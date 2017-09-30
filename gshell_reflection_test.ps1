@@ -37,7 +37,6 @@ class Api {
         $Assembly.FullName -match "(?<=Google.Apis.).*(?=, Version)" | Out-Null
         if ($Matches -ne $null) {$this.Name = $Matches[0]}
         
-
         Get-Resources $this | % {$this.Resources.Add($_) | Out-Null}
     }
 }
@@ -57,6 +56,7 @@ class ApiResource {
 class ApiMethod {
     $Resource
 
+    $Name
     $ReturnType
     $Parameters = (New-Object system.collections.arraylist)
     [string]$Description
@@ -78,7 +78,7 @@ class ApiMethodProperty {
 
 #Return *all* resources exported from this assembly
 function Get-Resources([Api]$Api){
-    $Service = $Api.Assembly.ExportedTypes | where {$_.BaseType.ToString() -eq "Google.Apis.Services.BaseClientService"}
+    $Service = $Api.ReflectedObj.ExportedTypes | where {$_.BaseType.ToString() -eq "Google.Apis.Services.BaseClientService"}
     $Resources = $Service.DeclaredProperties | where {$_.GetMethod.ReturnType -like "Google.Apis*"}
 
     $Results = New-Object System.Collections.ArrayList
@@ -94,8 +94,11 @@ function Get-Resources([Api]$Api){
         $R.FullName = $t.FullName
         $R.Namespace = $t.Namespace
 
-        #TODO - Assign Methods
         #TODO - Assign Child Resources (if any)
+
+        $Methods = Get-ApiResourceMethods $T
+
+        $Methods | % {$R.Methods.Add($_) | Out-Null }
 
         $Results.Add($R) | Out-Null
     }
@@ -117,51 +120,36 @@ function Get-ApiResourceMethods($Resource){
         $M = New-Object ApiMethod
         $M.Resource = $Resource
         $M.Name = $Method.Name
-        $M.ReturnType = $Method.ReturnType
+        $M.ReturnType = Get-ApiMethodReturnType $Method
         $Method.GetParameters() | % {$M.Parameters.Add($_) | Out-Null}
         $M.ReflectedObj = $Method
+
+        $Results.Add($M) | Out-Null
     }
+
+    return $Results
 }
 
 function Get-Api ($Assembly) {
-    return New-Object Api $Assembly
+    $Api = New-Object Api $Assembly
+
+    return $Api
 }
 
-function Get-ApiMethodProperties($Method){
-
-}
 
 function Get-ApiMethodReturnType($Method){
-
+    return $Method.ReturnType.BaseType.GenericTypeArguments[0]
 }
 
 $Assembly = [System.Reflection.Assembly]::LoadFrom("C:\Users\svarney\Documents\gShell\gShell\gShell\bin\Debug\Google.Apis.Discovery.v1.dll")
 
-$BaseClientService = $Assembly.ExportedTypes | where {$_.BaseType.ToString() -eq "Google.Apis.Services.BaseClientService"}
+$Api = Get-Api $Assembly
 
-$MethodFamiliesCollection = New-Object System.Collections.ArrayList
-
-$BaseClientService.DeclaredProperties | where {$_.PropertyType -like "*Resource"} `
-    | % {$MethodFamiliesCollection.Add($_) | Out-Null}
-
-#eventually put in foreach
-$TypeMethods = $MethodFamiliesCollection[0]
-
-#GetRest, List
-$ApiMethodCalls = $TypeMethods.PropertyType.DeclaredMethods
-
-#eventually put in foreach
-$ApiMethodCall = $ApiMethodCalls[0]
-
-#These are the parameters for this method call - includes name and type
-$ApiMethodCallParameters = $ApiMethodCall.GetParameters()
-
-<#
-
-Base Client Service, eg DiscoveryService
-- derives from BaseClientService
-- This is the TYPE found in the ServiceWrapper in gshell's dotnet files, eg:
-        public class Discovery : ServiceWrapper<discovery_v1.DiscoveryService>
-- CONTAINS a virtual property that has a type of an API class, eg ApisResource - uses Resource naming convention always?
-
-#>
+#proof of concept
+write-host $Api.Name -ForegroundColor Yellow
+foreach ($R in $Api.Resources) {
+    Write-Host (Set-Indent ("{%T}"+$R.Name) 1) -ForegroundColor DarkYellow
+    foreach ($M in $R.Methods) {
+        Write-Host (Set-Indent ("{%T}"+$M.Name) 2) -ForegroundColor Green
+    }
+}

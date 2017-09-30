@@ -58,7 +58,7 @@ class ApiMethod {
     $Resource
 
     $ReturnType
-    $Properties = (New-Object system.collections.arraylist)
+    $Parameters = (New-Object system.collections.arraylist)
     [string]$Description
     $ReflectedObj
     [bool]$PagedResults
@@ -105,8 +105,22 @@ function Get-Resources([Api]$Api){
 
 #Return the methods from a given resource class
 function Get-ApiResourceMethods($Resource){
-    $Methods = ($resource.GetNestedTypes() | % {$_.ImplementedInterfaces | where Name -eq "IClientServiceRequest"})
-    #START HERE - GET THIS WORKING
+    #$Methods = $Resource.DeclaredNestedTypes | where {$_.ImplementedInterfaces.Name -contains "IClientServiceRequest"}
+    $Methods = $resource.DeclaredMethods | where { `
+                $_.IsVirtual -and -not $_.IsFinal -and `
+                $_.ReturnType.ImplementedInterfaces.Name -contains "IClientServiceRequest" }
+
+    #Methods where virtual and return type implements IClientServiceRequest
+    $Results = New-Object System.Collections.ArrayList
+
+    foreach ($Method in $Methods) {
+        $M = New-Object ApiMethod
+        $M.Resource = $Resource
+        $M.Name = $Method.Name
+        $M.ReturnType = $Method.ReturnType
+        $Method.GetParameters() | % {$M.Parameters.Add($_) | Out-Null}
+        $M.ReflectedObj = $Method
+    }
 }
 
 function Get-Api ($Assembly) {

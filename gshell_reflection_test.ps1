@@ -20,6 +20,7 @@ function Set-Indent ([string]$String, [int]$TabCount, [string]$TabPlaceholder = 
 #region Classes
 class Api {
     $Name
+    $NameAndVersion
     $Resources = (New-Object system.collections.arraylist)
     $RootNamespace
     $DataNamespace
@@ -35,7 +36,10 @@ class Api {
         #Try and find the name
         $Matches = $null
         $Assembly.FullName -match "(?<=Google.Apis.).*(?=, Version)" | Out-Null
-        if ($Matches -ne $null) {$this.Name = $Matches[0]}
+        if ($Matches -ne $null) {
+            $this.Name = $Matches[0].Split(".")[0]
+            $this.NameAndVersion = $Matches[0]
+        }
         
         Get-Resources $this | % {$this.Resources.Add($_) | Out-Null}
     }
@@ -47,10 +51,34 @@ class ApiResource {
     $ChildResources = (New-Object System.Collections.ArrayList)
 
     $Name
+    $NameLower
     $FullName
     $Namespace
     $Methods = (New-Object System.Collections.ArrayList)
     $ReflectedObj
+}
+
+function New-ApiResource ([Api]$Api, [System.Reflection.PropertyInfo]$Resource) {
+    #for whatever reason, can't put this in the constructor with or else it gives a type error
+
+    $t = $Resource.PropertyType
+
+    $R = New-Object ApiResource
+
+    $R.Api = $Api
+    $R.ReflectedObj = $t
+    $R.Name = $t.Name -replace "Resource",""
+    $R.NameLower = $R.Name.ToLower()[0] + $R.name.Substring(1,$R.name.Length-1)
+    $R.FullName = $t.FullName
+    $R.Namespace = $t.Namespace
+
+    #TODO - Assign Child Resources (if any)
+
+    $Methods = Get-ApiResourceMethods $T
+
+    $Methods | % {$R.Methods.Add($_) | Out-Null }
+
+    return $R
 }
 
 class ApiMethod {
@@ -76,6 +104,8 @@ class ApiMethodProperty {
 
 #endregion
 
+#region Data Aggregation
+
 #Return *all* resources exported from this assembly
 function Get-Resources([Api]$Api){
     $Service = $Api.ReflectedObj.ExportedTypes | where {$_.BaseType.ToString() -eq "Google.Apis.Services.BaseClientService"}
@@ -84,21 +114,7 @@ function Get-Resources([Api]$Api){
     $Results = New-Object System.Collections.ArrayList
 
     foreach ($Resource in $Resources) {
-        $t = $Resource.PropertyType
-
-        $R = New-Object ApiResource
-
-        $R.Api = $Api
-        $R.ReflectedObj = $t
-        $R.Name = $t.Name
-        $R.FullName = $t.FullName
-        $R.Namespace = $t.Namespace
-
-        #TODO - Assign Child Resources (if any)
-
-        $Methods = Get-ApiResourceMethods $T
-
-        $Methods | % {$R.Methods.Add($_) | Out-Null }
+        $R = New-ApiResource $Api $Resource
 
         $Results.Add($R) | Out-Null
     }
@@ -107,6 +123,7 @@ function Get-Resources([Api]$Api){
 }
 
 #Return the methods from a given resource class
+
 function Get-ApiResourceMethods($Resource){
     #$Methods = $Resource.DeclaredNestedTypes | where {$_.ImplementedInterfaces.Name -contains "IClientServiceRequest"}
     $Methods = $resource.DeclaredMethods | where { `
@@ -136,20 +153,38 @@ function Get-Api ($Assembly) {
     return $Api
 }
 
-
 function Get-ApiMethodReturnType($Method){
     return $Method.ReturnType.BaseType.GenericTypeArguments[0]
 }
 
-$Assembly = [System.Reflection.Assembly]::LoadFrom("C:\Users\svarney\Documents\gShell\gShell\gShell\bin\Debug\Google.Apis.Discovery.v1.dll")
+#endregion
 
-$Api = Get-Api $Assembly
+#region Templates
 
-#proof of concept
-write-host $Api.Name -ForegroundColor Yellow
-foreach ($R in $Api.Resources) {
-    Write-Host (Set-Indent ("{%T}"+$R.Name) 1) -ForegroundColor DarkYellow
-    foreach ($M in $R.Methods) {
-        Write-Host (Set-Indent ("{%T}"+$M.Name) 2) -ForegroundColor Green
+
+
+#endregion
+
+function Main {
+    $Assembly = [System.Reflection.Assembly]::LoadFrom("C:\Users\svarney\Documents\gShell\gShell\gShell\bin\Debug\Google.Apis.Discovery.v1.dll")
+
+    $Api = Get-Api $Assembly
+
+    #proof of concept
+    write-host $Api.Name -ForegroundColor Yellow
+    foreach ($R in $Api.Resources) {
+        Write-Host (Set-Indent ("{%T}"+$R.Name) 1) -ForegroundColor DarkYellow
+        foreach ($M in $R.Methods) {
+            Write-Host (Set-Indent ("{%T}"+$M.Name)  2) -ForegroundColor Green
+        }
     }
+
+    return $api
 }
+
+$Api = Main
+
+$Resources = $Api.Resources
+$Resource = $Resources[0]
+$Methods = $Resource.Methods
+$Method = $Methods[0]

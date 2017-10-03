@@ -7,6 +7,10 @@ function Import-GShellAssemblies(){
 
 #region General Functions
 
+function Get-DiscoveryJson ($ApiName) {
+    #START HERE - LOAD THE JSON IN FROM A LOCAL FILE
+}
+
 function Get-ObjProperties ($PSObject) {
     $PSObject.psobject.Properties | % {write-host $_.Name -ForegroundColor Green; Write-Host $PSObject.($_.Name) "`r`n"}
 }
@@ -122,7 +126,24 @@ function Get-Resources([Api]$Api){
     return $Results
 }
 
-#Return the methods from a given resource class
+#instantiate an object with null params
+function New-ObjectOfType($Type) {
+
+    #NOTE - we may need to 
+
+    $Constructor = $Type.DeclaredConstructors | select -First 1
+    $Params = $Constructor.GetParameters()
+
+    $NulledParams = New-Object System.Collections.ArrayList
+
+    foreach ($P in $Params) {
+        $NulledParams.Add($null) | Out-Null
+    }
+
+    $obj = New-Object ($Type.FullName) -ArgumentList $NulledParams
+
+    return $obj
+}
 
 function Get-ApiResourceMethods($Resource){
     #$Methods = $Resource.DeclaredNestedTypes | where {$_.ImplementedInterfaces.Name -contains "IClientServiceRequest"}
@@ -140,6 +161,8 @@ function Get-ApiResourceMethods($Resource){
         $M.ReturnType = Get-ApiMethodReturnType $Method
         $Method.GetParameters() | % {$M.Parameters.Add($_) | Out-Null}
         $M.ReflectedObj = $Method
+
+        $Instantiated = 
 
         $Results.Add($M) | Out-Null
     }
@@ -166,25 +189,25 @@ function Get-ApiMethodReturnType($Method){
 #endregion
 
 function Main {
-    $Assembly = [System.Reflection.Assembly]::LoadFrom("C:\Users\svarney\Documents\gShell\gShell\gShell\bin\Debug\Google.Apis.Discovery.v1.dll")
+    $ApiName = "Google.Apis.Discovery.v1"
+    
+    $Assembly = [System.Reflection.Assembly]::LoadFrom("C:\Users\svarney\Documents\gShell\gShell\gShell\bin\Debug\$ApiName.dll")
+
+    $Json = Get-DiscoveryJson $ApiName
 
     $Api = Get-Api $Assembly
 
     #proof of concept
-    write-host $Api.Name -ForegroundColor Yellow
-    foreach ($R in $Api.Resources) {
-        Write-Host (Set-Indent ("{%T}"+$R.Name) 1) -ForegroundColor DarkYellow
-        foreach ($M in $R.Methods) {
-            Write-Host (Set-Indent ("{%T}"+$M.Name)  2) -ForegroundColor Green
-        }
-    }
+    #write-host $Api.Name -ForegroundColor Yellow
+    #foreach ($R in $Api.Resources) {
+    #    Write-Host (Set-Indent ("{%T}"+$R.Name) 1) -ForegroundColor DarkYellow
+    #    foreach ($M in $R.Methods) {
+    #        Write-Host (Set-Indent ("{%T}"+$M.Name)  2) -ForegroundColor Green
+    #    }
+    #}
 
     return $api
 }
 
-$Api = Main
-
-$Resources = $Api.Resources
-$Resource = $Resources[0]
-$Methods = $Resource.Methods
-$Method = $Methods[0]
+Write-Host $Method.ReflectedObj.ReturnType.FullName -ForegroundColor Green
+$test = New-ObjectOfType $Method.ReflectedObj.ReturnType

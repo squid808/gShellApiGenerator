@@ -16,16 +16,52 @@
     return $string
 }
 
+
+
+function Write-GShellDotNetWrapper_ResourceWrappedMethod ($Method) {
+    $MethodName = $M.Name
+    $MethodReturnType = $M.ReturnType.FullName
+
+    #TODO - figure out a way to determine which parameters are optional *as far as the API is concerned*
+    #LOOK IN TO THE INIT PARAMETERS METHOD OF THE REQUEST METHOD!
+    $PropertiesObj = if ($M.Parameters.Count -ne 0) {
+        
+    }
+    
+    $text = @"
+public $MethodReturnType $MethodName ({0}StandardQueryParameters StandardQueryParams = null) {{
+    
+    if (StandardQueryParams != null) {{
+        request.Fields = StandardQueryParams.fields;
+        request.QuotaUser = StandardQueryParams.quotaUser;
+        request.UserIp = StandardQueryParams.userIp;
+    }}
+}}
+"@ -f $PropertiesObj
+
+    return $text
+
+}
+
+#TODO
 function Write-GShellDotNetWrapper_ResourceWrappedMethods ($Resource, $Level=0) {
     $list = New-Object System.Collections.ArrayList
 
-    TODO START HERE
+    $ResourceName = $Resource.Name
+    
 
     foreach ($M in $Resource.Methods) {
-        $text = @"
-public  class 
-"@
+        $M = Write-GShellDotNetWrapper_ResourceWrappedMethod $M
+
+        $list.Add($text) | Out-Null
     }
+
+
+    $string = "{%T}" + ($list -join "`r`n`r`n")
+
+    $string = Set-Indent -String $string -TabCount $Level
+    
+    return $string
 }
 
 function Write-GShellDotNetWrapper ($Api) {
@@ -176,4 +212,15 @@ namespace gShell.dotNet
 }
 "@
 
-Write-GShellDotNetWrapper $Api
+$Api = Main
+
+$Resources = $Api.Resources
+$Resource = $Resources[0]
+$Methods = $Resource.Methods
+$Method = $Methods[0]
+$M = $Method
+$Init = $M.ReflectedObj.ReturnType.DeclaredMethods | where name -eq "InitParameters"
+
+#Write-GShellDotNetWrapper_ResourceWrappedMethods $resource
+
+Write-GShellDotNetWrapper_ResourceWrappedMethod $M

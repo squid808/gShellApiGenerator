@@ -443,7 +443,7 @@ function Download-Dependencies ($DependencyHash, $OutPath, $JsonHash, [bool]$Log
     }
 }
 
-function Main ([string]$Package, [bool]$Log=$false) {
+function Get-SinglePackageByName ([string]$Package, [bool]$Log=$false) {
 
     $Root = "$env:USERPROFILE\Desktop\Libraries"
 
@@ -478,4 +478,4 @@ TODO:
 5) Improve logging, fix function formatting and params
 #>
 
-Main "Google.Apis.Discovery.v1" -Log $true | Out-Null
+Main "Google.Apis.Admin.Directory_v1" -Log $true | Out-Null

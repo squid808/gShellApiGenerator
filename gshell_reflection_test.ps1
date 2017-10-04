@@ -1,6 +1,6 @@
 ﻿#Todo: Load from nuget json file
 function Import-GShellAssemblies(){
-    foreach ($file in (gci "C:\Users\svarney\Documents\gShell\gShell\gShell\bin\Debug" -Filter "*.dll")){
+    foreach ($file in (gci "$env:USERPROFILE\desktop\\Documents\gShell\gShell\gShell\bin\Debug" -Filter "*.dll")){
         [System.Reflection.Assembly]::LoadFrom($file.FullName)
     }
 }
@@ -9,6 +9,7 @@ function Import-GShellAssemblies(){
 
 function Get-DiscoveryJson ($ApiName) {
     #START HERE - LOAD THE JSON IN FROM A LOCAL FILE
+    $RestJson = Get-Content -Path "$env:USERPROFILE\desktop\\Desktop\DiscoveryRestJson\Google.Apis.Discovery.v1.r1.json" | ConvertFrom-Json
 }
 
 function Get-ObjProperties ($PSObject) {
@@ -191,7 +192,7 @@ function Get-ApiMethodReturnType($Method){
 function Main {
     $ApiName = "Google.Apis.Discovery.v1"
     
-    $Assembly = [System.Reflection.Assembly]::LoadFrom("C:\Users\svarney\Documents\gShell\gShell\gShell\bin\Debug\$ApiName.dll")
+    $Assembly = [System.Reflection.Assembly]::LoadFrom("$env:USERPROFILE\desktop\\Documents\gShell\gShell\gShell\bin\Debug\$ApiName.dll")
 
     $Json = Get-DiscoveryJson $ApiName
 

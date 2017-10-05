@@ -212,7 +212,11 @@ namespace gShell.dotNet
 }
 "@
 
-$Api = Main
+$RestJson = Load-RestJsonFile discovery v1
+
+$LibraryIndex = Get-JsonIndex $LibraryIndexRoot
+
+$Api = Invoke-GShellReflection $RestJson $LibraryIndex
 
 $Resources = $Api.Resources
 $Resource = $Resources[0]

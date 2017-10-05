@@ -1,11 +1,4 @@
-﻿#Todo: Load from nuget json file
-function Import-GShellAssemblies(){
-    foreach ($file in (gci "$env:USERPROFILE\desktop\\Documents\gShell\gShell\gShell\bin\Debug" -Filter "*.dll")){
-        [System.Reflection.Assembly]::LoadFrom($file.FullName)
-    }
-}
-
-#region General Functions
+﻿#region General Functions
 
 function Get-DiscoveryJson ($ApiName) {
     #START HERE - LOAD THE JSON IN FROM A LOCAL FILE
@@ -189,14 +182,45 @@ function Get-ApiMethodReturnType($Method){
 
 #endregion
 
-function Main {
-    $ApiName = "Google.Apis.Discovery.v1"
+#Todo: Load from nuget json file
+function Import-GShellAssemblies($LibraryIndex, $LibraryIndexVersionInfo){
     
-    $Assembly = [System.Reflection.Assembly]::LoadFrom("$env:USERPROFILE\desktop\\Documents\gShell\gShell\gShell\bin\Debug\$ApiName.dll")
+    if (-not [string]::IsNullOrWhiteSpace($LibraryIndexVersionInfo.dllPath) -and `
+        $LibraryIndexVersionInfo.dllPath -ne "missing" -and `
+        $LibraryIndexVersionInfo.dllPath -notlike "*_._") {
 
-    $Json = Get-DiscoveryJson $ApiName
+        $Assembly = [System.Reflection.Assembly]::LoadFrom($LibraryIndexVersionInfo.dllPath)
+
+        foreach ($D in $LibraryIndexVersionInfo.Dependencies) {
+            $VersionNumber = Get-LatestVersionFromRange -VersionRange $D.Versions
+
+            if ($VersionNumber -eq -1) {
+                $VersionInfo = $LibraryIndex.GetLibVersionLatest($D.Name)
+            } else {
+                $VersionInfo = $LibraryIndex.GetLibVersion($D.Name, $VersionNumber)
+            }
+
+            Import-GShellAssemblies $LibraryIndex $VersionInfo | Out-Null
+        }
+    }
+
+    return $Assembly
+}
+
+#to be called after loading from discovery and nuget happens. should have a handle on the files at this point
+function Invoke-GShellReflection ($RestJson, $LibraryIndex) {
+    
+    $AssemblyName = Get-NugetPackageIdFromJson $RestJson
+
+    $LatestVersionInfo = $LibraryIndex.GetLibVersionLatest($AssemblyName)
+
+    $Assembly = Import-GShellAssemblies $LibraryIndex $LatestVersionInfo
+
+    #$Json = Get-DiscoveryJson $ApiName
 
     $Api = Get-Api $Assembly
+
+    $Api | Add-Member -MemberType NoteProperty -Name "RestJson" -Value $RestJson
 
     #proof of concept
     #write-host $Api.Name -ForegroundColor Yellow
@@ -210,5 +234,11 @@ function Main {
     return $api
 }
 
-Write-Host $Method.ReflectedObj.ReturnType.FullName -ForegroundColor Green
-$test = New-ObjectOfType $Method.ReflectedObj.ReturnType
+$RestJson = Load-RestJsonFile discovery v1
+
+$LibraryIndex = Get-JsonIndex $LibraryIndexRoot
+
+$Api = Invoke-GShellReflection $RestJson $LibraryIndex
+
+#Write-Host $Method.ReflectedObj.ReturnType.FullName -ForegroundColor Green
+#$test = New-ObjectOfType $Method.ReflectedObj.ReturnType

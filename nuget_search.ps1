@@ -70,6 +70,21 @@ function Get-CatalogEntry ($Package, $Author = $null, $Version = $null, $IsExact
     return $CatalogEntry
 }
 
+function Get-LatestVersionFromRange ($VersionRange) {
+    
+    $matches = $null
+
+    $VersionRange -match '(?<=,\s).*(?=[\]\)])' | Out-Null
+
+    if  ([string]::IsNullOrWhiteSpace($matches[0])){
+        $Version = -1 #if no end version supplied, get most recent
+    } else  {
+        $Version = $Matches[0]
+    }
+
+    return $Version
+}
+
 function Get-DependenciesOf($CatalogEntry, $JsonHash, $CatalogHash = $null, [bool]$Log=$false){
     
     Log ("Retrieving Dependencies for {0}" -f $CatalogEntry.id) $Log
@@ -101,15 +116,8 @@ function Get-DependenciesOf($CatalogEntry, $JsonHash, $CatalogHash = $null, [boo
         if (-NOT $CatalogHash.ContainsKey($Dependency.id)) {
             $CatalogHash[$Dependency.id] = @{}
         }
-
-        #determine the version required. may be blank
-        $Dependency.range -match '(?<=,\s).*(?=[\]\)])' | Out-Null
-
-        if  ([string]::IsNullOrWhiteSpace($matches[0])){
-            $DependencyVersion = -1 #if no end version supplied, get most recent
-        } else  {
-            $DependencyVersion = $Matches[0]
-        }
+        
+        $DependencyVersion = Get-LatestVersionFromRange $Dependency.Range
 
         if (-NOT $CatalogHash[$Dependency.id].ContainsKey($DependencyVersion)) {
 
@@ -260,7 +268,17 @@ function Get-JsonIndex ($Path, [bool]$Log=$false) {
     #GetLibVersionAll(LibName)
     $JsonHash | Add-Member -MemberType ScriptMethod -Name "GetLibVersionAll" -Value {
         param( [string]$LibName)
-        return $this.GetLib($LibName).Versions.psobject.Properties.Name
+        return $this.GetLib($LibName).Versions.psobject.Properties
+    }
+
+    #GetLibVersionLatest(LibName)
+    $JsonHash | Add-Member -MemberType ScriptMethod -Name "GetLibVersionLatest" -Value {
+        param( [string]$LibName)
+        $version = $this.GetLibVersionAll($LibName).name | sort -Descending | select -First 1
+        if ($version -ne $null) {
+            $result = $this.GetLibVersion($LibName, $Version)
+        }
+        return $result
     }
 
     #AddLibVersion(LibName, Version)
@@ -328,7 +346,7 @@ function Get-JsonIndex ($Path, [bool]$Log=$false) {
     $ChangedInfo = $false
 
     foreach ($L in $JsonHash.GetLibAll()) {
-        foreach ($V in $JsonHash.GetLibVersionAll($L)){
+        foreach ($V in $JsonHash.GetLibVersionAll($L).Name){
             $Info = $JsonHash.GetLibVersion($L, $V)
             
             if ($Info.dllPath -notlike "*_._" -AND $Info.dllPath -ne $null) {
@@ -448,8 +466,6 @@ function Download-Dependencies ($DependencyHash, $OutPath, $JsonHash, [bool]$Log
 
 function Get-SinglePackageByName ([string]$Package, [bool]$Log=$false) {
 
-    $Root = "$env:USERPROFILE\Desktop\Libraries"
-
     $NugetIndex = Invoke-RestMethod "https://api.nuget.org/v3/index.json"
 
     $SearchServiceUri = $NugetIndex.resources[0].'@id'
@@ -461,11 +477,11 @@ function Get-SinglePackageByName ([string]$Package, [bool]$Log=$false) {
 
     $TargetFramework = ".NetFramework4.5"
 
-    $JsonHash = Get-JsonIndex $Root -Log $Log
+    $JsonHash = Get-JsonIndex $LibraryIndexRoot -Log $Log
 
     $DependencyHash = Get-DependenciesOf $CatalogEntry $JsonHash -Log $Log
 
-    Download-Dependencies $DependencyHash $Root $JsonHash -Log $Log
+    Download-Dependencies $DependencyHash $LibraryIndexRoot $JsonHash -Log $Log
 
     return $CatalogEntry
 }
@@ -522,3 +538,5 @@ function Get-AllApiPackages {
         }
     }
 }
+
+$LibraryIndexRoot = "$env:USERPROFILE\Desktop\Libraries"

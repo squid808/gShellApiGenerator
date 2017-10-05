@@ -103,11 +103,13 @@ function Get-MostRecentJsonFile ($Path) {
     }
 }
 
+#loads the most recent json file path
 function Get-JsonApiFile ($Name, $Version) {
     $Folder = [System.IO.Path]::Combine($JsonRootPath, ("$Name.$Version"))
     return (Get-MostRecentJsonFile $Folder)
 }
 
+#loads the msot recent json file
 function Load-RestJsonFile ($Name, $Version) {
     $file = Get-JsonApiFile $Name $Version
     if ($file -ne $null) {

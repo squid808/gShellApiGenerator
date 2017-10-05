@@ -30,13 +30,16 @@ function Has-Property ($Object, $Property) {
     $Object.psobject.Properties.name -contains $Property
 }
 
-function SearchForNugetPackage($SearchServiceUri, $Package, $IsExactPackageId=$true, [bool]$Log=$false){
+function SearchForNugetPackage($SearchServiceUri, $Package, $IsExactPackageId=$false, [bool]$Log=$false){
     
     Log "Searching for Package $Package" $Log
 
     if ($IsExactPackageId) {$PackageSpecifier="packageid:"}
     $Uri = ("{0}?q={1}{2}&prerelease=false&includeDelisted=false" -f $SearchServiceUri, $PackageSpecifier, $Package)
-    return Invoke-RestMethod $Uri
+    
+    $results = Invoke-RestMethod $Uri
+
+    return $results
 }
 
 function Get-CatalogEntry ($Package, $Author = $null, $Version = $null, $IsExactPackageId = $true, [bool]$Log=$false) {
@@ -478,4 +481,44 @@ TODO:
 5) Improve logging, fix function formatting and params
 #>
 
-Main "Google.Apis.Admin.Directory_v1" -Log $true | Out-Null
+#Get-SinglePackageByName "Google.Apis.Admin.Directory_v1" -Log $true | Out-Null
+
+#determine a likely nuget package name based on json info
+function Get-NugetPackageIdFromJson ($Json) {
+    if ($Json.id -like "admin:*") {
+        $PackageId = "{0}.{1}.{2}" -f $Json.name, $Json.canonicalName, $Json.version
+    } else {
+        $PackageId = $Json.id -replace "\.","_" -replace ":","."
+        #$J.id -match "(?=[a-zA-Z])*[^a-zA-Z:\.0-9]" | Out-Null
+        #$PackageId = $J.id -replace $matches[0],":" -replace "\.","_" -replace ":","."
+    }
+
+    $P = "Google.Apis.$PackageId"
+
+    return $P
+}
+
+function Get-ApiPackage ($Name, $Version) {
+    try {
+        $Json = Load-RestJsonFile $Name $Version
+        $PackageId = (Get-NugetPackageIdFromJson $Json)
+        $CatalogEntry = Get-SinglePackageByName $PackageId -Log $true
+    } catch {
+        throw $_
+    }
+}
+
+function Get-AllApiPackages {
+    foreach ($JsonFileInfo in (gci $JsonRootPath -Recurse -Filter "*.json")){
+        $File = Get-MostRecentJsonFile $JsonFileInfo.directory.fullname
+        if ($File -ne $null) {
+            try {
+                $Json = Get-Content $File.FullName | ConvertFrom-Json
+                $PackageId = (Get-NugetPackageIdFromJson $Json)
+                $CatalogEntry = Get-SinglePackageByName $PackageId -Log $true
+            } catch {
+                write-host $_.innerexception.message
+            }
+        }
+    }
+}

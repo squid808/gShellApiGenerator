@@ -53,7 +53,7 @@ function Get-GoogleApiJsonFiles ($Name = $null, $Version = $null, $Preferred = $
             $Rev = $RestRevision.version
         }
 
-        $JsonFileFolderName = "google.apis.{0}.{1}" -f $ApiInfo.name.ToLower(), $ApiInfo.version.ToLower()
+        $JsonFileFolderName = "{0}.{1}" -f $ApiInfo.name.ToLower(), $ApiInfo.version.ToLower()
 
         $JsonFileFolder = [System.IO.Path]::Combine($JsonRootPath,$JsonFileFolderName)
 
@@ -104,6 +104,14 @@ function Get-MostRecentJsonFile ($Path) {
 }
 
 function Get-JsonApiFile ($Name, $Version) {
-    $Folder = [System.IO.Path]::Combine($JsonRootPath, ("google.apis.$Name.$Version"))
+    $Folder = [System.IO.Path]::Combine($JsonRootPath, ("$Name.$Version"))
     return (Get-MostRecentJsonFile $Folder)
+}
+
+function Load-RestJsonFile ($Name, $Version) {
+    $file = Get-JsonApiFile $Name $Version
+    if ($file -ne $null) {
+        $Json = Get-Content $file.FullName | ConvertFrom-Json
+    }
+    return $Json
 }

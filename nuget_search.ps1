@@ -26,10 +26,6 @@ function Format-Json([Parameter(Mandatory, ValueFromPipeline)][String] $json) {
   }) -Join "`n"
 }
 
-function Has-Property ($Object, $Property) {
-    $Object.psobject.Properties.name -contains $Property
-}
-
 function SearchForNugetPackage($SearchServiceUri, $Package, $IsExactPackageId=$false, [bool]$Log=$false){
     
     Log "Searching for Package $Package" $Log

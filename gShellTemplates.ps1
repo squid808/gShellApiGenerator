@@ -19,13 +19,13 @@
 
 
 function Write-GShellDotNetWrapper_ResourceWrappedMethod ($Method) {
-    $MethodName = $M.Name
-    $MethodReturnType = $M.ReturnType.FullName
+    $MethodName = $Method.Name
+    $MethodReturnType = $Method.ReturnType.FullName
 
     #TODO - figure out a way to determine which parameters are optional *as far as the API is concerned*
     #LOOK IN TO THE INIT PARAMETERS METHOD OF THE REQUEST METHOD!
-    $PropertiesObj = if ($M.Parameters.Count -ne 0) {
-        
+    $PropertiesObj = if ($Method.Parameters.Count -ne 0) {
+        "A"
     }
     
     $text = @"
@@ -212,16 +212,15 @@ namespace gShell.dotNet
 }
 "@
 
-$RestJson = Load-RestJsonFile discovery v1
-
+$RestJson = Load-RestJsonFile admin reports_v1
+#$RestJson = Load-RestJsonFile discovery v1
 $LibraryIndex = Get-JsonIndex $LibraryIndexRoot
-
 $Api = Invoke-GShellReflection $RestJson $LibraryIndex
 
 $Resources = $Api.Resources
 $Resource = $Resources[0]
 $Methods = $Resource.Methods
-$Method = $Methods[0]
+$Method = $Methods[1]
 $M = $Method
 $Init = $M.ReflectedObj.ReturnType.DeclaredMethods | where name -eq "InitParameters"
 

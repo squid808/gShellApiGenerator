@@ -9,6 +9,20 @@ function Get-ObjProperties ($PSObject) {
     $PSObject.psobject.Properties | % {write-host $_.Name -ForegroundColor Green; Write-Host $PSObject.($_.Name) "`r`n"}
 }
 
+function Has-ObjProperty {
+[CmdletBinding()]
+
+    param (
+        [Parameter(Mandatory=$true,ValueFromPipeline=$true)]
+        $PSObject,
+    
+        [Parameter(Mandatory=$true,Position=0)]
+        [string]$Target
+    )
+
+    return $PSObject.psobject.Properties.Name -contains $Target
+}
+
 function Set-Indent ([string]$String, [int]$TabCount, [string]$TabPlaceholder = "{%T}") {
     return ($String -replace $TabPlaceholder,("`t"*$TabCount))
 }
@@ -24,29 +38,37 @@ class Api {
     $DataNamespace
     $Version
     $ReflectedObj
+    $DiscoveryObj
+}
 
-    Api ([System.Reflection.Assembly]$Assembly) {
-        $this.RootNamespace = $Assembly.FullName.Split(",")[0]
-        $this.DataNamespace = $this.RootNamespace + ".Data"
-        $this.Version = $Assembly.FullName.Split(",")[1].Split("=")[1]
-        $this.ReflectedObj = $Assembly
+function New-Api ([System.Reflection.Assembly]$Assembly, $RestJson) {
+    $api = New-Object Api
 
-        #Try and find the name
-        $Matches = $null
-        $Assembly.FullName -match "(?<=Google.Apis.).*(?=, Version)" | Out-Null
-        if ($Matches -ne $null) {
-            $this.Name = $Matches[0].Split(".")[0]
-            $this.NameAndVersion = $Matches[0]
-        }
+    $api.DiscoveryObj = $RestJson
         
-        Get-Resources $this | % {$this.Resources.Add($_) | Out-Null}
+    $api.RootNamespace = $Assembly.FullName.Split(",")[0]
+    $api.DataNamespace = $api.RootNamespace + ".Data"
+    $api.Version = $Assembly.FullName.Split(",")[1].Split("=")[1]
+    $api.ReflectedObj = $Assembly
+
+    #Try and find the name
+    $Matches = $null
+    $Assembly.FullName -match "(?<=Google.Apis.).*(?=, Version)" | Out-Null
+    if ($Matches -ne $null) {
+        $api.Name = $Matches[0].Split(".")[0]
+        $api.NameAndVersion = $Matches[0]
     }
+    
+    Get-Resources $api | % {$api.Resources.Add($_) | Out-Null}
+
+    return $api
 }
 
 class ApiResource {
     $Api
     $ParentResource
     $ChildResources = (New-Object System.Collections.ArrayList)
+    $DiscoveryObj
 
     $Name
     $NameLower
@@ -70,9 +92,10 @@ function New-ApiResource ([Api]$Api, [System.Reflection.PropertyInfo]$Resource) 
     $R.FullName = $t.FullName
     $R.Namespace = $t.Namespace
 
+    $R.DiscoveryObj = $Api.DiscoveryObj.resources.($R.Name)
     #TODO - Assign Child Resources (if any)
 
-    $Methods = Get-ApiResourceMethods $T
+    $Methods = Get-ApiResourceMethods $R $T
 
     $Methods | % {$R.Methods.Add($_) | Out-Null }
 
@@ -80,24 +103,106 @@ function New-ApiResource ([Api]$Api, [System.Reflection.PropertyInfo]$Resource) 
 }
 
 class ApiMethod {
+<#
+Remarks - The api method call is broken up in to two parts in the underlying code:
+    The Virtual Method
+        - a method that returns an object of type of the request class
+        - is of a virtual type
+        - parameters are almost always the required parameters for the API call
+    The Request Class
+        - a class that contains properties for each API parameter, including those from the virtual method
+        - properties include custom attributes that indicate the parameter name and parameter type (path, query, custom)
+#>
+
+    #Reference to the container resource
     $Resource
 
+    #The name of the method derived from the Virtual method
     $Name
+
+    #The type ultimately returned by the api call itself, not the method that returns a request type
     $ReturnType
+
+    #Are the results paged
+    [bool]$HasPagedResults
+
+    #All parameters related to this API call - pulled out of both the virtual method and the request class
     $Parameters = (New-Object system.collections.arraylist)
+
+    #Parameters related to just the virtual method
+    $VirtualParameters = (New-Object system.collections.arraylist)
+
+    #Parameters from the request class only
+    $RequestParameters = (New-Object system.collections.arraylist)
+
+    #If the virtual method takes in an object as a parameter named 'body' - used to determine if there is a subobject required
+    [bool]$HasBodyParameter
+
+    #The body parameter from the virtual method, if any
+    $BodyParameter
+
+    #The description of the method
     [string]$Description
+
+    #This method's reflected representation
     $ReflectedObj
-    [bool]$PagedResults
+
+    #This method's discovery API representation
+    $DiscoveryObj
+
+    
+}
+
+function New-ApiMethod ([ApiResource]$Resource, $Method) {
+    $M = New-Object ApiMethod
+    $M.Resource = $Resource
+    $M.ReflectedObj = $Method
+    $M.DiscoveryObj = $Resource.DiscoveryObj.methods.($M.name)
+
+    $M.Name = $Method.Name
+    $M.Description = $M.DiscoveryObj.description
+    $M.ReturnType = Get-ApiMethodReturnType $Method
+    foreach ($P in $Method.GetParameters()) {
+        $M.Parameters.Add($P) | Out-Null
+        $M.VirtualParameters.Add($P) | Out-Null
+    }
+    
+    foreach ($P in $M.ReflectedObj.ReturnType
+
+    $M.HasPagedResults = $Method.ReturnType.DeclaredProperties.name -contains "PageToken"
+    $M.HasBodyParameter = $M.Parameters.name -contains "body"
+    if ($M.HasBodyParameter -eq $true) {
+        $M.BodyParameter = $M.Parameters | where name -eq "body"
+    }
+
+    return $M
 }
 
 class ApiMethodProperty {
+    #Reference to the containing method
     $Method
     
+    #The Property's Name
     $Name
+
+    #The property's reflected type
     $Type
-    $Mandatory
+
+    #Is this property mandatory for the API call
+    [bool]$Mandatory
+
+    #The description for this property
     $Description
+
+    #This property's reflected representation
     $ReflectedObj
+
+    #This property's discovery API representation
+    $DiscoveryObj
+}
+
+function New-ApiMethodProperty ([ApiMethod]$Method, $Property) {
+    $P = New-Object ApiMethodProperty
 }
 
 #endregion
@@ -139,9 +244,9 @@ function New-ObjectOfType($Type) {
     return $obj
 }
 
-function Get-ApiResourceMethods($Resource){
+function Get-ApiResourceMethods($Resource, $ResourceType){
     #$Methods = $Resource.DeclaredNestedTypes | where {$_.ImplementedInterfaces.Name -contains "IClientServiceRequest"}
-    $Methods = $resource.DeclaredMethods | where { `
+    $Methods = $ResourceType.DeclaredMethods | where { `
                 $_.IsVirtual -and -not $_.IsFinal -and `
                 $_.ReturnType.ImplementedInterfaces.Name -contains "IClientServiceRequest" }
 
@@ -149,25 +254,12 @@ function Get-ApiResourceMethods($Resource){
     $Results = New-Object System.Collections.ArrayList
 
     foreach ($Method in $Methods) {
-        $M = New-Object ApiMethod
-        $M.Resource = $Resource
-        $M.Name = $Method.Name
-        $M.ReturnType = Get-ApiMethodReturnType $Method
-        $Method.GetParameters() | % {$M.Parameters.Add($_) | Out-Null}
-        $M.ReflectedObj = $Method
-
-        $Instantiated = 
+        $M = New-ApiMethod $resource $method
 
         $Results.Add($M) | Out-Null
     }
 
     return $Results
-}
-
-function Get-Api ($Assembly) {
-    $Api = New-Object Api $Assembly
-
-    return $Api
 }
 
 function Get-ApiMethodReturnType($Method){
@@ -216,29 +308,16 @@ function Invoke-GShellReflection ($RestJson, $LibraryIndex) {
 
     $Assembly = Import-GShellAssemblies $LibraryIndex $LatestVersionInfo
 
-    #$Json = Get-DiscoveryJson $ApiName
-
-    $Api = Get-Api $Assembly
-
-    $Api | Add-Member -MemberType NoteProperty -Name "RestJson" -Value $RestJson
-
-    #proof of concept
-    #write-host $Api.Name -ForegroundColor Yellow
-    #foreach ($R in $Api.Resources) {
-    #    Write-Host (Set-Indent ("{%T}"+$R.Name) 1) -ForegroundColor DarkYellow
-    #    foreach ($M in $R.Methods) {
-    #        Write-Host (Set-Indent ("{%T}"+$M.Name)  2) -ForegroundColor Green
-    #    }
-    #}
+    $Api = New-Api $Assembly $RestJson
 
     return $api
 }
 
-$RestJson = Load-RestJsonFile discovery v1
-
-$LibraryIndex = Get-JsonIndex $LibraryIndexRoot
-
-$Api = Invoke-GShellReflection $RestJson $LibraryIndex
-
 #Write-Host $Method.ReflectedObj.ReturnType.FullName -ForegroundColor Green
 #$test = New-ObjectOfType $Method.ReflectedObj.ReturnType
+
+$RestJson = Load-RestJsonFile admin directory_v1
+#$RestJson = Load-RestJsonFile admin reports_v1
+#$RestJson = Load-RestJsonFile discovery v1
+$LibraryIndex = Get-JsonIndex $LibraryIndexRoot
+$Api = Invoke-GShellReflection $RestJson $LibraryIndex

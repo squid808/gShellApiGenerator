@@ -16,7 +16,19 @@
     return $string
 }
 
+function Write-GShellMethodProperties_MethodParams ($Method, [bool]$RequiredOnly) {
+    $Params = New-Object System.Collections.ArrayList
 
+    foreach ($P in $Method.Parameters){
+        if ($RequiredOnly -eq $False -or ($RequiredOnly -eq $true -and $P.Required -eq $true)){
+            $Params.Add(("{0} {1}" -f $P.Type, $P.Name)) | Out-Null
+        }
+    }
+
+    $result = $Params -join ", "
+
+    return $result
+}
 
 function Write-GShellDotNetWrapper_ResourceWrappedMethod ($Method) {
     $MethodName = $Method.Name
@@ -227,3 +239,5 @@ $Init = $M.ReflectedObj.ReturnType.DeclaredMethods | where name -eq "InitParamet
 #Write-GShellDotNetWrapper_ResourceWrappedMethods $resource
 
 Write-GShellDotNetWrapper_ResourceWrappedMethod $M
+
+#Write-GShellMethodProperties_MethodParams -Method $M

@@ -214,7 +214,7 @@ function Get-JsonIndex ($Path, [bool]$Log=$false) {
 
     $JsonHash | Add-Member -MemberType NoteProperty -Name "RootPath" -Value $DllPathsJsonPath -Force
 
-    if (-NOT (Has-Property $JsonHash "Libraries")) {
+    if (-NOT (Has-ObjProperty $JsonHash "Libraries")) {
         $JsonHash | Add-Member -MemberType NoteProperty -Name "Libraries" -Value (New-Object psobject)
     }
 
@@ -226,7 +226,7 @@ function Get-JsonIndex ($Path, [bool]$Log=$false) {
     #HasLib(LibName)
     $JsonHash | Add-Member -MemberType ScriptMethod -Name "HasLib" -Value {
         param( [string]$LibName)
-        return (Has-Property $this.Libraries $LibName)
+        return (Has-ObjProperty $this.Libraries $LibName)
     }
 
     #GetLib(LibName)
@@ -252,7 +252,7 @@ function Get-JsonIndex ($Path, [bool]$Log=$false) {
     $JsonHash | Add-Member -MemberType ScriptMethod -Name "HasLibVersion" -Value {
         param( [string]$LibName, [string]$Version)
         return ($this.HasLib($LibName) -and `
-            (Has-Property $this.GetLib($LibName).Versions $Version))
+            (Has-ObjProperty $this.GetLib($LibName).Versions $Version))
     }
 
     #GetLibVersion(LibName, Version)

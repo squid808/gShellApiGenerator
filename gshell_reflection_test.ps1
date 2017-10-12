@@ -9,17 +9,25 @@ function Get-ObjProperties ($PSObject) {
     $PSObject.psobject.Properties | % {write-host $_.Name -ForegroundColor Green; Write-Host $PSObject.($_.Name) "`r`n"}
 }
 
+function ConvertTo-FirstLower ($String) {
+    return $String.ToLower()[0] + $String.Substring(1,$String.Length-1)
+}
+
+function ConvertTo-FirstUpper ($String) {
+    return $String.ToUpper()[0] + $String.Substring(1,$String.Length-1)
+}
+
 function Has-ObjProperty {
 [CmdletBinding()]
 
     param (
         [Parameter(Mandatory=$true,ValueFromPipeline=$true)]
-        $PSObject,
+        [object]$PSObject,
     
-        [Parameter(Mandatory=$true,Position=0)]
+        [Parameter(Mandatory=$true)]
         [string]$Target
     )
-
+    
     return $PSObject.psobject.Properties.Name -contains $Target
 }
 
@@ -87,8 +95,8 @@ function New-ApiResource ([Api]$Api, [System.Reflection.PropertyInfo]$Resource) 
 
     $R.Api = $Api
     $R.ReflectedObj = $t
-    $R.Name = $t.Name -replace "Resource",""
-    $R.NameLower = $R.Name.ToLower()[0] + $R.name.Substring(1,$R.name.Length-1)
+    $R.Name = ConvertTo-FirstUpper ($t.Name -replace "Resource","")
+    $R.NameLower = ConvertTo-FirstLower $R.Name
     $R.FullName = $t.FullName
     $R.Namespace = $t.Namespace
 
@@ -120,6 +128,9 @@ Remarks - The api method call is broken up in to two parts in the underlying cod
     #The name of the method derived from the Virtual method
     $Name
 
+    #The name of the method derived from the Virtual method in first-lower case
+    $NameLower
+
     #The type ultimately returned by the api call itself, not the method that returns a request type
     $ReturnType
 
@@ -149,27 +160,37 @@ Remarks - The api method call is broken up in to two parts in the underlying cod
 
     #This method's discovery API representation
     $DiscoveryObj
-
-    
 }
 
 function New-ApiMethod ([ApiResource]$Resource, $Method) {
     $M = New-Object ApiMethod
     $M.Resource = $Resource
     $M.ReflectedObj = $Method
-    $M.DiscoveryObj = $Resource.DiscoveryObj.methods.($M.name)
+    $M.DiscoveryObj = $Resource.DiscoveryObj.methods.($Method.name)
 
-    $M.Name = $Method.Name
+    $M.Name = ConvertTo-FirstUpper $Method.Name
+    $M.NameLower = ConvertTo-FirstLower $Method.Name
     $M.Description = $M.DiscoveryObj.description
     $M.ReturnType = Get-ApiMethodReturnType $Method
+    
+    #get the properties of the virtual method. This may include a body?
     foreach ($P in $Method.GetParameters()) {
-        $M.Parameters.Add($P) | Out-Null
-        $M.VirtualParameters.Add($P) | Out-Null
+        #$M.Parameters.Add($P) | Out-Null
+        $M.VirtualParameters.Add((New-ApiMethodProperty $M $P)) | Out-Null
     }
     
-    foreach ($P in $M.ReflectedObj.ReturnType
+    #get the properties of the request class - those missing set methods are generally properties not associated with
+    # the api -MethodName, HttpMethod and RestPath. Properties with setters are likely to be those we want to update
+    # and send along with the API request
+    foreach ($P in ($M.ReflectedObj.ReturnType.DeclaredProperties | where SetMethod -ne $null)){
+        $Param = (New-ApiMethodProperty $M $P)
+        
+        $M.Parameters.Add($Param) | Out-Null
+        $M.RequestParameters.Add($Param) | Out-Null
+    }
 
     $M.HasPagedResults = $Method.ReturnType.DeclaredProperties.name -contains "PageToken"
+
     $M.HasBodyParameter = $M.Parameters.name -contains "body"
     if ($M.HasBodyParameter -eq $true) {
         $M.BodyParameter = $M.Parameters | where name -eq "body"
@@ -182,14 +203,17 @@ class ApiMethodProperty {
     #Reference to the containing method
     $Method
     
-    #The Property's Name
+    #The property's name
     $Name
+
+    #The property's name in first-lower case
+    $NameLower
 
     #The property's reflected type
     $Type
 
     #Is this property mandatory for the API call
-    [bool]$Mandatory
+    [bool]$Required
 
     #The description for this property
     $Description
@@ -201,8 +225,55 @@ class ApiMethodProperty {
     $DiscoveryObj
 }
 
+function Get-ApiPropertyTypeShortName($Property, $Method) {
+    $Name = $Property.FullName
+    
+    switch ($Name) {
+        "System.String" {return "string"}
+        "System.Int32" {return "int"}
+        "System.Boolean" {return "bool"}
+    }
+
+    $Replaced = $Name -replace ($Method.Resource.Api.RootNamespace + ".")
+
+    return $Replaced
+}
+
+function Get-ApiPropertyType ([ApiMethodProperty]$Property) {
+    if ($Property.ReflectedObj.PropertyType.Name -eq "Nullable``1"){
+
+        #-replace "``1\[","<" -replace "\]",">"
+
+        $inners = New-Object System.Collections.ArrayList
+
+        foreach ($I in $Property.ReflectedObj.PropertyType.GenericTypeArguments) {
+            $inners.Add((Get-ApiPropertyTypeShortName $I $Property.Method)) | Out-Null
+        }
+
+        $InnerString = $inners -join ", "
+
+        $Type = "System.Nullable<{0}>" -f $InnerString
+
+        return $type
+
+    } else  {
+
+        return Get-ApiPropertyTypeShortName $Property.ReflectedObj.PropertyType $Property.Method
+    }
+}
+
 function New-ApiMethodProperty ([ApiMethod]$Method, $Property) {
     $P = New-Object ApiMethodProperty
+    $P.Method = $Method
+    $P.Name = ConvertTo-FirstUpper $Property.Name
+    $P.NameLower = ConvertTo-FirstLower $Property.Name
+    $P.ReflectedObj = $Property
+    $P.DiscoveryObj = $Method.DiscoveryObj.parameters.($Property.Name)
+    $P.Type = Get-ApiPropertyType $P
+    $P.Description = $P.DiscoveryObj.Description
+    $P.Required = [bool]($P.DiscoveryObj.required)
+
+    return $P
 }
 
 #endregion
@@ -316,8 +387,16 @@ function Invoke-GShellReflection ($RestJson, $LibraryIndex) {
 #Write-Host $Method.ReflectedObj.ReturnType.FullName -ForegroundColor Green
 #$test = New-ObjectOfType $Method.ReflectedObj.ReturnType
 
-$RestJson = Load-RestJsonFile admin directory_v1
-#$RestJson = Load-RestJsonFile admin reports_v1
+#$RestJson = Load-RestJsonFile admin directory_v1
+$RestJson = Load-RestJsonFile admin reports_v1
 #$RestJson = Load-RestJsonFile discovery v1
 $LibraryIndex = Get-JsonIndex $LibraryIndexRoot
 $Api = Invoke-GShellReflection $RestJson $LibraryIndex
+
+
+$Resources = $Api.Resources
+$Resource = $Resources[0]
+$Methods = $Resource.Methods
+$Method = $Methods[1]
+$M = $Method
+$Init = $M.ReflectedObj.ReturnType.DeclaredMethods | where name -eq "InitParameters"

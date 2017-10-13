@@ -1,19 +1,22 @@
-﻿function Wrap-Text ($Text) {
+﻿function Wrap-Text ($Text, $Level=0, $Padding=0, $PrependText=$null) {
     $lines =  $Text -split "`r`n"
 
     for ($l = 0; $l -lt $lines.Count; $l++){
-    #foreach ($l in $lines) {
         if ($lines[$l].Length -gt 120) {
-            #find a matching character to break on, then split and repeat
-            foreach ($c in @("\(", "\[", ",", " ", "\)", "\]")) {
-                if (($lines[$l].Substring(110,10) -match $c)) {
-                    for ($i = 120; $i -ge 110; $i--) {
-                        if ($lines[$l][$i] -eq $c) {
-                            $lines[$l] = $lines[$l].Insert(($i+1), "`r`n{%T}    ")
-                            $lines[$l] = Wrap-Text $lines[$l]
-                            break;
+            for ($i = 119; $i -ge 0; $i--) {
+                if ($lines[$l][$i] -match "[\(\[, \)\]]") {
+                    $matches = $null
+                    if ($Level -eq 0) {
+                        if ($lines[$l] -match "[^\s]") {
+                            $padding = $lines[$l].IndexOf($matches[0])
+                        } else {
+                            $padding = 0
                         }
                     }
+
+                    $lines[$l] = $lines[$l].Insert(($i+1), 
+                        ("`r`n$PrependText{0}    " -f (" "*$padding)))
+                    $lines[$l] = Wrap-Text $lines[$l] -Level ($Level+1) -Padding $padding
                     break;
                 }
             }
@@ -21,6 +24,50 @@
     }
 
     return $lines -join "`r`n"
+}
+
+function Set-Indent ([string]$String, [int]$TabCount, [string]$TabPlaceholder = "{%T}") {
+    return ($String -replace $TabPlaceholder,("    "*$TabCount))
+}
+
+function Write-GShellWrappedMethod_PagedResultBlock ($Method) {
+    $MethodReturnTypeName = $Method.ReturnType.Name
+    $MethodReturnTypeFullName = $Method.ReturnType.Type
+
+    $text = @"
+{%T}    if (null != properties.StartProgressBar)
+{%T}    {
+{%T}        properties.StartProgressBar("Gathering $MethodReturnTypeName", string.Format("-Collecting $MethodReturnTypeName page 1"));
+{%T}    }
+        
+{%T}    $MethodReturnTypeFullName pagedResult = request.Execute();
+        
+{%T}    if (pagedResult != null)
+{%T}    {
+{%T}        results.Add(pagedResult);
+        
+{%T}        while (!string.IsNullOrWhiteSpace(pagedResult.NextPageToken) && pagedResult.NextPageToken != request.PageToken && (properties.TotalResults == 0 || results.Count < properties.TotalResults))
+{%T}        {
+{%T}            request.PageToken = pagedResult.NextPageToken;
+        
+{%T}            if (null != properties.UpdateProgressBar)
+{%T}            {
+{%T}                properties.UpdateProgressBar(5, 10, "Gathering $MethodReturnTypeName", string.Format("-Collecting $MethodReturnTypeName page {0}", (results.Count + 1).ToString()));
+{%T}            }
+{%T}            pagedResult = request.Execute();
+{%T}            results.Add(pagedResult);
+{%T}        }
+        
+{%T}        if (null != properties.UpdateProgressBar)
+{%T}        {
+{%T}            properties.UpdateProgressBar(1, 2, "Gathering $MethodReturnTypeName", string.Format("-Returning {0} pages.", results.Count.ToString()));
+{%T}        }
+{%T}    }
+        
+{%T}    return results;
+"@
+
+    return $text
 }
 
 function Write-GShellDotNetWrapper_ResourceInstantiations ($Resources, $Level=0) {
@@ -62,28 +109,64 @@ function Write-GShellMethodProperties_MethodParams ($Method, [bool]$RequiredOnly
     return $result
 }
 
+function Write-GShellDotNetWrapper_MethodPropertyObjAssignment ($Method) {
+    if ($Method.Parameters.Required -contains $False) {
+    
+        $Params = New-Object System.Collections.ArrayList
+
+        foreach ($P in ($Method.Parameters | where Required -eq $False)){
+            $Params.Add(("{{%T}}        request.{0} = properties.{0};" -f $P.Name)) | Out-Null
+        }
+
+        $pText = $Params -join "`r`n"
+
+        $Text = @"
+{%T}    if (properties != null) {{
+$pText
+{%T}    }}
+"@
+    }
+
+    return $Text.ToString()
+}
+
 function Write-GShellDotNetWrapper_ResourceWrappedMethod ($Method) {
     $MethodName = $Method.Name
-    $MethodReturnType = $Method.ReturnType
+    $MethodReturnType = $Method.ReturnType.Type
 
     #TODO - figure out a way to determine which parameters are optional *as far as the API is concerned*
     #LOOK IN TO THE INIT PARAMETERS METHOD OF THE REQUEST METHOD!
     $PropertiesObj = if ($Method.Parameters.Count -ne 0) {
         Write-GShellMethodProperties_MethodParams $Method -RequiredOnly $true -IncludeStandardQueryParams $true -IncludePropertiesObject $true
     }
-    
-    $text = @"
+       
+    $sections = New-Object System.Collections.ArrayList
+
+    $sections.Add((@"
 {%T}public $MethodReturnType $MethodName ($PropertiesObj) {{
-{%T}    
+
 {%T}    if (StandardQueryParams != null) {{
 {%T}        request.Fields = StandardQueryParams.fields;
 {%T}        request.QuotaUser = StandardQueryParams.quotaUser;
 {%T}        request.UserIp = StandardQueryParams.userIp;
 {%T}    }}
-{%T}}}
-"@
+"@)) | Out-Null
 
-    return (Wrap-Text $text)
+    $PropertyAssignments = Write-GShellDotNetWrapper_MethodPropertyObjAssignment $Method
+    if ($PropertyAssignments -ne $null) {$sections.Add($PropertyAssignments) | Out-Null}
+
+    if ($Method.HasPagedResults) {
+        $PagedBlock = Write-GShellWrappedMethod_PagedResultBlock $Method
+        $sections.Add($PagedBlock) | Out-Null
+    } else {
+        $sections.Add("{%T}return request.Execute();") | Out-Null
+    }
+
+    $sections.Add("{%T}}}") | Out-Null
+
+    $text = $sections -join "`r`n`r`n"
+
+    return $text
 
 }
 
@@ -268,9 +351,18 @@ $Method = $Methods[1]
 $M = $Method
 $Init = $M.ReflectedObj.ReturnType.DeclaredMethods | where name -eq "InitParameters"
 
-#Write-GShellDotNetWrapper_ResourceWrappedMethods $resource
+Write-GShellDotNetWrapper_ResourceWrappedMethods $resource
 
-Write-GShellDotNetWrapper_ResourceWrappedMethod $M
-
+#$Result = Write-GShellDotNetWrapper_ResourceWrappedMethod $M
+#
+#$Indented = Set-Indent $Result 0
+#
+#$Wrapped = Wrap-Text $Indented
+#
+#$Wrapped
+#wrap-text (Set-Indent -String $Result -TabCount 2)
 #Write-GShellMethodProperties_MethodParams -Method $M
 
+#$Tabbed = Set-Indent $Result 2
+
+#Wrap-Text $Tabbed

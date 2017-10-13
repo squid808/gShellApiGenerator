@@ -31,9 +31,6 @@ function Has-ObjProperty {
     return $PSObject.psobject.Properties.Name -contains $Target
 }
 
-function Set-Indent ([string]$String, [int]$TabCount, [string]$TabPlaceholder = "{%T}") {
-    return ($String -replace $TabPlaceholder,("`t"*$TabCount))
-}
 
 #endregion
 
@@ -140,12 +137,6 @@ Remarks - The api method call is broken up in to two parts in the underlying cod
     #All parameters related to this API call - pulled out of both the virtual method and the request class
     $Parameters = (New-Object system.collections.arraylist)
 
-    $ParameterOrder
-
-    $ParameterNames
-
-    $ParameterHash
-
     #Parameters related to just the virtual method
     $VirtualParameters = (New-Object system.collections.arraylist)
 
@@ -177,13 +168,14 @@ function New-ApiMethod ([ApiResource]$Resource, $Method) {
     $M.Name = ConvertTo-FirstUpper $Method.Name
     $M.NameLower = ConvertTo-FirstLower $Method.Name
     $M.Description = $M.DiscoveryObj.description
-    $M.ReturnType = Get-ApiPropertyTypeShortName (Get-ApiMethodReturnType $Method) $M
+    $M.ReturnType =  New-ApiMethodProperty $M (Get-ApiMethodReturnType $Method)
+    $M.ReturnType.Type = Get-ApiPropertyTypeShortName $M.ReturnType.ReflectedObj $M
     
     $ParameterNames = New-Object "System.Collections.Generic.HashSet[string]"
 
     #get the properties of the virtual method. This may include a body?
     foreach ($P in $Method.GetParameters()) {
-        $ParameterNames.Add($P.Name.ToLower())
+        $ParameterNames.Add($P.Name.ToLower()) | Out-Null
         $Param = New-ApiMethodProperty $M $P -ForceRequired $true
 
         $M.Parameters.Add($Param) | Out-Null
@@ -193,7 +185,7 @@ function New-ApiMethod ([ApiResource]$Resource, $Method) {
     #get the properties of the request class - those missing set methods are generally properties not associated with
     # the api -MethodName, HttpMethod and RestPath. Properties with setters are likely to be those we want to update
     # and send along with the API request
-    foreach ($P in ($M.ReflectedObj.ReturnType.DeclaredProperties | where SetMethod -ne $null)){
+    foreach ($P in ($M.ReflectedObj.ReturnType.DeclaredProperties | where {$_.SetMethod -ne $null -and $_.Name.ToLower() -ne "pagetoken"})){
         if (-not $ParameterNames.Contains($P.Name.ToLower())) {
             $Param = New-ApiMethodProperty $M $P
         
@@ -335,7 +327,6 @@ function New-ObjectOfType($Type) {
 }
 
 function Get-ApiResourceMethods($Resource, $ResourceType){
-    #$Methods = $Resource.DeclaredNestedTypes | where {$_.ImplementedInterfaces.Name -contains "IClientServiceRequest"}
     $Methods = $ResourceType.DeclaredMethods | where { `
                 $_.IsVirtual -and -not $_.IsFinal -and `
                 $_.ReturnType.ImplementedInterfaces.Name -contains "IClientServiceRequest" }

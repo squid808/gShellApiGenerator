@@ -121,9 +121,9 @@ function Write-GShellDotNetWrapper_MethodPropertyObjAssignment ($Method) {
         $pText = $Params -join "`r`n"
 
         $Text = @"
-{%T}    if (properties != null) {{
+{%T}    if (properties != null) {
 $pText
-{%T}    }}
+{%T}    }
 "@
     }
 
@@ -143,13 +143,13 @@ function Write-GShellDotNetWrapper_ResourceWrappedMethod ($Method) {
     $sections = New-Object System.Collections.ArrayList
 
     $sections.Add((@"
-{%T}public $MethodReturnType $MethodName ($PropertiesObj) {{
+{%T}public $MethodReturnType $MethodName ($PropertiesObj) {
 
-{%T}    if (StandardQueryParams != null) {{
+{%T}    if (StandardQueryParams != null) {
 {%T}        request.Fields = StandardQueryParams.fields;
 {%T}        request.QuotaUser = StandardQueryParams.quotaUser;
 {%T}        request.UserIp = StandardQueryParams.userIp;
-{%T}    }}
+{%T}    }
 "@)) | Out-Null
 
     $PropertyAssignments = Write-GShellDotNetWrapper_MethodPropertyObjAssignment $Method
@@ -162,7 +162,7 @@ function Write-GShellDotNetWrapper_ResourceWrappedMethod ($Method) {
         $sections.Add("{%T}return request.Execute();") | Out-Null
     }
 
-    $sections.Add("{%T}}}") | Out-Null
+    $sections.Add("{%T}}") | Out-Null
 
     $text = $sections -join "`r`n`r`n"
 
@@ -170,23 +170,21 @@ function Write-GShellDotNetWrapper_ResourceWrappedMethod ($Method) {
 
 }
 
-#TODO
+#START HERE - fix double brackets, check if properties are being duplicated among methods
 function Write-GShellDotNetWrapper_ResourceWrappedMethods ($Resource, $Level=0) {
     $list = New-Object System.Collections.ArrayList
 
     $ResourceName = $Resource.Name
     
-
     foreach ($M in $Resource.Methods) {
-        $M = Write-GShellDotNetWrapper_ResourceWrappedMethod $M
+        $text = Write-GShellDotNetWrapper_ResourceWrappedMethod $M
 
         $list.Add($text) | Out-Null
     }
 
+    $string = $list -join "`r`n`r`n"
 
-    $string = "{%T}" + ($list -join "`r`n`r`n")
-
-    $string = Set-Indent -String $string -TabCount $Level
+    $string = wrap-text (Set-Indent -String $string -TabCount $Level)
     
     return $string
 }

@@ -140,6 +140,12 @@ Remarks - The api method call is broken up in to two parts in the underlying cod
     #All parameters related to this API call - pulled out of both the virtual method and the request class
     $Parameters = (New-Object system.collections.arraylist)
 
+    $ParameterOrder
+
+    $ParameterNames
+
+    $ParameterHash
+
     #Parameters related to just the virtual method
     $VirtualParameters = (New-Object system.collections.arraylist)
 
@@ -171,22 +177,29 @@ function New-ApiMethod ([ApiResource]$Resource, $Method) {
     $M.Name = ConvertTo-FirstUpper $Method.Name
     $M.NameLower = ConvertTo-FirstLower $Method.Name
     $M.Description = $M.DiscoveryObj.description
-    $M.ReturnType = Get-ApiMethodReturnType $Method
+    $M.ReturnType = Get-ApiPropertyTypeShortName (Get-ApiMethodReturnType $Method) $M
     
+    $ParameterNames = New-Object "System.Collections.Generic.HashSet[string]"
+
     #get the properties of the virtual method. This may include a body?
     foreach ($P in $Method.GetParameters()) {
-        #$M.Parameters.Add($P) | Out-Null
-        $M.VirtualParameters.Add((New-ApiMethodProperty $M $P)) | Out-Null
+        $ParameterNames.Add($P.Name.ToLower())
+        $Param = New-ApiMethodProperty $M $P -ForceRequired $true
+
+        $M.Parameters.Add($Param) | Out-Null
+        $M.VirtualParameters.Add($Param) | Out-Null
     }
     
     #get the properties of the request class - those missing set methods are generally properties not associated with
     # the api -MethodName, HttpMethod and RestPath. Properties with setters are likely to be those we want to update
     # and send along with the API request
     foreach ($P in ($M.ReflectedObj.ReturnType.DeclaredProperties | where SetMethod -ne $null)){
-        $Param = (New-ApiMethodProperty $M $P)
+        if (-not $ParameterNames.Contains($P.Name.ToLower())) {
+            $Param = New-ApiMethodProperty $M $P
         
-        $M.Parameters.Add($Param) | Out-Null
-        $M.RequestParameters.Add($Param) | Out-Null
+            $M.Parameters.Add($Param) | Out-Null
+            $M.RequestParameters.Add($Param) | Out-Null
+        }
     }
 
     $M.HasPagedResults = $Method.ReturnType.DeclaredProperties.name -contains "PageToken"
@@ -240,13 +253,19 @@ function Get-ApiPropertyTypeShortName($Property, $Method) {
 }
 
 function Get-ApiPropertyType ([ApiMethodProperty]$Property) {
-    if ($Property.ReflectedObj.PropertyType.Name -eq "Nullable``1"){
+    if ($Property.ReflectedObj.GetType().Name -eq "RuntimeParameterInfo") {
+        $RefType = $Property.ReflectedObj.ParameterType
+    } else {
+        $RefType = $Property.ReflectedObj.PropertyType
+    }
+
+    if ($RefType.Name -eq "Nullable``1"){
 
         #-replace "``1\[","<" -replace "\]",">"
 
         $inners = New-Object System.Collections.ArrayList
 
-        foreach ($I in $Property.ReflectedObj.PropertyType.GenericTypeArguments) {
+        foreach ($I in $RefType.GenericTypeArguments) {
             $inners.Add((Get-ApiPropertyTypeShortName $I $Property.Method)) | Out-Null
         }
 
@@ -258,11 +277,11 @@ function Get-ApiPropertyType ([ApiMethodProperty]$Property) {
 
     } else  {
 
-        return Get-ApiPropertyTypeShortName $Property.ReflectedObj.PropertyType $Property.Method
+        return Get-ApiPropertyTypeShortName $RefType $Property.Method
     }
 }
 
-function New-ApiMethodProperty ([ApiMethod]$Method, $Property) {
+function New-ApiMethodProperty ([ApiMethod]$Method, $Property, [bool]$ForceRequired = $false) {
     $P = New-Object ApiMethodProperty
     $P.Method = $Method
     $P.Name = ConvertTo-FirstUpper $Property.Name
@@ -271,7 +290,7 @@ function New-ApiMethodProperty ([ApiMethod]$Method, $Property) {
     $P.DiscoveryObj = $Method.DiscoveryObj.parameters.($Property.Name)
     $P.Type = Get-ApiPropertyType $P
     $P.Description = $P.DiscoveryObj.Description
-    $P.Required = [bool]($P.DiscoveryObj.required)
+    $P.Required = if ($ForceRequired -eq $true) {$true} else {[bool]($P.DiscoveryObj.required)}
 
     return $P
 }

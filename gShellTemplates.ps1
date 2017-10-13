@@ -1,4 +1,29 @@
-﻿function Write-GShellDotNetWrapper_ResourceInstantiations ($Resources, $Level=0) {
+﻿function Wrap-Text ($Text) {
+    $lines =  $Text -split "`r`n"
+
+    for ($l = 0; $l -lt $lines.Count; $l++){
+    #foreach ($l in $lines) {
+        if ($lines[$l].Length -gt 120) {
+            #find a matching character to break on, then split and repeat
+            foreach ($c in @("\(", "\[", ",", " ", "\)", "\]")) {
+                if (($lines[$l].Substring(110,10) -match $c)) {
+                    for ($i = 120; $i -ge 110; $i--) {
+                        if ($lines[$l][$i] -eq $c) {
+                            $lines[$l] = $lines[$l].Insert(($i+1), "`r`n{%T}    ")
+                            $lines[$l] = Wrap-Text $lines[$l]
+                            break;
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    return $lines -join "`r`n"
+}
+
+function Write-GShellDotNetWrapper_ResourceInstantiations ($Resources, $Level=0) {
 
     $list = New-Object System.Collections.ArrayList
 
@@ -16,7 +41,8 @@
     return $string
 }
 
-function Write-GShellMethodProperties_MethodParams ($Method, [bool]$RequiredOnly) {
+function Write-GShellMethodProperties_MethodParams ($Method, [bool]$RequiredOnly=$false,
+    [bool]$IncludeStandardQueryParams=$false, [bool]$IncludePropertiesObject=$false) {
     $Params = New-Object System.Collections.ArrayList
 
     foreach ($P in $Method.Parameters){
@@ -25,6 +51,12 @@ function Write-GShellMethodProperties_MethodParams ($Method, [bool]$RequiredOnly
         }
     }
 
+    if ($IncludePropertiesObject -eq $true -and $Method.Parameters.Required -contains $False) {
+        $Params.Add(("{0}{1}Properties properties = null" -f $Method.Resource.Name, $Method.Name)) | Out-Null
+    }
+
+    if ($IncludeStandardQueryParams -eq $true) {$Params.Add("StandardQueryParameters StandardQueryParams = null") | Out-Null}
+
     $result = $Params -join ", "
 
     return $result
@@ -32,26 +64,26 @@ function Write-GShellMethodProperties_MethodParams ($Method, [bool]$RequiredOnly
 
 function Write-GShellDotNetWrapper_ResourceWrappedMethod ($Method) {
     $MethodName = $Method.Name
-    $MethodReturnType = $Method.ReturnType.FullName
+    $MethodReturnType = $Method.ReturnType
 
     #TODO - figure out a way to determine which parameters are optional *as far as the API is concerned*
     #LOOK IN TO THE INIT PARAMETERS METHOD OF THE REQUEST METHOD!
     $PropertiesObj = if ($Method.Parameters.Count -ne 0) {
-        "A"
+        Write-GShellMethodProperties_MethodParams $Method -RequiredOnly $true -IncludeStandardQueryParams $true -IncludePropertiesObject $true
     }
     
     $text = @"
-public $MethodReturnType $MethodName ({0}StandardQueryParameters StandardQueryParams = null) {{
-    
-    if (StandardQueryParams != null) {{
-        request.Fields = StandardQueryParams.fields;
-        request.QuotaUser = StandardQueryParams.quotaUser;
-        request.UserIp = StandardQueryParams.userIp;
-    }}
-}}
-"@ -f $PropertiesObj
+{%T}public $MethodReturnType $MethodName ($PropertiesObj) {{
+{%T}    
+{%T}    if (StandardQueryParams != null) {{
+{%T}        request.Fields = StandardQueryParams.fields;
+{%T}        request.QuotaUser = StandardQueryParams.quotaUser;
+{%T}        request.UserIp = StandardQueryParams.userIp;
+{%T}    }}
+{%T}}}
+"@
 
-    return $text
+    return (Wrap-Text $text)
 
 }
 
@@ -241,3 +273,4 @@ $Init = $M.ReflectedObj.ReturnType.DeclaredMethods | where name -eq "InitParamet
 Write-GShellDotNetWrapper_ResourceWrappedMethod $M
 
 #Write-GShellMethodProperties_MethodParams -Method $M
+

@@ -1,10 +1,14 @@
-﻿function Wrap-Text ($Text, $Level=0, $Padding=0, $PrependText=$null) {
+﻿#TODO: make all lines return as arraylists and only join at the end to prevent having to split apart lines for wrapping and tabbing?
+#TODO: make each write method take in an [indent] level param to determine indents, and handle tabbing and wrapping before returning?
+
+#take in a block of text and wrap any lines longer than 120 lines
+function Wrap-Text ($Text, $Level=0, $Padding=0, $PrependText=$null) {
     $lines =  $Text -split "`r`n"
 
     for ($l = 0; $l -lt $lines.Count; $l++){
         if ($lines[$l].Length -gt 120) {
             for ($i = 119; $i -ge 0; $i--) {
-                if ($lines[$l][$i] -match "[\(\[, \)\]]") {
+                if ($lines[$l][$i] -match "[ \)\],]") {
                     $matches = $null
                     if ($Level -eq 0) {
                         if ($lines[$l] -match "[^\s]") {
@@ -14,8 +18,14 @@
                         }
                     }
 
-                    $lines[$l] = $lines[$l].Insert(($i+1), 
+                    if ($lines[$l] -match "///\s*<summary>") {
+                        $lines[$l] = $lines[$l].Insert(($i+1), 
+                        ("`r`n{0}/// " -f (" "*$padding)))
+                    } else {
+                        $lines[$l] = $lines[$l].Insert(($i+1), 
                         ("`r`n$PrependText{0}    " -f (" "*$padding)))
+                    }
+
                     $lines[$l] = Wrap-Text $lines[$l] -Level ($Level+1) -Padding $padding
                     break;
                 }
@@ -26,10 +36,12 @@
     return $lines -join "`r`n"
 }
 
+#take in a block of text and replace indent markers with a four-space tab
 function Set-Indent ([string]$String, [int]$TabCount, [string]$TabPlaceholder = "{%T}") {
     return ($String -replace $TabPlaceholder,("    "*$TabCount))
 }
 
+#the paged result block for a method
 function Write-GShellWrappedMethod_PagedResultBlock ($Method) {
     $MethodReturnTypeName = $Method.ReturnType.Name
     $MethodReturnTypeFullName = $Method.ReturnType.Type
@@ -70,6 +82,7 @@ function Write-GShellWrappedMethod_PagedResultBlock ($Method) {
     return $text
 }
 
+#write the instantiation of the resources
 function Write-GShellDotNetWrapper_ResourceInstantiations ($Resources, $Level=0) {
 
     $list = New-Object System.Collections.ArrayList
@@ -88,6 +101,7 @@ function Write-GShellDotNetWrapper_ResourceInstantiations ($Resources, $Level=0)
     return $string
 }
 
+#The method signature parameters 
 function Write-GShellMethodProperties_MethodParams ($Method, [bool]$RequiredOnly=$false,
     [bool]$IncludeStandardQueryParams=$false, [bool]$IncludePropertiesObject=$false) {
     $Params = New-Object System.Collections.ArrayList
@@ -109,8 +123,47 @@ function Write-GShellMethodProperties_MethodParams ($Method, [bool]$RequiredOnly
     return $result
 }
 
+#The *Properties inner classes (within a resource) used to hold the non-required properties for a method
+function Write-GShellDotNetWrapper_MethodPropertyObj ($Method) {
+    if ($Method.Parameters.Required -contains $false) {
+    
+        $Params = New-Object System.Collections.Arraylist
+
+        foreach ($P in ($Method.Parameters | where Required -eq $False)){
+
+            if ($P.DiscoveryObj -ne $null -and $P.DiscoveryObj.type -eq "integer" `
+                -and $P.DiscoveryObj.maximum -ne $null) {
+                $InitValue = $P.DiscoveryObj.maximum
+            } else {
+                $InitValue = "null"
+            }
+
+            $Params.Add(("{{%T}}    /// <summary> {3} </summary>`r`n{{%T}}    public {0} {1} = {2};" `
+                -f $P.Type, $P.Name, $InitValue,  $P.Description)) | Out-Null
+        }
+
+        $pText = $Params -join "`r`n`r`n"
+
+        $ObjName = $Method.Resource.Name + $Method.Name + "Properties"
+
+        $ObjSummary = "Optional parameters for the {0} {1} method." -f `
+            $Method.Resource.Name, $Method.Name
+
+        $Text = @"
+{%T}/// <summary> $ObjSummary </summary>
+{%T}public class $ObjName
+{%T}{
+$pText    
+{%T}}
+"@
+
+        return $Text
+    }
+}
+
+#Within a dotnet wrapped method, extracting and assigning parameters of the Method Properties object
 function Write-GShellDotNetWrapper_MethodPropertyObjAssignment ($Method) {
-    if ($Method.Parameters.Required -contains $False) {
+    if ($Method.Parameters.Required -contains $false) {
     
         $Params = New-Object System.Collections.ArrayList
 
@@ -130,6 +183,7 @@ $pText
     return $Text.ToString()
 }
 
+#write a single wrapped method
 function Write-GShellDotNetWrapper_ResourceWrappedMethod ($Method) {
     $MethodName = $Method.Name
     $MethodReturnType = $Method.ReturnType.Type
@@ -170,7 +224,7 @@ function Write-GShellDotNetWrapper_ResourceWrappedMethod ($Method) {
 
 }
 
-#START HERE - fix double brackets, check if properties are being duplicated among methods
+#write all wrapped methods in a resource
 function Write-GShellDotNetWrapper_ResourceWrappedMethods ($Resource, $Level=0) {
     $list = New-Object System.Collections.ArrayList
 
@@ -189,6 +243,7 @@ function Write-GShellDotNetWrapper_ResourceWrappedMethods ($Resource, $Level=0) 
     return $string
 }
 
+#write all sections of wrapped methods for an API
 function Write-GShellDotNetWrapper ($Api) {
 
     $ApiRootNamespace = $Api.RootNamespace
@@ -364,3 +419,5 @@ Write-GShellDotNetWrapper_ResourceWrappedMethods $resource
 #$Tabbed = Set-Indent $Result 2
 
 #Wrap-Text $Tabbed
+
+wrap-text (set-indent (Write-GShellDotNetWrapper_MethodPropertyObj $Method) 0)

@@ -1,6 +1,20 @@
 ﻿#TODO: make all lines return as arraylists and only join at the end to prevent having to split apart lines for wrapping and tabbing?
 #TODO: make each write method take in an [indent] level param to determine indents, and handle tabbing and wrapping before returning?
 
+<#
+
+sections of code:
+    In Cmdlets:
+        1) The *Obj cmdlets
+        2) the actual gshell cmdlets code
+    In DotNet:
+        1) The gShell.Cmdlets.[API] *Base class containing wrapped method calls (between cmdlets and dotnet)
+        2) gShell.dotNet with the IServiceWrapper class and subclasses to define resources, methods, properties
+
+#>
+
+#region Helpers
+
 #take in a block of text and wrap any lines longer than 120 lines
 function Wrap-Text ($Text, $Level=0, $Padding=0, $PrependText=$null) {
     $lines =  $Text -split "`r`n"
@@ -41,8 +55,29 @@ function Set-Indent ([string]$String, [int]$TabCount, [string]$TabPlaceholder = 
     return ($String -replace $TabPlaceholder,("    "*$TabCount))
 }
 
+#endregion
+
+#region Templating
+
+#region ObjCmdlets - 
+
+#endregion
+
+
+#region Cmdlets
+
+#endregion
+
+
+#region gShell.Cmdlets.[API] - wrapped method calls
+
+#endregion
+
+
+#region gShell.dotNet - defining classes (DNSW - Dot Net Service Wrapper)
+
 #the paged result block for a method
-function Write-GShellWrappedMethod_PagedResultBlock ($Method) {
+function Write-DNSW_PagedResultBlock ($Method) {
     $MethodReturnTypeName = $Method.ReturnType.Name
     $MethodReturnTypeFullName = $Method.ReturnType.Type
 
@@ -82,27 +117,8 @@ function Write-GShellWrappedMethod_PagedResultBlock ($Method) {
     return $text
 }
 
-#write the instantiation of the resources
-function Write-GShellDotNetWrapper_ResourceInstantiations ($Resources, $Level=0) {
-
-    $list = New-Object System.Collections.ArrayList
-
-    foreach ($R in $Resources)  {
-
-        $text = "public {0} {1} = new {0}();" -f $R.Name, $R.NameLower
-
-        $list.Add($text) | Out-Null
-    }
-
-    $string = "{%T}" + ($list -join "`r`n`r`n")
-
-    $string = Set-Indent -String $string -TabCount $Level
-    
-    return $string
-}
-
 #The method signature parameters 
-function Write-GShellMethodProperties_MethodParams ($Method, [bool]$RequiredOnly=$false,
+function Write-DNSW_MethodSignatureParams ($Method, [bool]$RequiredOnly=$false,
     [bool]$IncludeStandardQueryParams=$false, [bool]$IncludePropertiesObject=$false) {
     $Params = New-Object System.Collections.ArrayList
 
@@ -124,7 +140,7 @@ function Write-GShellMethodProperties_MethodParams ($Method, [bool]$RequiredOnly
 }
 
 #The *Properties inner classes (within a resource) used to hold the non-required properties for a method
-function Write-GShellDotNetWrapper_MethodPropertyObj ($Method) {
+function Write-DNSW_MethodPropertyObj ($Method) {
     if ($Method.Parameters.Required -contains $false) {
     
         $Params = New-Object System.Collections.Arraylist
@@ -162,7 +178,7 @@ $pText
 }
 
 #Within a dotnet wrapped method, extracting and assigning parameters of the Method Properties object
-function Write-GShellDotNetWrapper_MethodPropertyObjAssignment ($Method) {
+function Write-DNSW_MethodPropertyObjAssignment ($Method) {
     if ($Method.Parameters.Required -contains $false) {
     
         $Params = New-Object System.Collections.ArrayList
@@ -184,14 +200,14 @@ $pText
 }
 
 #write a single wrapped method
-function Write-GShellDotNetWrapper_ResourceWrappedMethod ($Method) {
+function Write-DNSW_Method ($Method) {
     $MethodName = $Method.Name
     $MethodReturnType = $Method.ReturnType.Type
 
     #TODO - figure out a way to determine which parameters are optional *as far as the API is concerned*
     #LOOK IN TO THE INIT PARAMETERS METHOD OF THE REQUEST METHOD!
     $PropertiesObj = if ($Method.Parameters.Count -ne 0) {
-        Write-GShellMethodProperties_MethodParams $Method -RequiredOnly $true -IncludeStandardQueryParams $true -IncludePropertiesObject $true
+        Write-DNSW_MethodSignatureParams $Method -RequiredOnly $true -IncludeStandardQueryParams $true -IncludePropertiesObject $true
     }
        
     $sections = New-Object System.Collections.ArrayList
@@ -206,11 +222,11 @@ function Write-GShellDotNetWrapper_ResourceWrappedMethod ($Method) {
 {%T}    }
 "@)) | Out-Null
 
-    $PropertyAssignments = Write-GShellDotNetWrapper_MethodPropertyObjAssignment $Method
+    $PropertyAssignments = Write-DNSW_MethodPropertyObjAssignment $Method
     if ($PropertyAssignments -ne $null) {$sections.Add($PropertyAssignments) | Out-Null}
 
     if ($Method.HasPagedResults) {
-        $PagedBlock = Write-GShellWrappedMethod_PagedResultBlock $Method
+        $PagedBlock = Write-DNSW_PagedResultBlock $Method
         $sections.Add($PagedBlock) | Out-Null
     } else {
         $sections.Add("{%T}return request.Execute();") | Out-Null
@@ -225,13 +241,13 @@ function Write-GShellDotNetWrapper_ResourceWrappedMethod ($Method) {
 }
 
 #write all wrapped methods in a resource
-function Write-GShellDotNetWrapper_ResourceWrappedMethods ($Resource, $Level=0) {
+function Write-DNSW_Methods ($Resource, $Level=0) {
     $list = New-Object System.Collections.ArrayList
 
     $ResourceName = $Resource.Name
     
     foreach ($M in $Resource.Methods) {
-        $text = Write-GShellDotNetWrapper_ResourceWrappedMethod $M
+        $text = Write-DNSW_Method $M
 
         $list.Add($text) | Out-Null
     }
@@ -244,7 +260,7 @@ function Write-GShellDotNetWrapper_ResourceWrappedMethods ($Resource, $Level=0) 
 }
 
 #write all sections of wrapped methods for an API
-function Write-GShellDotNetWrapper ($Api) {
+function Write-DNSW ($Api) {
 
     $ApiRootNamespace = $Api.RootNamespace
     $ApiClassName = $Api.Name
@@ -254,7 +270,7 @@ function Write-GShellDotNetWrapper ($Api) {
     $ApiNameAndVersion = $ApiClassName + ":" + $ApiVersionNoDots
 
     $Resources = "//TODO: MAKE WRITE-GShellDotNetRESOURCES"
-    $ResourceInstantiatons = Write-GShellDotNetWrapper_ResourceInstantiations $Api.Resources
+    $ResourceInstantiatons = Write-DNSW_ResourceInstantiations $Api.Resources
     $ResourceWrappedMethods = "//TODO: ResourceWrappedMethods here"
     
     $WorksWithGmail = "//TODO: WORKS WITH GMAIL?"
@@ -347,6 +363,34 @@ namespace gShell.Cmdlets.$ApiClassName {
     return $Text
 }
 
+
+#endregion
+
+
+#endregion
+
+
+
+#write the instantiation of the resources
+function Write-DNSW_ResourceInstantiations ($Resources, $Level=0) {
+
+    $list = New-Object System.Collections.ArrayList
+
+    foreach ($R in $Resources)  {
+
+        $text = "public {0} {1} = new {0}();" -f $R.Name, $R.NameLower
+
+        $list.Add($text) | Out-Null
+    }
+
+    $string = "{%T}" + ($list -join "`r`n`r`n")
+
+    $string = Set-Indent -String $string -TabCount $Level
+    
+    return $string
+}
+
+
 $Test = @"
 namespace gShell.dotNet
 {
@@ -404,9 +448,9 @@ $Method = $Methods[1]
 $M = $Method
 $Init = $M.ReflectedObj.ReturnType.DeclaredMethods | where name -eq "InitParameters"
 
-Write-GShellDotNetWrapper_ResourceWrappedMethods $resource
+Write-DNSW_Methods $resource
 
-#$Result = Write-GShellDotNetWrapper_ResourceWrappedMethod $M
+#$Result = Write-DNSW_Method $M
 #
 #$Indented = Set-Indent $Result 0
 #
@@ -414,10 +458,10 @@ Write-GShellDotNetWrapper_ResourceWrappedMethods $resource
 #
 #$Wrapped
 #wrap-text (Set-Indent -String $Result -TabCount 2)
-#Write-GShellMethodProperties_MethodParams -Method $M
+#Write-DNSW_MethodSignatureParams -Method $M
 
 #$Tabbed = Set-Indent $Result 2
 
 #Wrap-Text $Tabbed
 
-wrap-text (set-indent (Write-GShellDotNetWrapper_MethodPropertyObj $Method) 0)
+wrap-text (set-indent (Write-DNSW_MethodPropertyObj $Method) 0)

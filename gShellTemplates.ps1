@@ -11,7 +11,9 @@ sections of code:
     In DotNet:
         1) The gShell.Cmdlets.[API] *Base class containing wrapped method calls (between cmdlets and dotnet)
         2) gShell.dotNet with the IServiceWrapper class and subclasses to define resources, methods, properties
-
+    Other Files:
+        1) Cmdlet Help File
+        2) Wiki Pages (depreciate and point online help to google api pages instead? or maybe one page per API with anchors?)
 #>
 
 #region Helpers
@@ -33,9 +35,9 @@ function Wrap-Text ($Text, $Level=0, $Padding=0, $PrependText=$null) {
                         }
                     }
 
-                    if ($lines[$l] -match "///\s*<summary>") {
+                    if ($lines[$l] -match "///\s") {
                         $lines[$l] = $lines[$l].Insert(($i+1), 
-                        ("`r`n{0}/// " -f (" "*$padding)))
+                        ("`r`n{0}///  " -f (" "*$padding)))
                     } else {
                         $lines[$l] = $lines[$l].Insert(($i+1), 
                         ("`r`n$PrependText{0}    " -f (" "*$padding)))
@@ -231,7 +233,7 @@ function Write-DNSW_ResourceInstantiations ($Resources, $Level=0) {
         $list.Add($text) | Out-Null
     }
 
-    $string = $list -join "`r`n`r`n"
+    $string = $list -join "`r`n"
 
     $string = Set-Indent -String $string -TabCount $Level
     
@@ -243,37 +245,41 @@ function Write-DNSW_PagedResultBlock ($Method, $Level=0) {
     $MethodReturnTypeName = $Method.ReturnType.Name
     $MethodReturnTypeFullName = $Method.ReturnType.Type
 
+    $resultsType = $Method.ReturnType.Type
+
     $text = @"
-{%T}if (null != properties.StartProgressBar)
-{%T}{
-{%T}    properties.StartProgressBar("Gathering $MethodReturnTypeName", string.Format("-Collecting $MethodReturnTypeName page 1"));
-{%T}}
-    
-{%T}$MethodReturnTypeFullName pagedResult = request.Execute();
-    
-{%T}if (pagedResult != null)
-{%T}{
-{%T}    results.Add(pagedResult);
-    
-{%T}    while (!string.IsNullOrWhiteSpace(pagedResult.NextPageToken) && pagedResult.NextPageToken != request.PageToken && (properties.TotalResults == 0 || results.Count < properties.TotalResults))
+{%T}    var results = new List<$resultsType>(); 
+
+{%T}    if (null != Properties.StartProgressBar)
 {%T}    {
-{%T}        request.PageToken = pagedResult.NextPageToken;
-    
-{%T}        if (null != properties.UpdateProgressBar)
-{%T}        {
-{%T}            properties.UpdateProgressBar(5, 10, "Gathering $MethodReturnTypeName", string.Format("-Collecting $MethodReturnTypeName page {0}", (results.Count + 1).ToString()));
-{%T}        }
-{%T}        pagedResult = request.Execute();
+{%T}        Properties.StartProgressBar("Gathering $MethodReturnTypeName", string.Format("-Collecting $MethodReturnTypeName page 1"));
+{%T}    }
+        
+{%T}    $MethodReturnTypeFullName pagedResult = request.Execute();
+        
+{%T}    if (pagedResult != null)
+{%T}    {
 {%T}        results.Add(pagedResult);
+        
+{%T}        while (!string.IsNullOrWhiteSpace(pagedResult.NextPageToken) && pagedResult.NextPageToken != request.PageToken && (Properties.TotalResults == 0 || results.Count < Properties.TotalResults))
+{%T}        {
+{%T}            request.PageToken = pagedResult.NextPageToken;
+        
+{%T}            if (null != Properties.UpdateProgressBar)
+{%T}            {
+{%T}                Properties.UpdateProgressBar(5, 10, "Gathering $MethodReturnTypeName", string.Format("-Collecting $MethodReturnTypeName page {0}", (results.Count + 1).ToString()));
+{%T}            }
+{%T}            pagedResult = request.Execute();
+{%T}            results.Add(pagedResult);
+{%T}        }
+        
+{%T}        if (null != Properties.UpdateProgressBar)
+{%T}        {
+{%T}            Properties.UpdateProgressBar(1, 2, "Gathering $MethodReturnTypeName", string.Format("-Returning {0} pages.", results.Count.ToString()));
+{%T}        }
 {%T}    }
-    
-{%T}    if (null != properties.UpdateProgressBar)
-{%T}    {
-{%T}        properties.UpdateProgressBar(1, 2, "Gathering $MethodReturnTypeName", string.Format("-Returning {0} pages.", results.Count.ToString()));
-{%T}    }
-{%T}}
-    
-{%T}return results;
+        
+{%T}    return results;
 "@
 
     return $text
@@ -281,17 +287,21 @@ function Write-DNSW_PagedResultBlock ($Method, $Level=0) {
 
 #The method signature parameters 
 function Write-DNSW_MethodSignatureParams ($Method, $Level=0, [bool]$RequiredOnly=$false,
-    [bool]$IncludeStandardQueryParams=$false, [bool]$IncludePropertiesObject=$false) {
+    [bool]$IncludeStandardQueryParams=$false, [bool]$IncludePropertiesObject=$false, [bool]$NameOnly=$false) {
     $Params = New-Object System.Collections.ArrayList
 
     foreach ($P in $Method.Parameters){
         if ($RequiredOnly -eq $False -or ($RequiredOnly -eq $true -and $P.Required -eq $true)){
-            $Params.Add(("{0} {1}" -f $P.Type, $P.Name)) | Out-Null
+            if ($NameOnly -ne $true) {
+                $Params.Add(("{0} {1}" -f $P.Type, $P.Name)) | Out-Null
+            } else {
+                $Params.Add($P.Name) | Out-Null
+            }
         }
     }
 
     if ($IncludePropertiesObject -eq $true -and $Method.Parameters.Required -contains $False) {
-        $Params.Add(("{0}{1}Properties properties = null" -f $Method.Resource.Name, $Method.Name)) | Out-Null
+        $Params.Add(("{0}{1}Properties Properties = null" -f $Method.Resource.Name, $Method.Name)) | Out-Null
     }
 
     if ($IncludeStandardQueryParams -eq $true) {$Params.Add("StandardQueryParameters StandardQueryParams = null") | Out-Null}
@@ -335,7 +345,7 @@ $pText
 {%T}}
 "@
 
-        $text = Set-Indent -String $text -TabCount $Level
+        $text = wrap-text (Set-Indent -String $text -TabCount $Level)
 
         return $Text
     }
@@ -348,36 +358,69 @@ function Write-DNSW_MethodPropertyObjAssignment ($Method, $Level=0) {
         $Params = New-Object System.Collections.ArrayList
 
         foreach ($P in ($Method.Parameters | where Required -eq $False)){
-            $Params.Add(("{{%T}}        request.{0} = properties.{0};" -f $P.Name)) | Out-Null
+            $Params.Add(("{{%T}}        request.{0} = Properties.{0};" -f $P.Name)) | Out-Null
         }
 
         $pText = $Params -join "`r`n"
 
         $Text = @"
-{%T}    if (properties != null) {
+{%T}    if (Properties != null) {
 $pText
 {%T}    }
 "@
+        return $Text.ToString()
+
+    }
+}
+
+#write the xml-based comment block for a method
+function Write-DNSW_MethodComments ($Method, $Level=0) {
+    
+    #params section
+    $CommentsList = New-Object System.Collections.ArrayList
+    
+    $summary = "{{%T}}/// <summary> {0} </summary>" -f $Method.Description
+
+    $CommentsList.Add($summary) | Out-Null
+
+    foreach ($P in ($Method.Parameters | where Required -eq $true)){
+        $CommentsList.Add(("{{%T}}/// <param name=`"{0}`"> {1} </param>" -f $P.Name, $P.Description)) | Out-Null
     }
 
-    return $Text.ToString()
+    if ($Method.Parameters.Required -contains $false) {
+        $CommentsList.Add(("{%T}/// <param name=`"Properties`"> The optional parameters for this method. </param>")) | Out-Null
+    }
+
+    $text = $CommentsList -join "`r`n"
+
+    return $text
 }
 
 #write a single wrapped method
 function Write-DNSW_Method ($Method, $Level=0) {
     $MethodName = $Method.Name
-    $MethodReturnType = $Method.ReturnType.Type
+    $MethodReturnType = if ($Method.HasPagedResults -eq $true) {
+        "List<{0}>" -f $Method.ReturnType.Type
+    } else {
+        $Method.ReturnType.Type
+    }
 
-    #TODO - figure out a way to determine which parameters are optional *as far as the API is concerned*
-    #LOOK IN TO THE INIT PARAMETERS METHOD OF THE REQUEST METHOD!
     $PropertiesObj = if ($Method.Parameters.Count -ne 0) {
         Write-DNSW_MethodSignatureParams $Method -RequiredOnly $true -IncludeStandardQueryParams $true -IncludePropertiesObject $true
     }
        
     $sections = New-Object System.Collections.ArrayList
 
+    $comments = Write-DNSW_MethodComments $Method $Level
+
+    $requestParams = Write-DNSW_MethodSignatureParams $Method -RequiredOnly $true -NameOnly $true
+
+    $request = "var request = GetService().{0}.{1}($requestParams);" -f $Method.Resource.Name, $Method.name
+
     $sections.Add((@"
-{%T}public $MethodReturnType $MethodName ($PropertiesObj) {
+{%T}public $MethodReturnType $MethodName ($PropertiesObj)
+{%T}{
+{%T}    $request
 
 {%T}    if (StandardQueryParams != null) {
 {%T}        request.Fields = StandardQueryParams.fields;
@@ -390,20 +433,25 @@ function Write-DNSW_Method ($Method, $Level=0) {
     if ($PropertyAssignments -ne $null) {$sections.Add($PropertyAssignments) | Out-Null}
 
     if ($Method.HasPagedResults) {
-        $PagedBlock = Write-DNSW_PagedResultBlock $Method
+        $PagedBlock = Write-DNSW_PagedResultBlock $Method -Level $Level
         $sections.Add($PagedBlock) | Out-Null
     } else {
-        $sections.Add("{%T}return request.Execute();") | Out-Null
+        $sections.Add("{%T}    return request.Execute();") | Out-Null
     }
 
     $sections.Add("{%T}}") | Out-Null
 
     $text = $sections -join "`r`n`r`n"
 
+    $text = $comments,$text -join "`r`n"
+
+    $text = Wrap-Text (Set-Indent $text -TabCount $Level)
+
     return $text
 
 }
 
+#TODO this not used?
 #write all wrapped methods in a resource
 function Write-DNSW_Methods ($Resource, $Level=0) {
     $list = New-Object System.Collections.ArrayList
@@ -423,20 +471,57 @@ function Write-DNSW_Methods ($Resource, $Level=0) {
     return $string
 }
 
+#write a single resource class from within the API
 function Write-DNSW_Resource ($Resource, $Level=0) {
 
     $MethodTexts = New-Object System.Collections.ArrayList
+    
+    #Handle Inner Resources
+    if ($Resource.ChildResources.Count -ne 0) {
+        $ChildrenProperties = Write-DNSW_ResourcesAsProperties $Resource.ChildResources -Level ($Level+1)
+        $ChildResourceInstantiations = Write-DNSW_ResourceInstantiations $Resource.ChildResources -Level ($Level+2)
+        $ResourceName = $Resource.Name
+
+        $ChildrenTextBlock = @"
+{%T}#region Properties and Constructor
+
+{0}
+
+{%T}public $ResourceName()
+{%T}{{
+{1}
+{%T}}}
+
+{%T}#endregion
+"@
+
+        $ChildrenTextBlock = Wrap-Text (Set-Indent $ChildrenTextBlock ($Level+1))
+
+        $ChildrenTextBlock = $ChildrenTextBlock -f $ChildrenProperties, $ChildResourceInstantiations
+
+        $MethodTexts.Add($ChildrenTextBlock) | Out-Null
+
+        $ChildrenResources = Write-DNSW_Resources $Resource.ChildResources -Level ($Level+1)
+
+        $MethodTexts.Add($ChildrenResources) | Out-Null
+    }
 
     foreach ($Method in $Resource.Methods) {
-        $PObjs = New-Object System.Collections.ArrayList
+        #make the property object, if any
+        $MethodParts = New-Object System.Collections.ArrayList
         
-        $PObj = Write-DNSW_MethodPropertyObj $method $Level
+        $PObj = Write-DNSW_MethodPropertyObj $method ($Level+1)
         
         if ($PObj -ne $null) {
-            $PObjs.Add($PObj) | Out-Null
+            $MethodParts.Add($PObj) | Out-Null
         }
 
-        $MethodText = $PObjs -join "`r`n`r`n"
+        #Make the method class
+        $MethodClass = Write-DNSW_Method $Method ($Level+1)
+
+        $MethodParts.Add($MethodClass) | Out-Null
+
+        $MethodText = $MethodParts -join "`r`n`r`n"
 
         if ($MethodText -ne $null) {
             $MethodTexts.Add($MethodText) | Out-Null
@@ -445,9 +530,25 @@ function Write-DNSW_Resource ($Resource, $Level=0) {
 
     $AllMethods = $MethodTexts -join "`r`n`r`n"
 
-    return $AllMethods
+    $ResourceName = $Resource.Name 
+    $ResourceNameLower = $Resource.NameLower
+
+    $resourceText = @"
+{%T}/// <summary> The $ResourceNameLower collection of methods. </summary>
+{%T}public class $ResourceName
+{%T}{{
+{0}
+{%T}}}
+"@
+
+    $resourceText = Wrap-Text (Set-Indent $resourceText $Level)
+
+    $resourceText = $resourceText -f $AllMethods
+
+    return $resourceText
 }
 
+#write all resources from  within  the API
 function Write-DNSW_Resources ($Resources, $Level=0) {
     $ResourceList = New-Object System.Collections.ArrayList
     
@@ -466,18 +567,31 @@ function Write-DNSW_Resources ($Resources, $Level=0) {
 
 function Write-DNSW ($Resource, $Level=0) {
     $ApiRootNamespace = $Api.RootNamespace
-    $ApiClassName = $Api.Name
-    $ApiClassNameBase = $ApiClassName + "Base"
+    $ApiCanonicalName = ConvertTo-FirstUpper $Api.DiscoveryObj.canonicalName
+    $ApiCanonicalNameService = $ApiCanonicalName + "Service"
+    $ApiCanonicalVersion = $Api.DiscoveryObj.version
+    $ApiClassNameBase = $ApiCanonicalName + "Base"
     $ApiVersionNoDots = $Api.NameAndVersion -replace "[.]","_"
     $ApiModuleName = $Api.RootNamespace + "." + $ApiVersionNoDots
-    $ApiNameAndVersion = $ApiClassName + ":" + $ApiVersionNoDots
+    $ApiNameAndVersion = $Api.DiscoveryObj.name + ":" + $ApiCanonicalVersion
 
     $ResourcesAsProperties = Write-DNSW_ResourcesAsProperties $Api.Resources -Level 2
     $ResourceInstantiatons = Write-DNSW_ResourceInstantiations $Api.Resources -Level 3
-    #$ResourceWrappedMethods = Write-DNSW_Methods 
     $ResourceClasses = Write-DNSW_Resources $Api.Resources -Level 2
     
-    $WorksWithGmail = "//TODO: WORKS WITH GMAIL?"
+    #TODO: figure out service account
+    if ($Api.Name -eq "Admin") {
+        $UseServiceAccount = $false
+        $WorksWithGmail = "false"
+    } else {
+        $UseServiceAccount = $true
+        $WorksWithGmail = "true"
+    }
+
+    if ($UseServiceAccount)  {
+        $CreateServiceServiceAccountSignature = ", string gShellServiceAccount = null"
+        $CreateServiceServiceAccount = ", gShellServiceAccount"
+    }
     
     $dotNetBlock = @"
 namespace gShell.dotNet
@@ -488,32 +602,36 @@ namespace gShell.dotNet
     using gShell.dotNet;
     using gShell.dotNet.Utilities.OAuth2;
 
-    using $ApiVersionNoDots = $ApiModuleName;
-    using Data = $ApiModuleName.Data;
+    using $ApiRootNamespace;
+    using Data = $ApiRootNamespace.Data;
 
-    /// <summary>The dotNet gShell version of the $ApiClassName api.</summary>
-    public class $ApiClassName : ServiceWrapper<$ApiVersionNoDots.$ApiClassNameService>
+    /// <summary>The dotNet gShell version of the $ApiCanonicalName api.</summary>
+    public class $ApiCanonicalName : ServiceWrapper<$ApiCanonicalNameService>, IServiceWrapper<Google.Apis.Services.IClientService>
     {
         protected override bool worksWithGmail { get { return $WorksWithGmail; } }
 
-        /// <summary>Creates a new $ApiVersionNoDots.$ApiClassName service.</summary>
+        /// <summary>Creates a new $ApiCanonicalVersion.$ApiCanonicalName service.</summary>
         /// <param name="domain">The domain to which this service will be authenticated.</param>
         /// <param name="authInfo">The authenticated AuthInfo for this user and domain.</param>
         /// <param name="gShellServiceAccount">The optional email address the service account should impersonate.</param>
-        protected override $ApiVersionNoDots.$ApiClassNameService CreateNewService(string domain, AuthenticatedUserInfo authInfo, string gShellServiceAccount = null)
+        protected override $ApiCanonicalNameService CreateNewService(string domain, AuthenticatedUserInfo authInfo$CreateServiceServiceAccountSignature)
         {
-            return new $ApiVersionNoDots.$ApiClassNameService(OAuth2Base.GetInitializer(domain, authInfo, gShellServiceAccount));
+            return new $ApiCanonicalNameService.$ApiClassNameService(OAuth2Base.GetInitializer(domain, authInfo$CreateServiceServiceAccount));
         }
 
         /// <summary>Returns the api name and version in {name}:{version} format.</summary>
         public override string apiNameAndVersion { get { return "$ApiNameAndVersion"; } }
 
+        #region Properties and Constructor
+
 $ResourcesAsProperties
 
-        public $ApiClassName()
+        public $ApiCanonicalName()
         {
 $ResourceInstantiatons
         }
+
+        #endregion
 
 $ResourceClasses
     }
@@ -531,8 +649,8 @@ $ResourceClasses
 
 
 
-
-$RestJson = Load-RestJsonFile admin reports_v1
+$RestJson = Load-RestJsonFile admin directory_v1
+#$RestJson = Load-RestJsonFile admin reports_v1
 #$RestJson = Load-RestJsonFile discovery v1
 $LibraryIndex = Get-JsonIndex $LibraryIndexRoot
 $Api = Invoke-GShellReflection $RestJson $LibraryIndex

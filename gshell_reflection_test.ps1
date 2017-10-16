@@ -83,8 +83,7 @@ class ApiResource {
     $ReflectedObj
 }
 
-function New-ApiResource ([Api]$Api, [System.Reflection.PropertyInfo]$Resource) {
-    #for whatever reason, can't put this in the constructor with or else it gives a type error
+function New-ApiResource ([Api]$Api, [System.Reflection.PropertyInfo]$Resource, [ApiResource]$ParentResource=$null) {
 
     $t = $Resource.PropertyType
 
@@ -97,8 +96,20 @@ function New-ApiResource ([Api]$Api, [System.Reflection.PropertyInfo]$Resource) 
     $R.FullName = $t.FullName
     $R.Namespace = $t.Namespace
 
-    $R.DiscoveryObj = $Api.DiscoveryObj.resources.($R.Name)
-    #TODO - Assign Child Resources (if any)
+    if ($ParentResource -ne $null) {
+        $R.ParentResource = $ParentResource
+        $R.DiscoveryObj = $R.ParentResource.DiscoveryObj.resources.($R.Name)
+    } else {
+        $R.DiscoveryObj = $Api.DiscoveryObj.resources.($R.Name)
+    }
+    
+    #Handle Children Resources
+    if ($t.DeclaredProperties -ne $null -and $t.DeclaredProperties.Count -gt 0) {
+        foreach ($CR in $t.DeclaredProperties) {
+            $ChildR = New-ApiResource $Api $CR $R
+            $R.ChildResources.Add($ChildR) | Out-Null
+        }
+    }
 
     $Methods = Get-ApiResourceMethods $R $T
 
@@ -251,19 +262,27 @@ function Get-ApiPropertyType ([ApiMethodProperty]$Property) {
         $RefType = $Property.ReflectedObj.PropertyType
     }
 
-    if ($RefType.Name -eq "Nullable``1"){
+    if ($RefType.Name -eq "Nullable``1" -or $RefType.Name -eq "Repeatable``1"){
 
         #-replace "``1\[","<" -replace "\]",">"
 
         $inners = New-Object System.Collections.ArrayList
 
         foreach ($I in $RefType.GenericTypeArguments) {
-            $inners.Add((Get-ApiPropertyTypeShortName $I $Property.Method)) | Out-Null
+            $innerType = Get-ApiPropertyTypeShortName $I $Property.Method
+            $innerType = $innerType -replace "[+]","."
+            $inners.Add($innerType) | Out-Null
         }
 
         $InnerString = $inners -join ", "
 
-        $Type = "System.Nullable<{0}>" -f $InnerString
+        if ($RefType.Name -eq "Nullable``1") {
+            $Type = "System.Nullable<{0}>" -f $InnerString
+        }
+
+        if ($RefType.Name -eq "Repeatable``1") {
+            $Type = "Google.Apis.Util.Repeatable<{0}>" -f $InnerString
+        }
 
         return $type
 
@@ -349,12 +368,6 @@ function Get-ApiMethodReturnType($Method){
 
 #endregion
 
-#region Templates
-
-
-
-#endregion
-
 #Todo: Load from nuget json file
 function Import-GShellAssemblies($LibraryIndex, $LibraryIndexVersionInfo){
     
@@ -397,8 +410,8 @@ function Invoke-GShellReflection ($RestJson, $LibraryIndex) {
 #Write-Host $Method.ReflectedObj.ReturnType.FullName -ForegroundColor Green
 #$test = New-ObjectOfType $Method.ReflectedObj.ReturnType
 
-#$RestJson = Load-RestJsonFile admin directory_v1
-$RestJson = Load-RestJsonFile admin reports_v1
+$RestJson = Load-RestJsonFile admin directory_v1
+#$RestJson = Load-RestJsonFile admin reports_v1
 #$RestJson = Load-RestJsonFile discovery v1
 $LibraryIndex = Get-JsonIndex $LibraryIndexRoot
 $Api = Invoke-GShellReflection $RestJson $LibraryIndex

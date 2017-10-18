@@ -214,7 +214,8 @@ function New-ApiMethod ([ApiResource]$Resource, $Method) {
         }
     }
 
-    $M.HasPagedResults = $Method.ReturnType.DeclaredProperties.name -contains "PageToken"
+    $M.HasPagedResults = $Method.ReturnType.DeclaredProperties.name -contains "PageToken" -and `
+                            $M.ReturnType.ReflectedObject.DeclaredProperties.name -contains "NextPageToken"
 
     $M.HasBodyParameter = $M.Parameters.name -contains "body"
     if ($M.HasBodyParameter -eq $true) {

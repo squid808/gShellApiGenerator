@@ -146,12 +146,12 @@ function Write-DNC_Method ($Method, $Level=0) {
     if ($Method.HasPagedResults -eq $true -or $Method.Parameters.Required -contains $False) {
         $PropertiesObjFullName = "g{0}.{1}.{1}{2}Properties" -f (ConvertTo-FirstUpper ($Api.DiscoveryObj.canonicalName -replace " ","")),
             $Method.Resource.Name, $Method.Name
-        $sections.Add("{%T}    properties = properties ?? new $PropertiesObjFullName();") | Out-Null
+        $sections.Add("{%T}    Properties = Properties ?? new $PropertiesObjFullName();") | Out-Null
     }
 
     if ($Method.HasPagedResults -eq $true) {
-        $sections.Add("{%T}    properties.StartProgressBar = StartProgressBar;") | Out-Null
-        $sections.Add("{%T}    properties.UpdateProgressBar = UpdateProgressBar;") | Out-Null
+        $sections.Add("{%T}    Properties.StartProgressBar = StartProgressBar;") | Out-Null
+        $sections.Add("{%T}    Properties.UpdateProgressBar = UpdateProgressBar;") | Out-Null
     }
 
     if ($Method.ReturnType.Type -ne "void") {
@@ -163,7 +163,7 @@ function Write-DNC_Method ($Method, $Level=0) {
             -IncludePropertiesObject $true -NameOnly $true
     }
 
-    $Return = "`{{%T}}    {0}mainBase.{1}.{2}({3});" -f $resultReturn, $method.Resource.Name, $Method.Name, $ReturnProperties
+    $Return = "`{{%T}}    {0}mainBase.{1}.{2}({3});" -f $resultReturn, $method.Resource.NameLower, $Method.Name, $ReturnProperties
 
     if ($Method.HasPagedResults -eq $true -or $Method.Parameters.Required -contains $False) {
         $Return = "`r`n" + $Return
@@ -335,20 +335,22 @@ $GeneralFileHeader
 using gShell.Cmdlets.Utilities.OAuth2;
 using gShell.dotNet;
 
+using System;
+using System.Collections.Generic;
+//using System.Management.Automation;
+//
+//using Google.Apis.Auth.OAuth2;
+//using Google.Apis.Services;
+using $ApiRootNamespace;
+using Data = $ApiRootNamespace.Data;
+//
+//using gShell.dotNet.Utilities;
+//using gShell.dotNet.Utilities.OAuth2;
+using g$ApiName = gShell.dotNet.$ApiName;
+
 namespace gShell.Cmdlets.$ApiName {
 
-    using System;
-    using System.Collections.Generic;
-    //using System.Management.Automation;
-    //
-    //using Google.Apis.Auth.OAuth2;
-    //using Google.Apis.Services;
-    using $ApiRootNamespace;
-    using Data = $ApiRootNamespace.Data;
-    //
-    //using gShell.dotNet.Utilities;
-    //using gShell.dotNet.Utilities.OAuth2;
-    using g$ApiName = gShell.dotNet.$ApiName;
+    
 
     /// <summary>
     /// A PowerShell-ready wrapper for the $ApiName api, as well as the resources and methods therein.
@@ -368,7 +370,7 @@ namespace gShell.Cmdlets.$ApiName {
 
 $ResourcesAsProperties
 
-        protected $ApiName()
+        protected $ApiNameBase()
         {
             mainBase = new g$ApiName();
 
@@ -536,9 +538,13 @@ function Write-DNSW_MethodPropertyObj ($Method, $Level=0) {
         }
 
         if ($Method.HasPagedResults -eq $true) {
-            $Params.Add("/// <summary>A delegate that is used to start a progress bar.</summary> #TODO HERE
-                public Action<string, string> StartProgressBar = null;") | Out-Null
-            $Params.Add("{%T}    properties.UpdateProgressBar = UpdateProgressBar;") | Out-Null
+            $ProgressBarString = "{%T}    /// <summary>A delegate that is used to start a progress bar.</summary>`r`n"
+            $ProgressBarString += "{%T}    public Action<string, string> StartProgressBar = null;`r`n`r`n"
+            $ProgressBarString += "{%T}     /// <summary>A delegate that is used to update a progress bar.</summary>`r`n"
+            $ProgressBarString += "{%T}    public Action<int, int, string, string> UpdateProgressBar = null;`r`n`r`n"
+            $ProgressBarString += "{%T}     /// <summary>A counter for the total number of results to pull when iterating through paged results.</summary>`r`n"
+            $ProgressBarString += "{%T}    public int TotalResults = 0;"
+            $Params.Add($ProgressBarString) | Out-Null
         }
 
         $pText = $Params -join "`r`n`r`n"
@@ -647,7 +653,10 @@ function Write-DNSW_Method ($Method, $Level=0) {
         $PagedBlock = Write-DNSW_PagedResultBlock $Method -Level $Level
         $sections.Add($PagedBlock) | Out-Null
     } else {
-        $sections.Add("{%T}    return request.Execute();") | Out-Null
+        if ($Method.ReturnType.Type -ne "void") {
+            $resultReturn = "return "
+        }
+        $sections.Add(("{{%T}}    {0}request.Execute();" -f $resultReturn)) | Out-Null
     }
 
     $sections.Add("{%T}}") | Out-Null
@@ -659,7 +668,7 @@ function Write-DNSW_Method ($Method, $Level=0) {
     $text = Wrap-Text (Set-Indent $text -TabCount $Level)
 
     return $text
-
+    
 }
 
 #TODO this not used?
@@ -807,16 +816,18 @@ function Write-DNSW ($Resource, $Level=0) {
     
     $dotNetBlock = @"
 $GeneralFileHeader
+
+using System;
+using System.Collections.Generic;
+
+using gShell.dotNet;
+using gShell.dotNet.Utilities.OAuth2;
+
+using $ApiRootNamespace;
+using Data = $ApiRootNamespace.Data;
+
 namespace gShell.dotNet
 {
-    using System;
-    using System.Collections.Generic;
-
-    using gShell.dotNet;
-    using gShell.dotNet.Utilities.OAuth2;
-
-    using $ApiRootNamespace;
-    using Data = $ApiRootNamespace.Data;
 
     /// <summary>The dotNet gShell version of the $ApiName api.</summary>
     public class $ApiName : ServiceWrapper<$ApiNameService>, IServiceWrapper<Google.Apis.Services.IClientService>
@@ -862,8 +873,8 @@ $ResourceClasses
 
 
 
-#$RestJson = Load-RestJsonFile admin directory_v1
-$RestJson = Load-RestJsonFile admin reports_v1
+$RestJson = Load-RestJsonFile admin directory_v1
+#$RestJson = Load-RestJsonFile admin reports_v1
 #$RestJson = Load-RestJsonFile discovery v1
 #$RestJson = Load-RestJsonFile gmail v1
 

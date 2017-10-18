@@ -10,11 +10,15 @@ function Get-ObjProperties ($PSObject) {
 }
 
 function ConvertTo-FirstLower ($String) {
-    return $String.ToLower()[0] + $String.Substring(1,$String.Length-1)
+    if (-not [string]::IsNullOrWhiteSpace($string)){
+        return $String.ToLower()[0] + $String.Substring(1,$String.Length-1)
+    }
 }
 
 function ConvertTo-FirstUpper ($String) {
-    return $String.ToUpper()[0] + $String.Substring(1,$String.Length-1)
+    if (-not [string]::IsNullOrWhiteSpace($string)){
+        return $String.ToUpper()[0] + $String.Substring(1,$String.Length-1)
+    }
 }
 
 function Has-ObjProperty {
@@ -37,7 +41,9 @@ function Has-ObjProperty {
 #region Classes
 class Api {
     $Name
+    $NameLower
     $NameAndVersion
+    $NameAndVersionLower
     $Resources = (New-Object system.collections.arraylist)
     $RootNamespace
     $DataNamespace
@@ -51,19 +57,16 @@ function New-Api ([System.Reflection.Assembly]$Assembly, $RestJson) {
 
     $api.DiscoveryObj = $RestJson
         
-    $api.RootNamespace = $Assembly.FullName.Split(",")[0]
+    $api.RootNamespace = $Assembly.FullName.Split(",")[0] -replace "\.Admin\.",".admin."
     $api.DataNamespace = $api.RootNamespace + ".Data"
-    $api.Version = $Assembly.FullName.Split(",")[1].Split("=")[1]
+    $api.Version = $api.RootNamespace.Split(".")[-1]
     $api.ReflectedObj = $Assembly
 
-    #Try and find the name
-    $Matches = $null
-    $Assembly.FullName -match "(?<=Google.Apis.).*(?=, Version)" | Out-Null
-    if ($Matches -ne $null) {
-        $api.Name = $Matches[0].Split(".")[0]
-        $api.NameAndVersion = $Matches[0]
-    }
-    
+    $api.Name = $Api.RootNamespace.Split(".")[-2]
+    $api.NameLower = ConvertTo-FirstLower $Api.Name
+    $api.NameAndVersion = $Api.RootNamespace -replace "^Google.Apis.",""
+    $api.NameAndVersionLower = ConvertTo-FirstLower $Api.NameAndVersion
+
     Get-Resources $api | % {$api.Resources.Add($_) | Out-Null}
 
     return $api
@@ -91,7 +94,7 @@ function New-ApiResource ([Api]$Api, [System.Reflection.PropertyInfo]$Resource, 
 
     $R.Api = $Api
     $R.ReflectedObj = $t
-    $R.Name = ConvertTo-FirstUpper ($t.Name -replace "Resource","")
+    $R.Name = ConvertTo-FirstUpper ($t.Name -replace 'Resource$',"")
     $R.NameLower = ConvertTo-FirstLower $R.Name
     $R.FullName = $t.FullName
     $R.Namespace = $t.Namespace
@@ -180,7 +183,13 @@ function New-ApiMethod ([ApiResource]$Resource, $Method) {
     $M.NameLower = ConvertTo-FirstLower $Method.Name
     $M.Description = $M.DiscoveryObj.description
     $M.ReturnType =  New-ApiMethodProperty $M (Get-ApiMethodReturnType $Method)
-    $M.ReturnType.Type = Get-ApiPropertyTypeShortName $M.ReturnType.ReflectedObj $M
+    
+    if (Has-ObjProperty $M.DiscoveryObj "response") {
+        
+        $M.ReturnType.Type = Get-ApiPropertyTypeShortName $M.ReturnType.ReflectedObj $M
+    } else {
+        $M.ReturnType.Type = "void"
+    }
     
     $ParameterNames = New-Object "System.Collections.Generic.HashSet[string]"
 

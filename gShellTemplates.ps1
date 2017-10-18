@@ -1,6 +1,7 @@
 ﻿#TODO: make all lines return as arraylists and only join at the end to prevent having to split apart lines for wrapping and tabbing?
 #TODO: make each write method take in an [indent] level param to determine indents, and handle tabbing and wrapping before returning?
 #TODO: incorporate set-indent and wrap-text?
+#TODO: determine impact of ApiVersionNoDots on APIs that have underscores already - what are their namespaces?
 
 <#
 
@@ -101,6 +102,68 @@ $GeneralFileHeader = @"
 
 #region gShell.Cmdlets.[API] - wrapped method calls (DNC - Dot Net Cmdlets)
 
+#write a single wrapped method
+function Write-DNC_Method ($Method, $Level=0) {
+    $MethodName = $Method.Name
+    $MethodReturnType = if ($Method.HasPagedResults -eq $true) {
+        "List<{0}>" -f $Method.ReturnType.Type
+    } else {
+        $Method.ReturnType.Type
+    }
+
+    $PropertiesObj = if ($Method.Parameters.Count -ne 0) {
+        Write-DNSW_MethodSignatureParams $Method -RequiredOnly $true -IncludeStandardQueryParams $true -IncludePropertiesObject $true
+    }
+       
+    $sections = New-Object System.Collections.ArrayList
+
+    $comments = Write-DNSW_MethodComments $Method $Level
+
+    $sections.Add((@"
+{%T}public $MethodReturnType $MethodName ($PropertiesObj)
+{%T}{
+"@)) | Out-Null
+
+    if ($Method.HasPagedResults -eq $true -or $Method.Parameters.Required -contains $False) {
+        $PropertiesObjFullName = "g{0}.{1}.{1}{2}Properties" -f (ConvertTo-FirstUpper ($Api.DiscoveryObj.canonicalName -replace " ","")),
+            $Method.Resource.Name, $Method.Name
+        $sections.Add("{%T}    properties = properties ?? new $PropertiesObjFullName();") | Out-Null
+    }
+
+    if ($Method.HasPagedResults -eq $true) {
+        $sections.Add("{%T}    properties.StartProgressBar = StartProgressBar;") | Out-Null
+        $sections.Add("{%T}    properties.UpdateProgressBar = UpdateProgressBar;") | Out-Null
+    }
+
+    if ($Method.ReturnType.Type -ne "void") {
+        $resultReturn = "return "
+    }
+
+    $ReturnProperties = if ($Method.Parameters.Count -ne 0) {
+        Write-DNSW_MethodSignatureParams $Method -RequiredOnly $true -IncludeStandardQueryParams $true `
+            -IncludePropertiesObject $true -NameOnly $true
+    }
+
+    $Return = "`{{%T}}    {0}mainBase.{1}.{2}({3});" -f $resultReturn, $method.Resource.Name, $Method.Name, $ReturnProperties
+
+    if ($Method.HasPagedResults -eq $true -or $Method.Parameters.Required -contains $False) {
+        $Return = "`r`n" + $Return
+    }
+
+    $sections.Add($Return) | Out-Null
+
+    $sections.Add("{%T}}") | Out-Null
+
+    $text = $sections -join "`r`n"
+
+    $text = $comments,$text -join "`r`n"
+
+    $text = Wrap-Text (Set-Indent $text -TabCount $Level)
+
+    return $text
+
+}
+
 #write the resources as properties for the container class
 function Write-DNC_ResourcesAsProperties ($Resources, $Level=0) {
 
@@ -120,7 +183,6 @@ function Write-DNC_ResourcesAsProperties ($Resources, $Level=0) {
     
     return $string
 }
-
 
 #write the instantiation of the resources
 function Write-DNC_ResourceInstantiations ($Resources, $Level=0) {
@@ -145,51 +207,48 @@ function Write-DNC_ResourceInstantiations ($Resources, $Level=0) {
 function Write-DNC_Resource ($Resource, $Level=0) {
 
     $MethodTexts = New-Object System.Collections.ArrayList
+
+    $ResourceName = $Resource.Name 
+    $ResourceNameLower = $Resource.NameLower
     
     #Handle Inner Resources
     if ($Resource.ChildResources.Count -ne 0) {
-        #$ChildrenProperties = Write-DNSW_ResourcesAsProperties $Resource.ChildResources -Level ($Level+1)
-        #$ChildResourceInstantiations = Write-DNSW_ResourceInstantiations $Resource.ChildResources -Level ($Level+2)
-        $ResourceName = $Resource.Name
+        $ChildrenProperties = Write-DNSW_ResourcesAsProperties $Resource.ChildResources -Level ($Level+1)
+        $ChildResourceInstantiations = Write-DNSW_ResourceInstantiations $Resource.ChildResources -Level ($Level+2)
+        $ChildResourceName = $Resource.Name
+        $ChildResources = Write-DNC_Resources $Resource.ChildResources -Level ($Level+1)
 
         $ChildrenTextBlock = @"
-{%T}#region $ResourceName
+{%T}#region Sub-Resources
 
-{0}
+$ChildrenProperties
 
 {%T}public $ResourceName()
-{%T}{{
-{1}
-{%T}}}
+{%T}{
+$ChildResourceInstantiations
+{%T}}
+
+$ChildResources
 
 {%T}#endregion
 "@
 
         $ChildrenTextBlock = Wrap-Text (Set-Indent $ChildrenTextBlock ($Level+1))
 
-        #$ChildrenTextBlock = $ChildrenTextBlock -f $ChildrenProperties, $ChildResourceInstantiations
-
         $MethodTexts.Add($ChildrenTextBlock) | Out-Null
-
-        #$ChildrenResources = Write-DNSW_Resources $Resource.ChildResources -Level ($Level+1)
-
-        $MethodTexts.Add($ChildrenResources) | Out-Null
     }
 
+    #Handle the methods
     foreach ($Method in $Resource.Methods) {
+
         #make the property object, if any
         $MethodParts = New-Object System.Collections.ArrayList
         
-        #$PObj = Write-DNSW_MethodPropertyObj $method ($Level+1)
+        $MethodObj = Write-DNC_Method $method ($Level+1)
         
-        if ($PObj -ne $null) {
-            $MethodParts.Add($PObj) | Out-Null
+        if ($MethodObj -ne $null) {
+            $MethodParts.Add($MethodObj) | Out-Null
         }
-
-        #Make the method class
-        #$MethodClass = Write-DNSW_Method $Method ($Level+1)
-
-        $MethodParts.Add($MethodClass) | Out-Null
 
         $MethodText = $MethodParts -join "`r`n`r`n"
 
@@ -200,15 +259,16 @@ function Write-DNC_Resource ($Resource, $Level=0) {
 
     $AllMethods = $MethodTexts -join "`r`n`r`n"
 
-    $ResourceName = $Resource.Name 
-    $ResourceNameLower = $Resource.NameLower
-
     $resourceText = @"
-{%T}/// <summary> The $ResourceNameLower collection of methods. </summary>
+{%T}#region $ResourceName
+
+{%T}/// <summary> A wrapper class for the $ResourceName resource. </summary>
 {%T}public class $ResourceName
 {%T}{{
 {0}
 {%T}}}
+
+{%T}#endregion
 "@
 
     $resourceText = Wrap-Text (Set-Indent $resourceText $Level)
@@ -239,31 +299,24 @@ function Write-DNC_Resources ($Resources, $Level=0) {
 function Write-DNC ($Api, $Level=0) {
 
     $ApiRootNamespace = $Api.RootNamespace
-    $ApiCanonicalName = ConvertTo-FirstUpper ($Api.DiscoveryObj.canonicalName -replace " ","")
-    $ApiCanonicalNameService = $ApiCanonicalName + "Service"
-    $ApiCanonicalVersion = $Api.DiscoveryObj.version
-    $ApiClassNameBase = $ApiCanonicalName + "Base"
+    $ApiName = $Api.Name #ConvertTo-FirstUpper ($Api.DiscoveryObj.canonicalName -replace " ","")
+    $ApiNameBase = $ApiName + "Base"
+    $ApiNameService = $ApiName + "Service"
+    $ApiVersion = $Api.DiscoveryObj.version
     $ApiVersionNoDots = $Api.NameAndVersion -replace "[.]","_"
     $ApiModuleName = $Api.RootNamespace + "." + $ApiVersionNoDots
-    $ApiNameAndVersion = $Api.DiscoveryObj.name + ":" + $ApiCanonicalVersion
-
-    $ApiRootNamespace = $Api.RootNamespace
-    $ApiClassName = $Api.Name
-    $ApiClassNameBase = $ApiClassName + "Base"
-    $ApiVersionNoDots = $Api.NameAndVersion -replace "[.]","_"
-    $ApiModuleName = $Api.RootNamespace + "." + $ApiVersionNoDots
-    $ApiNameAndVersion = $ApiClassName + ":" + $ApiVersionNoDots
+    $ApiNameAndVersion = $Api.DiscoveryObj.name + ":" + $ApiVersion
     
     $ResourcesAsProperties = Write-DNC_ResourcesAsProperties $Api.Resources -Level 2
-    #$Resources = "//TODO: MAKE WRITE-GShellDotNetRESOURCES"
     $ResourceInstantiatons = Write-DNSW_ResourceInstantiations $Api.Resources -Level 3
     $ResourceWrappedMethods = Write-DNC_Resources $Api.Resources -Level 2
 
-    $text = @" 
+    $text = @"
+$GeneralFileHeader
 using gShell.Cmdlets.Utilities.OAuth2;
 using gShell.dotNet;
 
-namespace gShell.Cmdlets.$ApiCanonicalName {
+namespace gShell.Cmdlets.$ApiName {
 
     using System;
     using System.Collections.Generic;
@@ -271,34 +324,34 @@ namespace gShell.Cmdlets.$ApiCanonicalName {
     //
     //using Google.Apis.Auth.OAuth2;
     //using Google.Apis.Services;
-    //using $ApiVersionNoDots = $ApiModuleName;
-    //using Data = $ApiModuleName.Data;
+    using $ApiRootNamespace;
+    using Data = $ApiRootNamespace.Data;
     //
     //using gShell.dotNet.Utilities;
     //using gShell.dotNet.Utilities.OAuth2;
-    using g$ApiCanonicalName = gShell.dotNet.$ApiCanonicalName;
+    using g$ApiName = gShell.dotNet.$ApiName;
 
     /// <summary>
-    /// A PowerShell-ready wrapper for the $ApiCanonicalName api, as well as the resources and methods therein.
+    /// A PowerShell-ready wrapper for the $ApiName api, as well as the resources and methods therein.
     /// </summary>
-    public abstract class $ApiCanonicalName : OAuth2CmdletBase
+    public abstract class $ApiNameBase : StandardParamsCmdletBase
     {
 
         #region Properties and Constructor
 
         /// <summary>The gShell dotNet class wrapper base.</summary>
-        protected static g$ApiCanonicalName mainBase { get; set; }
+        protected static g$ApiName mainBase { get; set; }
 
         /// <summary>
         /// Required to be able to store and retrieve the mainBase from the ServiceWrapperDictionary
         /// </summary>
-        protected override Type mainBaseType { get { return typeof($ApiCanonicalName); } }
+        protected override Type mainBaseType { get { return typeof(g$ApiName); } }
 
 $ResourcesAsProperties
 
-        protected $ApiCanonicalName()
+        protected $ApiName()
         {
-            mainBase = new g$ApiCanonicalName();
+            mainBase = new g$ApiName();
 
             ServiceWrapperDictionary[mainBaseType] = mainBase;
             
@@ -308,7 +361,7 @@ $ResourceInstantiatons
 
         #region Wrapped Methods
 
-        $ResourceWrappedMethods
+$ResourceWrappedMethods
 
         #endregion
 
@@ -424,10 +477,20 @@ function Write-DNSW_MethodSignatureParams ($Method, $Level=0, [bool]$RequiredOnl
     }
 
     if ($IncludePropertiesObject -eq $true -and $Method.Parameters.Required -contains $False) {
-        $Params.Add(("{0}{1}Properties Properties = null" -f $Method.Resource.Name, $Method.Name)) | Out-Null
+        if ($NameOnly) {
+            $Params.Add(("Properties")) | Out-Null
+        } else {
+            $Params.Add(("{0}{1}Properties Properties = null" -f $Method.Resource.Name, $Method.Name)) | Out-Null
+        }
     }
 
-    if ($IncludeStandardQueryParams -eq $true) {$Params.Add("StandardQueryParameters StandardQueryParams = null") | Out-Null}
+    if ($IncludeStandardQueryParams -eq $true) {
+        if ($NameOnly) {
+            $Params.Add("StandardQueryParams") | Out-Null
+        } else {
+            $Params.Add("StandardQueryParameters StandardQueryParams = null") | Out-Null
+        }
+    }
 
     $result = $Params -join ", "
 
@@ -691,13 +754,13 @@ function Write-DNSW_Resources ($Resources, $Level=0) {
 #write the entire DNSW resource file content
 function Write-DNSW ($Resource, $Level=0) {
     $ApiRootNamespace = $Api.RootNamespace
-    $ApiCanonicalName = ConvertTo-FirstUpper ($Api.DiscoveryObj.canonicalName -replace " ","")
-    $ApiCanonicalNameService = $ApiCanonicalName + "Service"
-    $ApiCanonicalVersion = $Api.DiscoveryObj.version
-    $ApiClassNameBase = $ApiCanonicalName + "Base"
+    $ApiName = $Api.Name #ConvertTo-FirstUpper ($Api.DiscoveryObj.canonicalName -replace " ","")
+    $ApiNameService = $ApiName + "Service"
+    $ApiVersion = $Api.DiscoveryObj.version
+    $ApiClassNameBase = $ApiName + "Base"
     $ApiVersionNoDots = $Api.NameAndVersion -replace "[.]","_"
     $ApiModuleName = $Api.RootNamespace + "." + $ApiVersionNoDots
-    $ApiNameAndVersion = $Api.DiscoveryObj.name + ":" + $ApiCanonicalVersion
+    $ApiNameAndVersion = $Api.DiscoveryObj.name + ":" + $ApiVersion
 
     $ResourcesAsProperties = Write-DNSW_ResourcesAsProperties $Api.Resources -Level 2
     $ResourceInstantiatons = Write-DNSW_ResourceInstantiations $Api.Resources -Level 3
@@ -730,18 +793,18 @@ namespace gShell.dotNet
     using $ApiRootNamespace;
     using Data = $ApiRootNamespace.Data;
 
-    /// <summary>The dotNet gShell version of the $ApiCanonicalName api.</summary>
-    public class $ApiCanonicalName : ServiceWrapper<$ApiCanonicalNameService>, IServiceWrapper<Google.Apis.Services.IClientService>
+    /// <summary>The dotNet gShell version of the $ApiName api.</summary>
+    public class $ApiName : ServiceWrapper<$ApiNameService>, IServiceWrapper<Google.Apis.Services.IClientService>
     {
         protected override bool worksWithGmail { get { return $WorksWithGmail; } }
 
-        /// <summary>Creates a new $ApiCanonicalVersion.$ApiCanonicalName service.</summary>
+        /// <summary>Creates a new $ApiVersion.$ApiName service.</summary>
         /// <param name="domain">The domain to which this service will be authenticated.</param>
         /// <param name="authInfo">The authenticated AuthInfo for this user and domain.</param>
         /// <param name="gShellServiceAccount">The optional email address the service account should impersonate.</param>
-        protected override $ApiCanonicalNameService CreateNewService(string domain, AuthenticatedUserInfo authInfo$CreateServiceServiceAccountSignature)
+        protected override $ApiNameService CreateNewService(string domain, AuthenticatedUserInfo authInfo$CreateServiceServiceAccountSignature)
         {
-            return new $ApiCanonicalNameService.$ApiClassNameService(OAuth2Base.GetInitializer(domain, authInfo$CreateServiceServiceAccount));
+            return new $ApiNameService.$ApiClassNameService(OAuth2Base.GetInitializer(domain, authInfo$CreateServiceServiceAccount));
         }
 
         /// <summary>Returns the api name and version in {name}:{version} format.</summary>
@@ -751,7 +814,7 @@ namespace gShell.dotNet
 
 $ResourcesAsProperties
 
-        public $ApiCanonicalName()
+        public $ApiName()
         {
 $ResourceInstantiatons
         }
@@ -774,9 +837,11 @@ $ResourceClasses
 
 
 
-$RestJson = Load-RestJsonFile admin directory_v1
-#$RestJson = Load-RestJsonFile admin reports_v1
+#$RestJson = Load-RestJsonFile admin directory_v1
+$RestJson = Load-RestJsonFile admin reports_v1
 #$RestJson = Load-RestJsonFile discovery v1
+#$RestJson = Load-RestJsonFile gmail v1
+
 $LibraryIndex = Get-JsonIndex $LibraryIndexRoot
 $Api = Invoke-GShellReflection $RestJson $LibraryIndex
 
@@ -786,4 +851,4 @@ $Methods = $Resource.Methods
 $Method = $Methods[1]
 $M = $Method
 
-write-dnc $Api | Out-File $env:USERPROFILE\Desktop\gentest.cs -Force
+((write-dnc $Api) + "`r`n`r`n`r`n`r`n" + (write-dnsw $Api) ) | Out-File $env:USERPROFILE\Desktop\gentest.cs -Force

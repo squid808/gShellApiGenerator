@@ -2,6 +2,7 @@
 #TODO: make each write method take in an [indent] level param to determine indents, and handle tabbing and wrapping before returning?
 #TODO: incorporate set-indent and wrap-text?
 #TODO: determine impact of ApiVersionNoDots on APIs that have underscores already - what are their namespaces?
+#TODO: fix indenting in middle of quote
 
 <#
 
@@ -19,13 +20,31 @@ sections of code:
 
 #region Helpers
 
+function Get-CharCountInString([string]$String, $Char) {
+    $result = 0
+    
+    for ($i = 0; $i -lt $String.Length; $i++) {
+        if ($String[$i] -eq $Char) {
+            $result++
+        }
+    }
+
+    return $result
+}
+
 #take in a block of text and wrap any lines longer than 120 lines
 function Wrap-Text ($Text, $Level=0, $Padding=0, $PrependText=$null) {
     $lines =  $Text -split "`r`n"
 
     for ($l = 0; $l -lt $lines.Count; $l++){
         if ($lines[$l].Length -gt 120) {
-            for ($i = 119; $i -ge 0; $i--) {
+            $StartInd = 119
+            
+            if ((Get-CharCountInString $lines[$l].Substring(0,$StartInd) '"')%2 -eq 1){
+                $StartInd = $lines[$l].Substring(0,$StartInd).LastIndexOf('"')
+            }
+
+            for ($i = $StartInd; $i -ge 0; $i--) {
                 if ($lines[$l][$i] -match "[ \)\],]") {
                     $matches = $null
                     if ($Level -eq 0) {
@@ -516,6 +535,12 @@ function Write-DNSW_MethodPropertyObj ($Method, $Level=0) {
                 -f $P.Type, $P.Name, $InitValue,  $P.Description)) | Out-Null
         }
 
+        if ($Method.HasPagedResults -eq $true) {
+            $Params.Add("/// <summary>A delegate that is used to start a progress bar.</summary> #TODO HERE
+                public Action<string, string> StartProgressBar = null;") | Out-Null
+            $Params.Add("{%T}    properties.UpdateProgressBar = UpdateProgressBar;") | Out-Null
+        }
+
         $pText = $Params -join "`r`n`r`n"
 
         $ObjName = $Method.Resource.Name + $Method.Name + "Properties"
@@ -804,7 +829,7 @@ namespace gShell.dotNet
         /// <param name="gShellServiceAccount">The optional email address the service account should impersonate.</param>
         protected override $ApiNameService CreateNewService(string domain, AuthenticatedUserInfo authInfo$CreateServiceServiceAccountSignature)
         {
-            return new $ApiNameService.$ApiClassNameService(OAuth2Base.GetInitializer(domain, authInfo$CreateServiceServiceAccount));
+            return new $ApiNameService(OAuth2Base.GetInitializer(domain, authInfo$CreateServiceServiceAccount));
         }
 
         /// <summary>Returns the api name and version in {name}:{version} format.</summary>

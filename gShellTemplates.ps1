@@ -78,6 +78,10 @@ function Set-Indent ([string]$String, [int]$TabCount, [string]$TabPlaceholder = 
     return ($String -replace $TabPlaceholder,("    "*$TabCount))
 }
 
+function Get-ParentResourceChain ($Method, $JoinChar = ".") {
+    #TODO!
+}
+
 $GeneralFileHeader = @"
 // gShell is licensed under the GNU GENERAL PUBLIC LICENSE, Version 3
 //
@@ -121,6 +125,40 @@ $GeneralFileHeader = @"
 
 #region gShell.Cmdlets.[API] - wrapped method calls (DNC - Dot Net Cmdlets)
 
+#The method signature parameters 
+function Write-DNC_MethodSignatureParams ($Method, $Level=0, [bool]$NameOnly=$false) {
+    $Params = New-Object System.Collections.ArrayList
+
+    foreach ($P in $Method.Parameters){
+        if ($P.Required -eq $true){
+            if ($NameOnly -ne $true) {
+                $Params.Add(("{0} {1}" -f $P.Type, $P.Name)) | Out-Null
+            } else {
+                $Params.Add($P.Name) | Out-Null
+            }
+        }
+    }
+
+    if  ($Method.Parameters.Required -contains $False) {
+        if ($NameOnly) {
+            $Params.Add(("Properties")) | Out-Null
+        } else {
+            $Params.Add(("g{0}.{1}.{2}{3}Properties Properties = null" -f $Method.Resource.Api.Name, $Method.Resource.Name, `
+                $Method.Resource.Name, $Method.Name)) | Out-Null
+        }
+    }
+
+    if ($NameOnly) {
+        $Params.Add("StandardQueryParams") | Out-Null
+    } else {
+        $Params.Add("StandardQueryParameters StandardQueryParams = null") | Out-Null
+    }
+
+    $result = $Params -join ", "
+
+    return $result
+}
+
 #write a single wrapped method
 function Write-DNC_Method ($Method, $Level=0) {
     $MethodName = $Method.Name
@@ -131,7 +169,7 @@ function Write-DNC_Method ($Method, $Level=0) {
     }
 
     $PropertiesObj = if ($Method.Parameters.Count -ne 0) {
-        Write-DNSW_MethodSignatureParams $Method -RequiredOnly $true -IncludeStandardQueryParams $true -IncludePropertiesObject $true
+        Write-DNC_MethodSignatureParams $Method
     }
        
     $sections = New-Object System.Collections.ArrayList
@@ -159,9 +197,10 @@ function Write-DNC_Method ($Method, $Level=0) {
     }
 
     $ReturnProperties = if ($Method.Parameters.Count -ne 0) {
-        Write-DNSW_MethodSignatureParams $Method -RequiredOnly $true -IncludeStandardQueryParams $true `
-            -IncludePropertiesObject $true -NameOnly $true
+        Write-DNC_MethodSignatureParams $Method  -NameOnly $true
     }
+
+    $ParentResourcePath = 
 
     $Return = "`{{%T}}    {0}mainBase.{1}.{2}({3});" -f $resultReturn, $method.Resource.NameLower, $Method.Name, $ReturnProperties
 
@@ -334,6 +373,7 @@ function Write-DNC ($Api, $Level=0) {
 $GeneralFileHeader
 using gShell.Cmdlets.Utilities.OAuth2;
 using gShell.dotNet;
+using gShell.dotNet.Utilities.OAuth2;
 
 using System;
 using System.Collections.Generic;
@@ -817,14 +857,14 @@ function Write-DNSW ($Resource, $Level=0) {
     $dotNetBlock = @"
 $GeneralFileHeader
 
-using System;
-using System.Collections.Generic;
-
-using gShell.dotNet;
-using gShell.dotNet.Utilities.OAuth2;
-
-using $ApiRootNamespace;
-using Data = $ApiRootNamespace.Data;
+#using System;
+#using System.Collections.Generic;
+#
+#using gShell.dotNet;
+#using gShell.dotNet.Utilities.OAuth2;
+#
+#using $ApiRootNamespace;
+#using Data = $ApiRootNamespace.Data;
 
 namespace gShell.dotNet
 {
@@ -887,4 +927,4 @@ $Methods = $Resource.Methods
 $Method = $Methods[1]
 $M = $Method
 
-((write-dnc $Api) + "`r`n`r`n`r`n`r`n" + (write-dnsw $Api) ) | Out-File $env:USERPROFILE\Desktop\gentest.cs -Force
+((write-dnc $Api) + "`r`n`r`n`r`n`r`n" + (write-dnsw $Api) ) | Out-File $env:USERPROFILE\Documents\gShell\gShell\gShell\dotNet\Directory\Google.Apis.admin.Directory.directory_v1_gshell_dotnet.cs -Force

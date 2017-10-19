@@ -78,8 +78,26 @@ function Set-Indent ([string]$String, [int]$TabCount, [string]$TabPlaceholder = 
     return ($String -replace $TabPlaceholder,("    "*$TabCount))
 }
 
-function Get-ParentResourceChain ($Method, $JoinChar = ".") {
-    #TODO!
+#Returns a parent resource chain, if any exists. if the given object is top-level, result is blank
+function Get-ParentResourceChain ($MethodOrResource, $JoinChar = ".", [bool]$UpperCase=$true) {
+    if ($MethodOrResource.ParentResource -ne $null) {
+        $ChainFromParent = (Get-ParentResourceChain $MethodOrResource.ParentResource `
+            -JoinChar $JoinChar -UpperCase $UpperCase)
+        
+        $Name = if ($UpperCase -eq $true){ 
+            $MethodOrResource.ParentResource.Name 
+        } else {
+            $MethodOrResource.ParentResource.NameLower
+        }
+
+        if ($ChainFromParent -ne $null) {
+            $result = $ChainFromParent, $Name -join $JoinChar
+        } else {
+            $result = $Name
+        }
+    }
+
+    return $result
 }
 
 $GeneralFileHeader = @"
@@ -143,7 +161,8 @@ function Write-DNC_MethodSignatureParams ($Method, $Level=0, [bool]$NameOnly=$fa
         if ($NameOnly) {
             $Params.Add(("Properties")) | Out-Null
         } else {
-            $Params.Add(("g{0}.{1}.{2}{3}Properties Properties = null" -f $Method.Resource.Api.Name, $Method.Resource.Name, `
+            $Params.Add(("g{0}.{1}.{2}{3}Properties Properties = null" -f `
+                $Method.Resource.Api.Name, (Get-ParentResourceChain $Method), `
                 $Method.Resource.Name, $Method.Name)) | Out-Null
         }
     }
@@ -182,7 +201,8 @@ function Write-DNC_Method ($Method, $Level=0) {
 "@)) | Out-Null
 
     if ($Method.HasPagedResults -eq $true -or $Method.Parameters.Required -contains $False) {
-        $PropertiesObjFullName = "g{0}.{1}.{1}{2}Properties" -f (ConvertTo-FirstUpper ($Api.DiscoveryObj.canonicalName -replace " ","")),
+        $PropertiesObjFullName = "g{0}.{1}.{2}{3}Properties" -f `
+            $Api.Name, (Get-ParentResourceChain $Method),
             $Method.Resource.Name, $Method.Name
         $sections.Add("{%T}    Properties = Properties ?? new $PropertiesObjFullName();") | Out-Null
     }
@@ -200,9 +220,9 @@ function Write-DNC_Method ($Method, $Level=0) {
         Write-DNC_MethodSignatureParams $Method  -NameOnly $true
     }
 
-    $ParentResourcePath = 
+    $ParentResourceChain = Get-ParentResourceChain $Method -UpperCase $False
 
-    $Return = "`{{%T}}    {0}mainBase.{1}.{2}({3});" -f $resultReturn, $method.Resource.NameLower, $Method.Name, $ReturnProperties
+    $Return = "`{{%T}}    {0}mainBase.{1}.{2}({3});" -f $resultReturn, $ParentResourceChain, $Method.Name, $ReturnProperties
 
     if ($Method.HasPagedResults -eq $true -or $Method.Parameters.Required -contains $False) {
         $Return = "`r`n" + $Return
@@ -672,7 +692,8 @@ function Write-DNSW_Method ($Method, $Level=0) {
 
     $requestParams = Write-DNSW_MethodSignatureParams $Method -RequiredOnly $true -NameOnly $true
 
-    $request = "var request = GetService().{0}.{1}($requestParams);" -f $Method.Resource.Name, $Method.name
+    $request = "var request = GetService().{0}.{1}($requestParams);" -f `
+        (Get-ParentResourceChain $Method), $Method.name
 
     $sections.Add((@"
 {%T}public $MethodReturnType $MethodName ($PropertiesObj)
@@ -857,14 +878,14 @@ function Write-DNSW ($Resource, $Level=0) {
     $dotNetBlock = @"
 $GeneralFileHeader
 
-#using System;
-#using System.Collections.Generic;
-#
-#using gShell.dotNet;
-#using gShell.dotNet.Utilities.OAuth2;
-#
-#using $ApiRootNamespace;
-#using Data = $ApiRootNamespace.Data;
+//using System;
+//using System.Collections.Generic;
+//
+//using gShell.dotNet;
+//using gShell.dotNet.Utilities.OAuth2;
+//
+//using $ApiRootNamespace;
+//using Data = $ApiRootNamespace.Data;
 
 namespace gShell.dotNet
 {
@@ -913,8 +934,11 @@ $ResourceClasses
 
 
 
-$RestJson = Load-RestJsonFile admin directory_v1
-#$RestJson = Load-RestJsonFile admin reports_v1
+#$RestJson = Load-RestJsonFile admin directory_v1
+#$Path = "Directory\Google.Apis.admin.Directory.directory_v1_gshell_dotnet.cs"
+
+$RestJson = Load-RestJsonFile admin reports_v1
+$Path = "Reports\Google.Apis.admin.Reports.reports_v1_gshell_dotnet.cs"
 #$RestJson = Load-RestJsonFile discovery v1
 #$RestJson = Load-RestJsonFile gmail v1
 
@@ -927,4 +951,4 @@ $Methods = $Resource.Methods
 $Method = $Methods[1]
 $M = $Method
 
-((write-dnc $Api) + "`r`n`r`n`r`n`r`n" + (write-dnsw $Api) ) | Out-File $env:USERPROFILE\Documents\gShell\gShell\gShell\dotNet\Directory\Google.Apis.admin.Directory.directory_v1_gshell_dotnet.cs -Force
+((write-dnc $Api) + "`r`n`r`n`r`n`r`n" + (write-dnsw $Api) ) | Out-File $env:USERPROFILE\Documents\gShell\gShell\gShell\dotNet\$Path -Force

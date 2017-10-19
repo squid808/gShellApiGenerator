@@ -136,6 +136,9 @@ Remarks - The api method call is broken up in to two parts in the underlying cod
     #Reference to the container resource
     $Resource
 
+    #Reference to the container resource
+    $ParentResource
+
     #The name of the method derived from the Virtual method
     $Name
 
@@ -176,6 +179,7 @@ Remarks - The api method call is broken up in to two parts in the underlying cod
 function New-ApiMethod ([ApiResource]$Resource, $Method) {
     $M = New-Object ApiMethod
     $M.Resource = $Resource
+    $M.ParentResource = $Resource
     $M.ReflectedObj = $Method
     $M.DiscoveryObj = $Resource.DiscoveryObj.methods.($Method.name)
 

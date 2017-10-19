@@ -44,13 +44,14 @@ class Api {
     $NameLower
     $NameAndVersion
     $NameAndVersionLower
-    $Resources = (New-Object system.collections.arraylist)
+    $Resources = (New-Object System.Collections.ArrayList)
     $ResourcesDict = @{}
     $RootNamespace
     $DataNamespace
     $Version
     $ReflectedObj
     $DiscoveryObj
+    $SchemaObjectsUsed = (New-Object System.Collections.ArrayList)
 }
 
 function New-Api ([System.Reflection.Assembly]$Assembly, $RestJson) {
@@ -233,7 +234,7 @@ function New-ApiMethod ([ApiResource]$Resource, $Method) {
 
     $M.HasBodyParameter = $M.Parameters.name -contains "body"
     if ($M.HasBodyParameter -eq $true) {
-        $M.BodyParameter = $M.Parameters | where name -eq "body"
+        $M.BodyParameter = New-ApiClass $M.ParametersDict.Body
     }
 
     return $M
@@ -328,6 +329,45 @@ function New-ApiMethodProperty ([ApiMethod]$Method, $Property, [bool]$ForceRequi
     $P.Required = if ($ForceRequired -eq $true) {$true} else {[bool]($P.DiscoveryObj.required)}
 
     return $P
+}
+
+class ApiClass {
+    $Api
+    $Name
+    $NameLower
+    $Type
+    $TypeData
+    $Properties = (New-Object System.Collections.ArrayList)
+    $Description
+    #This class's reflected representation
+    $ReflectedObj
+
+    #This class's discovery API representation
+    $DiscoveryObj
+}
+
+function New-ApiClass ($Parameter) {
+    $ReflectedObj = $Parameter.ReflectedObj
+    $C = New-Object ApiClass
+    $C.Api = $Parameter.Method.Resource.Api
+    $C.DiscoveryObj = $C.Api.DiscoveryObj.schemas.($Parameter.ReflectedObj.ParameterType.Name)
+    $C.ReflectedObj = $Parameter.ReflectedObj
+    $C.Name = $ReflectedObj.Name
+    $C.NameLower = ConvertTo-FirstLower $C.Name
+    $C.Type = $ReflectedObj.ParameterType.Name
+    $C.TypeData = "Data." + $C.Type
+    foreach ($Property in ($ReflectedObj.ParameterType.DeclaredProperties)) {
+        $P = New-Object ApiMethodProperty
+        $P.Name = $Property.Name
+        $P.DiscoveryObj = $C.DiscoveryObj.properties.($P.Name)
+        $P.ReflectedObj = $Property
+        $P.Type = Get-ApiPropertyTypeShortName $Property.PropertyType
+        $P.Description = $P.DiscoveryObj.Description
+        $C.Properties.Add($P) | Out-Null
+    }
+    $C.Description = $C.DiscoveryObj.description
+
+    return $C
 }
 
 #endregion

@@ -144,7 +144,229 @@ $GeneralFileHeader = @"
 #endregion
 
 
-#region Cmdlets
+#region MC (Method Cmdlets)
+
+$VerbsDict = @{
+    "Add"= "VerbsCommon.Add"
+    "Clear"= "VerbsCommon.Clear"
+    "Close"= "VerbsCommon.Close"
+    "Copy"= "VerbsCommon.Copy"
+    "Enter"= "VerbsCommon.Enter"
+    "Exit"= "VerbsCommon.Exit"
+    "Find"= "VerbsCommon.Find"
+    "Format"= "VerbsCommon.Format"
+    "Get"= "VerbsCommon.Get"
+    "Hide"= "VerbsCommon.Hide"
+    "Join"= "VerbsCommon.Join"
+    "Lock"= "VerbsCommon.Lock"
+    "Move"= "VerbsCommon.Move"
+    "New"= "VerbsCommon.New"
+    "Open"= "VerbsCommon.Open"
+    "Pop"= "VerbsCommon.Pop"
+    "Push"= "VerbsCommon.Push"
+    "Redo"= "VerbsCommon.Redo"
+    "Remove"= "VerbsCommon.Remove"
+    "Rename"= "VerbsCommon.Rename"
+    "Reset"= "VerbsCommon.Reset"
+    "Search"= "VerbsCommon.Search"
+    "Select"= "VerbsCommon.Select"
+    "Set"= "VerbsCommon.Set"
+    "Show"= "VerbsCommon.Show"
+    "Skip"= "VerbsCommon.Skip"
+    "Split"= "VerbsCommon.Split"
+    "Step"= "VerbsCommon.Step"
+    "Switch"= "VerbsCommon.Switch"
+    "Undo"= "VerbsCommon.Undo"
+    "Unlock"= "VerbsCommon.Unlock"
+    "Watch"= "VerbsCommon.Watch"
+
+    "Connect"= "VerbsCommunications.Connect"
+    "Disconnect"= "VerbsCommunications.Disconnect"
+    "Read"= "VerbsCommunications.Read"
+    "Receive"= "VerbsCommunications.Receive"
+    "Send"= "VerbsCommunications.Send"
+    "Write"= "VerbsCommunications.Write"
+
+    "Backup"= "VerbsData.Backup"
+    "Checkpoint"= "VerbsData.Checkpoint"
+    "Compare"= "VerbsData.Compare"
+    "Compress"= "VerbsData.Compress"
+    "Convert"= "VerbsData.Convert"
+    "ConvertFrom"= "VerbsData.ConvertFrom"
+    "ConvertTo"= "VerbsData.ConvertTo"
+    "Dismount"= "VerbsData.Dismount"
+    "Edit"= "VerbsData.Edit"
+    "Expand"= "VerbsData.Expand"
+    "Export"= "VerbsData.Export"
+    "Group"= "VerbsData.Group"
+    "Import"= "VerbsData.Import"
+    "Initialize"= "VerbsData.Initialize"
+    "Limit"= "VerbsData.Limit"
+    "Merge"= "VerbsData.Merge"
+    "Mount"= "VerbsData.Mount"
+    "Out"= "VerbsData.Out"
+    "Publish"= "VerbsData.Publish"
+    "Restore"= "VerbsData.Restore"
+    "Save"= "VerbsData.Save"
+    "Sync"= "VerbsData.Sync"
+    "Unpublish"= "VerbsData.Unpublish"
+    "Update"= "VerbsData.Update"
+
+    "Debug"= "VerbsDiagnostic.Debug"
+    "Measure"= "VerbsDiagnostic.Measure"
+    "Ping"= "VerbsDiagnostic.Ping"
+    "Repair"= "VerbsDiagnostic.Repair"
+    "Resolve"= "VerbsDiagnostic.Resolve"
+    "Test"= "VerbsDiagnostic.Test"
+    "Trace"= "VerbsDiagnostic.Trace"
+
+    "Approve"= "VerbsLifecycle.Approve"
+    "Assert"= "VerbsLifecycle.Assert"
+    "Complete"= "VerbsLifecycle.Complete"
+    "Confirm"= "VerbsLifecycle.Confirm"
+    "Deny"= "VerbsLifecycle.Deny"
+    "Disable"= "VerbsLifecycle.Disable"
+    "Enable"= "VerbsLifecycle.Enable"
+    "Install"= "VerbsLifecycle.Install"
+    "Invoke"= "VerbsLifecycle.Invoke"
+    "Register"= "VerbsLifecycle.Register"
+    "Request"= "VerbsLifecycle.Request"
+    "Restart"= "VerbsLifecycle.Restart"
+    "Resume"= "VerbsLifecycle.Resume"
+    "Start"= "VerbsLifecycle.Start"
+    "Stop"= "VerbsLifecycle.Stop"
+    "Submit"= "VerbsLifecycle.Submit"
+    "Suspend"= "VerbsLifecycle.Suspend"
+    "Uninstall"= "VerbsLifecycle.Uninstall"
+    "Unregister"= "VerbsLifecycle.Unregister"
+    "Wait"= "VerbsLifecycle.Wait"
+
+    "Block"= "VerbsSecurity.Block"
+    "Grant"= "VerbsSecurity.Grant"
+    "Protect"= "VerbsSecurity.Protect"
+    "Revoke"= "VerbsSecurity.Revoke"
+    "Unblock"= "VerbsSecurity.Unblock"
+    "Unprotect"= "VerbsSecurity.Unprotect"
+
+    "Use"= "VerbsOther.Use"
+}
+
+function Get-McVerb ($VerbInput) {
+    if ($VerbsDict.ContainsKey($VerbInput)) {
+        $FullVerb = $VerbsDict[($VerbInput)]
+        return $FullVerb.Split(".")[1]
+    }
+
+    return $VerbInput
+}
+
+function Get-MCAttributeVerb ($VerbInput) {
+    if ($VerbsDict.ContainsKey($VerbInput)) {
+        return $VerbsDict[($VerbInput)]
+    }
+
+    return "`"$VerbInput`""
+}
+
+function Write-MCAttribute ($Method) {
+    $Verb = Get-MCAttributeVerb $Method.Name
+    $Noun = $Method.Resource.Api.Name
+    $DocLink = $Method.Resource.Api.DiscoveryObj.documentationLink
+
+    $text = @"
+[Cmdlet($Verb, "G$Noun", SupportsShouldProcess = true, HelpUri = @"$DocLink")]
+"@
+
+    return $text
+}
+
+function Write-MCProperty ($Property, $Position = $null, [bool]$AsBodyParameter = $false) {
+    
+    $PropertyDescription = $Property.Description
+
+    if ($AsBodyParameter -eq $true) {
+        $PropertyType = $Property.TypeData
+        $PropertyName = $Property.Type + "Body"
+        $PropertyRequired = "true"
+    } else {
+        $PropertyType = $Property.Type
+        $PropertyName = $Property.Name
+        $PropertyRequired = $Property.Required.ToString().ToLower()
+    }
+
+    $Summary = "/// <summary> {0} </summary>" -f $PropertyDescription
+
+    if ($Position -ne $null) { $Position = "`r`n{%T}    Position = $Position," }
+
+    $text = @"
+$Summary
+{%T}[Parameter(Mandatory = $PropertyRequired,$Position
+{%T}    ValueFromPipelineByPropertyName = true,
+{%T}    HelpMessage = "$PropertyDescription")]
+{%T}public $PropertyType $PropertyName { get; set; }
+"@
+
+    return $text
+
+}
+
+function Write-MCProperies ($Method) {
+    $PropertyTexts = New-Object System.Collections.ArrayList
+    
+    $PositionInt = 0
+
+    foreach ($Property in ($Method.Parameters | where {$_.Required -eq $true -and `
+            $_.Name -ne "Body"})) {
+        $PropertyText = Write-MCProperty $Property $PositionInt
+        if (-not [string]::IsNullOrWhiteSpace($PropertyText)){
+            $PropertyTexts.Add($PropertyText) | Out-Null
+            $PositionInt++
+        }
+    }
+
+    if ($Method.HasBodyParameter -eq $true) {
+        $BodyText = Write-MCProperty $Method.BodyParameter $PositionInt -AsBodyParameter $true
+        $PropertyTexts.Add($BodyText) | Out-Null
+        $PositionInt++
+    } 
+
+    $Text = $PropertyTexts -join "`r`n`r`n"
+
+    return $Text
+}
+
+function Write-MC ($Method) {
+    $Verb = Get-McVerb $Method.Name
+    $Noun = "G" + $Method.Resource.Api.Name
+    $CmdletCommand = "{0}{1}Command" -f $Verb,$Noun
+    $CmdletBase = $Noun + "Base"
+    $ResourceName = $Resource.Name
+
+    $CmdletAttribute = Write-MCAttribute $Method
+    $Properties = Write-MCProperies $Method
+
+    $text = @"
+{%T}$CmdletAttribute
+{%T}public class $CmdletCommand : $CmdletBase
+{%T}{
+{%T}    #region Properties
+
+$Properties
+
+{%T}    #endregion
+
+{%T}    protected override void ProcessRecord()
+{%T}    {
+{%T}        if (ShouldProcess("$Noun $ResourceName", "$Verb-$Noun"))
+{%T}        {
+{%T}            WriteObject(users.Watch(WatchRequestBody, UserId, ServiceAccount: gShellServiceAccount, StandardQueryParams: StandardQueryParams));
+{%T}        }
+{%T}    }
+{%T}}
+"@
+
+    return $text
+}
 
 #endregion
 
@@ -971,11 +1193,13 @@ $Api = Invoke-GShellReflection $RestJson $LibraryIndex
 $Resources = $Api.Resources
 $Resource = $Resources[0]
 $Methods = $Resource.Methods
-$Method = $Methods[1]
+$Method = $Methods[2]
 $M = $Method
-
-$F = $Api.ResourcesDict.Users.ChildResourcesDict.Settings.ChildResourcesDict.ForwardingAddresses.MethodsDict.Create
+#
+#$F = $Api.ResourcesDict.Users.ChildResourcesDict.Settings.ChildResourcesDict.ForwardingAddresses.MethodsDict.Create
 
 #wrap-text (set-indent (Write-DNSW_MethodComments $F) 0)
 
-((write-dnc $Api) + "`r`n`r`n`r`n`r`n" + (write-dnsw $Api) ) | Out-File $env:USERPROFILE\Documents\gShell\gShell\gShell\dotNet\$Path -Force
+#((write-dnc $Api) + "`r`n`r`n`r`n`r`n" + (write-dnsw $Api) ) | Out-File $env:USERPROFILE\Documents\gShell\gShell\gShell\dotNet\$Path -Force
+
+wrap-text (set-indent (Write-MC $Method) 0)

@@ -3,6 +3,8 @@
 #TODO: incorporate set-indent and wrap-text?
 #TODO: determine impact of ApiVersionNoDots on APIs that have underscores already - what are their namespaces?
 #TODO: fix indenting in middle of quote
+#TODO: remove need for StandardParamsCmdletBase by implementing a root class for each API that contains the respective standard params, if any
+
 
 <#
 
@@ -98,6 +100,12 @@ function Get-ParentResourceChain ($MethodOrResource, $JoinChar = ".", [bool]$Upp
     }
 
     return $result
+}
+
+#Repairs comment strings such that empty lines and line breaks are replaced with ///
+function Format-CommentString ($String) {
+    $fixed = $string -replace "(?<=[\r\n])","///"
+    return $fixed
 }
 
 $GeneralFileHeader = @"
@@ -389,6 +397,16 @@ function Write-DNC ($Api, $Level=0) {
     $ResourceInstantiatons = Write-DNSW_ResourceInstantiations $Api.Resources -Level 3
     $ResourceWrappedMethods = Write-DNC_Resources $Api.Resources -Level 2
 
+    $baseClassType = if (-not (Has-ObjProperty $Api.DiscoveryObj "auth")){
+        "OAuth2CmdletBase"
+    } elseif (-not ($Api.RootNamespace.StartsWith("Google.Apis.admin"))) {
+        "ServiceAccountCmdletBase"
+    } elseif ((Has-ObjProperty $Api.DiscoveryObj "parameters")) {
+        "StandardParamsCmdletBase"
+    } else {
+        "AuthenticatedCmdletBase"
+    }
+
     $text = @"
 $GeneralFileHeader
 using gShell.Cmdlets.Utilities.OAuth2;
@@ -415,7 +433,7 @@ namespace gShell.Cmdlets.$ApiName {
     /// <summary>
     /// A PowerShell-ready wrapper for the $ApiName api, as well as the resources and methods therein.
     /// </summary>
-    public abstract class $ApiNameBase : StandardParamsCmdletBase
+    public abstract class $ApiNameBase : $baseClassType
     {
 
         #region Properties and Constructor
@@ -594,7 +612,7 @@ function Write-DNSW_MethodPropertyObj ($Method, $Level=0) {
             }
 
             $Params.Add(("{{%T}}    /// <summary> {3} </summary>`r`n{{%T}}    public {0} {1} = {2};" `
-                -f $P.Type, $P.Name, $InitValue,  $P.Description)) | Out-Null
+                -f $P.Type, $P.Name, $InitValue,  (Format-CommentString $P.Description))) | Out-Null
         }
 
         if ($Method.HasPagedResults -eq $true) {
@@ -656,12 +674,13 @@ function Write-DNSW_MethodComments ($Method, $Level=0) {
     #params section
     $CommentsList = New-Object System.Collections.ArrayList
     
-    $summary = "{{%T}}/// <summary> {0} </summary>" -f $Method.Description
+    $summary = "{{%T}}/// <summary> {0} </summary>" -f (Format-CommentString $Method.Description)
 
     $CommentsList.Add($summary) | Out-Null
 
     foreach ($P in ($Method.Parameters | where Required -eq $true)){
-        $CommentsList.Add(("{{%T}}/// <param name=`"{0}`"> {1} </param>" -f $P.Name, $P.Description)) | Out-Null
+        $CommentsList.Add(("{{%T}}/// <param name=`"{0}`"> {1} </param>" -f $P.Name, `
+            (Format-CommentString $P.Description))) | Out-Null
     }
 
     if ($Method.Parameters.Required -contains $false) {
@@ -937,10 +956,14 @@ $ResourceClasses
 #$RestJson = Load-RestJsonFile admin directory_v1
 #$Path = "Directory\Google.Apis.admin.Directory.directory_v1_gshell_dotnet.cs"
 
-$RestJson = Load-RestJsonFile admin reports_v1
-$Path = "Reports\Google.Apis.admin.Reports.reports_v1_gshell_dotnet.cs"
+#$RestJson = Load-RestJsonFile admin reports_v1
+#$Path = "Reports\Google.Apis.admin.Reports.reports_v1_gshell_dotnet.cs"
+
 #$RestJson = Load-RestJsonFile discovery v1
-#$RestJson = Load-RestJsonFile gmail v1
+#$Path = "Discovery\Discovery.cs"
+
+$RestJson = Load-RestJsonFile gmail v1
+$Path = "Gmail\Google.Apis.Gmail.v1_gshell_dotnet.cs"
 
 $LibraryIndex = Get-JsonIndex $LibraryIndexRoot
 $Api = Invoke-GShellReflection $RestJson $LibraryIndex
@@ -950,5 +973,9 @@ $Resource = $Resources[0]
 $Methods = $Resource.Methods
 $Method = $Methods[1]
 $M = $Method
+
+$F = $Api.ResourcesDict.Users.ChildResourcesDict.Settings.ChildResourcesDict.ForwardingAddresses.MethodsDict.Create
+
+#wrap-text (set-indent (Write-DNSW_MethodComments $F) 0)
 
 ((write-dnc $Api) + "`r`n`r`n`r`n`r`n" + (write-dnsw $Api) ) | Out-File $env:USERPROFILE\Documents\gShell\gShell\gShell\dotNet\$Path -Force

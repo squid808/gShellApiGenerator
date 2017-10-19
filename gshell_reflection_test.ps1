@@ -45,6 +45,7 @@ class Api {
     $NameAndVersion
     $NameAndVersionLower
     $Resources = (New-Object system.collections.arraylist)
+    $ResourcesDict = @{}
     $RootNamespace
     $DataNamespace
     $Version
@@ -68,6 +69,7 @@ function New-Api ([System.Reflection.Assembly]$Assembly, $RestJson) {
     $api.NameAndVersionLower = ConvertTo-FirstLower $Api.NameAndVersion
 
     Get-Resources $api | % {$api.Resources.Add($_) | Out-Null}
+    $api.Resources | % {$api.ResourcesDict[$_.name] = $_}
 
     return $api
 }
@@ -76,6 +78,7 @@ class ApiResource {
     $Api
     $ParentResource
     $ChildResources = (New-Object System.Collections.ArrayList)
+    $ChildResourcesDict = @{}
     $DiscoveryObj
 
     $Name
@@ -83,6 +86,7 @@ class ApiResource {
     $FullName
     $Namespace
     $Methods = (New-Object System.Collections.ArrayList)
+    $MethodsDict = @{}
     $ReflectedObj
 }
 
@@ -111,12 +115,14 @@ function New-ApiResource ([Api]$Api, [System.Reflection.PropertyInfo]$Resource, 
         foreach ($CR in $t.DeclaredProperties) {
             $ChildR = New-ApiResource $Api $CR $R
             $R.ChildResources.Add($ChildR) | Out-Null
+            $R.ChildResourcesDict[$ChildR.Name] = $ChildR
         }
     }
 
     $Methods = Get-ApiResourceMethods $R $T
 
     $Methods | % {$R.Methods.Add($_) | Out-Null }
+    $Methods | % {$R.MethodsDict[$_.Name] = $_}
 
     return $R
 }
@@ -154,6 +160,9 @@ Remarks - The api method call is broken up in to two parts in the underlying cod
     #All parameters related to this API call - pulled out of both the virtual method and the request class
     $Parameters = (New-Object system.collections.arraylist)
 
+    #All parameters related to this API call in a dictionary
+    $ParametersDict = @{}
+
     #Parameters related to just the virtual method
     $VirtualParameters = (New-Object system.collections.arraylist)
 
@@ -189,7 +198,6 @@ function New-ApiMethod ([ApiResource]$Resource, $Method) {
     $M.ReturnType =  New-ApiMethodProperty $M (Get-ApiMethodReturnType $Method)
     
     if (Has-ObjProperty $M.DiscoveryObj "response") {
-        
         $M.ReturnType.Type = Get-ApiPropertyTypeShortName $M.ReturnType.ReflectedObj $M
     } else {
         $M.ReturnType.Type = "void"
@@ -217,6 +225,8 @@ function New-ApiMethod ([ApiResource]$Resource, $Method) {
             $M.RequestParameters.Add($Param) | Out-Null
         }
     }
+
+    $M.Parameters | % {$M.ParametersDict[$_.Name] = $_ }
 
     $M.HasPagedResults = $Method.ReturnType.DeclaredProperties.name -contains "PageToken" -and `
                             $M.ReturnType.ReflectedObject.DeclaredProperties.name -contains "NextPageToken"

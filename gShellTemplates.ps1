@@ -40,32 +40,60 @@ function Wrap-Text ($Text, $Level=0, $Padding=0, $PrependText=$null) {
 
     for ($l = 0; $l -lt $lines.Count; $l++){
         if ($lines[$l].Length -gt 120) {
+
             $StartInd = 119
+
+            $BreakInString = $false
             
+            $LineBreakPattern = "[\s\)\],]"
+
+            #if the break is in the middle of a string
             if ((Get-CharCountInString $lines[$l].Substring(0,$StartInd) '"')%2 -eq 1){
-                $StartInd = $lines[$l].Substring(0,$StartInd).LastIndexOf('"')
+                $IndexOfOddQuote = $lines[$l].Substring(0,$StartInd).LastIndexOf('"')
+                $StringSection = $lines[$l].Substring($IndexOfOddQuote+1, $StartInd-$IndexOfOddQuote-1)
+
+                if ($StringSection -match $LineBreakPattern) {
+                    $StartInd-=2
+                    $BreakInString = $true
+                } else {
+                    $StartInd = $IndexOfOddQuote
+                }
+            }
+            
+            #determine padding if not already calculated and provided
+            if ($level -eq 0 -and $padding -eq 0) {
+                if ($lines[$l] -match "[^\s]") {
+                    $padding = $lines[$l].IndexOf($matches[0])
+                }
             }
 
-            for ($i = $StartInd; $i -ge 0; $i--) {
-                if ($lines[$l][$i] -match "[ \)\],]") {
-                    $matches = $null
+            #go backwards until padding to see if we can make a break match
+            for ($i = $StartInd; $i -ge $Padding+1; $i--) {
+                if ($lines[$l][$i] -match $LineBreakPattern) {
+                    
+                    #set the recursive padding for any sub-lines
                     if ($Level -eq 0) {
-                        if ($lines[$l] -match "[^\s]") {
-                            $padding = $lines[$l].IndexOf($matches[0])
+                        $paddingplus = 4
+                    }
+
+                    #if this is a comment line make sure sub-lines have /// as well
+                    if ($lines[$l] -match "///\s") {
+                        $ToInsert = "`r`n{0}/// " -f (" "*$padding)
+                    } else {
+
+                        #handle breaking strings with a "" + ""
+                        if ($BreakInString -eq $true) {
+                            $ToInsert = "`"+`r`n{0}`"" -f (" "*($padding+$paddingplus))
                         } else {
-                            $padding = 0
+                            $ToInsert = "`r`n{0}" -f (" "*($padding+$paddingplus))
                         }
                     }
 
-                    if ($lines[$l] -match "///\s") {
-                        $lines[$l] = $lines[$l].Insert(($i+1), 
-                        ("`r`n{0}///  " -f (" "*$padding)))
-                    } else {
-                        $lines[$l] = $lines[$l].Insert(($i+1), 
-                        ("`r`n$PrependText{0}    " -f (" "*$padding)))
-                    }
+                    #insert the break string at the breakpoint
+                    $lines[$l] = $lines[$l].Insert(($i+1), $ToInsert)
 
-                    $lines[$l] = Wrap-Text $lines[$l] -Level ($Level+1) -Padding $padding
+                    $lines[$l] = Wrap-Text $lines[$l] -Level ($Level+1) -Padding ($padding+$paddingplus)
+                    
                     break;
                 }
             }
@@ -106,6 +134,18 @@ function Get-ParentResourceChain ($MethodOrResource, $JoinChar = ".", [bool]$Upp
 function Format-CommentString ($String) {
     $fixed = $string -replace "(?<=[\r\n])","///"
     return $fixed
+}
+
+function Test-StringHasContent ([string]$String) {
+    return (-not [string]::IsNullOrWhiteSpace($String))
+}
+
+Set-Alias -Name Test-String -Value Test-StringHasContent
+
+function Add-String ([System.Collections.ArrayList]$Collection, [string]$String) {
+    if (Test-String $String) {
+        $Collection.Add($string) | Out-Null
+    }
 }
 
 $GeneralFileHeader = @"
@@ -335,13 +375,14 @@ function Write-MCProperies ($Method) {
     return $Text
 }
 
-function Write-MC ($Method) {
+function Write-MCMethod ($Method) {
     $Verb = Get-McVerb $Method.Name
     $Noun = "G" + $Method.Resource.Api.Name
     $CmdletCommand = "{0}{1}Command" -f $Verb,$Noun
     $CmdletBase = $Noun + "Base"
-    $ResourceName = $Resource.Name
-
+    $ResourceParent = Get-ParentResourceChain -MethodOrResource $Method
+    $ResourceName = $Method.Resource.Name
+    
     $CmdletAttribute = Write-MCAttribute $Method
     $Properties = Write-MCProperies $Method
 
@@ -366,6 +407,71 @@ $Properties
 "@
 
     return $text
+
+}
+
+function Write-MCResource ($Resource) {
+
+    $MethodTexts = New-Object System.Collections.ArrayList
+
+    foreach ($Method in $Resource.Methods) {
+        $MText = Write-MCMethod $Method
+        Add-String $MethodTexts $MText
+    }
+
+    $MethodBlock = $MethodTexts -join "`r`n`r`n"
+
+    $text = @"
+namespace gShell {
+$MethodBlock
+}
+"@
+
+    return $text
+}
+
+function Write-MCResources ($Resources) {
+#should return with each resource in its own namespace at the same level?
+
+    $ResourceTexts = New-Object System.Collections.ArrayList
+
+    foreach ($Resource in $Resources) {
+        $RText = Write-MCResource $Resource
+        Add-String $ResourceTexts $RText
+
+        if ($Resource.ChildResources.Count -gt 0) {
+            $ChildResourcesText = Write-MCResources $Resource.ChildResources
+            Add-String $ResourceTexts $ChildResourcesText
+        }
+    }
+
+    $ResourcesBlock = $ResourceTexts -join "`r`n`r`n"
+
+    return $ResourcesBlock
+
+}
+
+function Write-MC ($Api) {
+    
+    $Resources = Write-MCResources $Api.Resources
+
+    $ApiName = $R
+
+    $text = @"
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Management.Automation;
+
+using Google.Apis.Gmail.v1;
+using Data = Google.Apis.Gmail.v1.Data;
+
+using gGmail = gShell.dotNet.Gmail;
+
+$Resources
+"@
+
+    return $text
 }
 
 #endregion
@@ -380,27 +486,27 @@ function Write-DNC_MethodSignatureParams ($Method, $Level=0, [bool]$NameOnly=$fa
     foreach ($P in $Method.Parameters){
         if ($P.Required -eq $true){
             if ($NameOnly -ne $true) {
-                $Params.Add(("{0} {1}" -f $P.Type, $P.Name)) | Out-Null
+                Add-String $Params ("{0} {1}" -f $P.Type, $P.Name)
             } else {
-                $Params.Add($P.Name) | Out-Null
+                Add-String $Params $P.Name
             }
         }
     }
 
     if  ($Method.Parameters.Required -contains $False) {
         if ($NameOnly) {
-            $Params.Add(("Properties")) | Out-Null
+            Add-String $Params "Properties"
         } else {
-            $Params.Add(("g{0}.{1}.{2}{3}Properties Properties = null" -f `
+            Add-String $Params ("g{0}.{1}.{2}{3}Properties Properties = null" -f `
                 $Method.Resource.Api.Name, (Get-ParentResourceChain $Method), `
-                $Method.Resource.Name, $Method.Name)) | Out-Null
+                $Method.Resource.Name, $Method.Name)
         }
     }
 
     if ($NameOnly) {
-        $Params.Add("StandardQueryParams") | Out-Null
+        Add-String $Params "StandardQueryParams"
     } else {
-        $Params.Add("StandardQueryParameters StandardQueryParams = null") | Out-Null
+        Add-String $Params "StandardQueryParameters StandardQueryParams = null"
     }
 
     $result = $Params -join ", "
@@ -425,21 +531,21 @@ function Write-DNC_Method ($Method, $Level=0) {
 
     $comments = Write-DNSW_MethodComments $Method $Level
 
-    $sections.Add((@"
+    Add-String $sections (@"
 {%T}public $MethodReturnType $MethodName ($PropertiesObj)
 {%T}{
-"@)) | Out-Null
+"@)
 
     if ($Method.HasPagedResults -eq $true -or $Method.Parameters.Required -contains $False) {
         $PropertiesObjFullName = "g{0}.{1}.{2}{3}Properties" -f `
             $Api.Name, (Get-ParentResourceChain $Method),
             $Method.Resource.Name, $Method.Name
-        $sections.Add("{%T}    Properties = Properties ?? new $PropertiesObjFullName();") | Out-Null
+        Add-String $sections "{%T}    Properties = Properties ?? new $PropertiesObjFullName();"
     }
 
     if ($Method.HasPagedResults -eq $true) {
-        $sections.Add("{%T}    Properties.StartProgressBar = StartProgressBar;") | Out-Null
-        $sections.Add("{%T}    Properties.UpdateProgressBar = UpdateProgressBar;") | Out-Null
+        Add-String $sections "{%T}    Properties.StartProgressBar = StartProgressBar;"
+        Add-String $sections "{%T}    Properties.UpdateProgressBar = UpdateProgressBar;"
     }
 
     if ($Method.ReturnType.Type -ne "void") {
@@ -458,9 +564,9 @@ function Write-DNC_Method ($Method, $Level=0) {
         $Return = "`r`n" + $Return
     }
 
-    $sections.Add($Return) | Out-Null
+    Add-String $sections $Return 
 
-    $sections.Add("{%T}}") | Out-Null
+    Add-String $sections "{%T}}"
 
     $text = $sections -join "`r`n"
 
@@ -482,7 +588,7 @@ function Write-DNC_ResourcesAsProperties ($Resources, $Level=0) {
         $summary = "{{%T}}/// <summary> An instance of the {0} gShell dotNet resource. </summary>`r`n" -f $R.Name
         $text = "{0}{{%T}}public {1} {2} {{get; set;}}" -f $summary, $R.Name, $R.NameLower
 
-        $list.Add($text) | Out-Null
+        Add-String $list $text
     }
 
     $string = $list -join "`r`n`r`n"
@@ -501,7 +607,7 @@ function Write-DNC_ResourceInstantiations ($Resources, $Level=0) {
 
         $text = "public {0} {1} = new {0}();" -f $R.Name, $R.NameLower
 
-        $list.Add($text) | Out-Null
+        Add-String $list $text
     }
 
     $string = "{%T}" + ($list -join "`r`n`r`n")
@@ -543,7 +649,7 @@ $ChildResources
 
         $ChildrenTextBlock = Wrap-Text (Set-Indent $ChildrenTextBlock ($Level+1))
 
-        $MethodTexts.Add($ChildrenTextBlock) | Out-Null
+        Add-String $MethodTexts $ChildrenTextBlock
     }
 
     #Handle the methods
@@ -554,15 +660,11 @@ $ChildResources
         
         $MethodObj = Write-DNC_Method $method ($Level+1)
         
-        if ($MethodObj -ne $null) {
-            $MethodParts.Add($MethodObj) | Out-Null
-        }
+        Add-String $MethodParts $MethodObj
 
         $MethodText = $MethodParts -join "`r`n`r`n"
 
-        if ($MethodText -ne $null) {
-            $MethodTexts.Add($MethodText) | Out-Null
-        }
+        Add-String $MethodTexts $MethodText
     }
 
     $AllMethods = $MethodTexts -join "`r`n`r`n"
@@ -593,9 +695,7 @@ function Write-DNC_Resources ($Resources, $Level=0) {
     foreach ($Resource in $Resources) {
         $R = Write-DNC_Resource $Resource $Level
         
-        if ($R -ne $null) {
-            $ResourceList.Add($R) | Out-Null
-        }
+        Add-String $ResourceList $R
     }
 
     $Text = $ResourceList -join "`r`n`r`n"
@@ -708,7 +808,7 @@ function Write-DNSW_ResourcesAsProperties ($Resources, $Level=0) {
         $summary = "{{%T}}/// <summary> Gets or sets the {0} resource class. </summary>`r`n" -f $R.NameLower
         $text = "{0}{{%T}}public {1} {2} {{get; set;}}" -f $summary, $R.Name, $R.NameLower
 
-        $list.Add($text) | Out-Null
+        Add-String $list $text
     }
 
     $string = $list -join "`r`n`r`n"
@@ -727,7 +827,7 @@ function Write-DNSW_ResourceInstantiations ($Resources, $Level=0) {
 
         $text = "{{%T}}{0} = new {1}();" -f $R.NameLower, $R.Name
 
-        $list.Add($text) | Out-Null
+        Add-String $list $text
     }
 
     $string = $list -join "`r`n"
@@ -790,26 +890,26 @@ function Write-DNSW_MethodSignatureParams ($Method, $Level=0, [bool]$RequiredOnl
     foreach ($P in $Method.Parameters){
         if ($RequiredOnly -eq $False -or ($RequiredOnly -eq $true -and $P.Required -eq $true)){
             if ($NameOnly -ne $true) {
-                $Params.Add(("{0} {1}" -f $P.Type, $P.Name)) | Out-Null
+                Add-String $Params ("{0} {1}" -f $P.Type, $P.Name)
             } else {
-                $Params.Add($P.Name) | Out-Null
+                Add-String $Params $P.Name
             }
         }
     }
 
     if ($IncludePropertiesObject -eq $true -and $Method.Parameters.Required -contains $False) {
         if ($NameOnly) {
-            $Params.Add(("Properties")) | Out-Null
+            Add-String $Params "Properties"
         } else {
-            $Params.Add(("{0}{1}Properties Properties = null" -f $Method.Resource.Name, $Method.Name)) | Out-Null
+            Add-String $Params ("{0}{1}Properties Properties = null" -f $Method.Resource.Name, $Method.Name)
         }
     }
 
     if ($IncludeStandardQueryParams -eq $true) {
         if ($NameOnly) {
-            $Params.Add("StandardQueryParams") | Out-Null
+            Add-String $Params "StandardQueryParams"
         } else {
-            $Params.Add("StandardQueryParameters StandardQueryParams = null") | Out-Null
+            Add-String $Params "StandardQueryParameters StandardQueryParams = null"
         }
     }
 
@@ -833,8 +933,8 @@ function Write-DNSW_MethodPropertyObj ($Method, $Level=0) {
                 $InitValue = "null"
             }
 
-            $Params.Add(("{{%T}}    /// <summary> {3} </summary>`r`n{{%T}}    public {0} {1} = {2};" `
-                -f $P.Type, $P.Name, $InitValue,  (Format-CommentString $P.Description))) | Out-Null
+            Add-String $Params ("{{%T}}    /// <summary> {3} </summary>`r`n{{%T}}    public {0} {1} = {2};" `
+                -f $P.Type, $P.Name, $InitValue,  (Format-CommentString $P.Description))
         }
 
         if ($Method.HasPagedResults -eq $true) {
@@ -844,7 +944,7 @@ function Write-DNSW_MethodPropertyObj ($Method, $Level=0) {
             $ProgressBarString += "{%T}    public Action<int, int, string, string> UpdateProgressBar = null;`r`n`r`n"
             $ProgressBarString += "{%T}     /// <summary>A counter for the total number of results to pull when iterating through paged results.</summary>`r`n"
             $ProgressBarString += "{%T}    public int TotalResults = 0;"
-            $Params.Add($ProgressBarString) | Out-Null
+            Add-String $Params $ProgressBarString
         }
 
         $pText = $Params -join "`r`n`r`n"
@@ -875,7 +975,7 @@ function Write-DNSW_MethodPropertyObjAssignment ($Method, $Level=0) {
         $Params = New-Object System.Collections.ArrayList
 
         foreach ($P in ($Method.Parameters | where Required -eq $False)){
-            $Params.Add(("{{%T}}        request.{0} = Properties.{0};" -f $P.Name)) | Out-Null
+            Add-String $Params ("{{%T}}        request.{0} = Properties.{0};" -f $P.Name)
         }
 
         $pText = $Params -join "`r`n"
@@ -898,15 +998,15 @@ function Write-DNSW_MethodComments ($Method, $Level=0) {
     
     $summary = "{{%T}}/// <summary> {0} </summary>" -f (Format-CommentString $Method.Description)
 
-    $CommentsList.Add($summary) | Out-Null
+    Add-String $CommentsList $summary
 
     foreach ($P in ($Method.Parameters | where Required -eq $true)){
-        $CommentsList.Add(("{{%T}}/// <param name=`"{0}`"> {1} </param>" -f $P.Name, `
-            (Format-CommentString $P.Description))) | Out-Null
+        Add-String $CommentsList ("{{%T}}/// <param name=`"{0}`"> {1} </param>" -f $P.Name, `
+            (Format-CommentString $P.Description))
     }
 
     if ($Method.Parameters.Required -contains $false) {
-        $CommentsList.Add(("{%T}/// <param name=`"Properties`"> The optional parameters for this method. </param>")) | Out-Null
+        Add-String $CommentsList ("{%T}/// <param name=`"Properties`"> The optional parameters for this method. </param>")
     }
 
     $text = $CommentsList -join "`r`n"
@@ -936,7 +1036,7 @@ function Write-DNSW_Method ($Method, $Level=0) {
     $request = "var request = GetService().{0}.{1}($requestParams);" -f `
         (Get-ParentResourceChain $Method), $Method.name
 
-    $sections.Add((@"
+    Add-String $sections (@"
 {%T}public $MethodReturnType $MethodName ($PropertiesObj)
 {%T}{
 {%T}    $request
@@ -946,22 +1046,22 @@ function Write-DNSW_Method ($Method, $Level=0) {
 {%T}        request.QuotaUser = StandardQueryParams.quotaUser;
 {%T}        request.UserIp = StandardQueryParams.userIp;
 {%T}    }
-"@)) | Out-Null
+"@)
 
     $PropertyAssignments = Write-DNSW_MethodPropertyObjAssignment $Method
-    if ($PropertyAssignments -ne $null) {$sections.Add($PropertyAssignments) | Out-Null}
+    if ($PropertyAssignments -ne $null) {Add-String $sections $PropertyAssignments}
 
     if ($Method.HasPagedResults) {
         $PagedBlock = Write-DNSW_PagedResultBlock $Method -Level $Level
-        $sections.Add($PagedBlock) | Out-Null
+        Add-String $sections $PagedBlock
     } else {
         if ($Method.ReturnType.Type -ne "void") {
             $resultReturn = "return "
         }
-        $sections.Add(("{{%T}}    {0}request.Execute();" -f $resultReturn)) | Out-Null
+        Add-String $sections ("{{%T}}    {0}request.Execute();" -f $resultReturn)
     }
 
-    $sections.Add("{%T}}") | Out-Null
+    Add-String $sections "{%T}}"
 
     $text = $sections -join "`r`n`r`n"
 
@@ -983,7 +1083,7 @@ function Write-DNSW_Methods ($Resource, $Level=0) {
     foreach ($M in $Resource.Methods) {
         $text = Write-DNSW_Method $M
 
-        $list.Add($text) | Out-Null
+        Add-String $list $text
     }
 
     $string = $list -join "`r`n`r`n"
@@ -1021,11 +1121,11 @@ function Write-DNSW_Resource ($Resource, $Level=0) {
 
         $ChildrenTextBlock = $ChildrenTextBlock -f $ChildrenProperties, $ChildResourceInstantiations
 
-        $MethodTexts.Add($ChildrenTextBlock) | Out-Null
+        Add-String $MethodTexts $ChildrenTextBlock
 
         $ChildrenResources = Write-DNSW_Resources $Resource.ChildResources -Level ($Level+1)
 
-        $MethodTexts.Add($ChildrenResources) | Out-Null
+        Add-String $MethodTexts $ChildrenResources
     }
 
     foreach ($Method in $Resource.Methods) {
@@ -1034,20 +1134,16 @@ function Write-DNSW_Resource ($Resource, $Level=0) {
         
         $PObj = Write-DNSW_MethodPropertyObj $method ($Level+1)
         
-        if ($PObj -ne $null) {
-            $MethodParts.Add($PObj) | Out-Null
-        }
+        Add-String $MethodParts $PObj
 
         #Make the method class
         $MethodClass = Write-DNSW_Method $Method ($Level+1)
 
-        $MethodParts.Add($MethodClass) | Out-Null
+        Add-String $MethodParts $MethodClass
 
         $MethodText = $MethodParts -join "`r`n`r`n"
 
-        if ($MethodText -ne $null) {
-            $MethodTexts.Add($MethodText) | Out-Null
-        }
+        Add-String $MethodTexts $MethodText
     }
 
     $AllMethods = $MethodTexts -join "`r`n`r`n"
@@ -1077,9 +1173,7 @@ function Write-DNSW_Resources ($Resources, $Level=0) {
     foreach ($Resource in $Resources) {
         $R = Write-DNSW_Resource $Resource $Level
         
-        if ($R -ne $null) {
-            $ResourceList.Add($R) | Out-Null
-        }
+        Add-String $ResourceList $R
     }
 
     $Text = $ResourceList -join "`r`n`r`n"
@@ -1185,7 +1279,7 @@ $ResourceClasses
 #$Path = "Discovery\Discovery.cs"
 
 $RestJson = Load-RestJsonFile gmail v1
-$Path = "Gmail\Google.Apis.Gmail.v1_gshell_dotnet.cs"
+$Path = "Gmail\Gmail.cs"
 
 $LibraryIndex = Get-JsonIndex $LibraryIndexRoot
 $Api = Invoke-GShellReflection $RestJson $LibraryIndex
@@ -1202,4 +1296,16 @@ $M = $Method
 
 #((write-dnc $Api) + "`r`n`r`n`r`n`r`n" + (write-dnsw $Api) ) | Out-File $env:USERPROFILE\Documents\gShell\gShell\gShell\dotNet\$Path -Force
 
-wrap-text (set-indent (Write-MC $Method) 0)
+write-host "writing MC..."
+$MC = write-mc $Api
+
+write-host "indenting..."
+$Indent = Set-Indent $MC 0
+
+write-host "wrapping..."
+$Wrapped = Wrap-Text $Indent
+
+write-host "writing to file..."
+$Wrapped | Out-File $env:USERPROFILE\Documents\gShell\gShell\gShell\Cmdlets\$Path -Force
+
+"...done"

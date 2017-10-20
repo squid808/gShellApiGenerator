@@ -1,5 +1,11 @@
 ﻿#region General Functions
 
+function Clean-CommentString($String) {
+    $string = $string -replace '"',"'"
+
+    return $string
+}
+
 function Get-DiscoveryJson ($ApiName) {
     #START HERE - LOAD THE JSON IN FROM A LOCAL FILE
     $RestJson = Get-Content -Path "$env:USERPROFILE\desktop\\Desktop\DiscoveryRestJson\Google.Apis.Discovery.v1.r1.json" | ConvertFrom-Json
@@ -195,7 +201,7 @@ function New-ApiMethod ([ApiResource]$Resource, $Method) {
 
     $M.Name = ConvertTo-FirstUpper $Method.Name
     $M.NameLower = ConvertTo-FirstLower $Method.Name
-    $M.Description = $M.DiscoveryObj.description
+    $M.Description = Clean-CommentString $M.DiscoveryObj.description
     $M.ReturnType =  New-ApiMethodProperty $M (Get-ApiMethodReturnType $Method)
     
     if (Has-ObjProperty $M.DiscoveryObj "response") {
@@ -325,7 +331,7 @@ function New-ApiMethodProperty ([ApiMethod]$Method, $Property, [bool]$ForceRequi
     $P.ReflectedObj = $Property
     $P.DiscoveryObj = $Method.DiscoveryObj.parameters.($Property.Name)
     $P.Type = Get-ApiPropertyType $P
-    $P.Description = $P.DiscoveryObj.Description
+    $P.Description = Clean-CommentString $P.DiscoveryObj.Description
     $P.Required = if ($ForceRequired -eq $true) {$true} else {[bool]($P.DiscoveryObj.required)}
 
     return $P
@@ -362,10 +368,10 @@ function New-ApiClass ($Parameter) {
         $P.DiscoveryObj = $C.DiscoveryObj.properties.($P.Name)
         $P.ReflectedObj = $Property
         $P.Type = Get-ApiPropertyTypeShortName $Property.PropertyType
-        $P.Description = $P.DiscoveryObj.Description
+        $P.Description = Clean-CommentString $P.DiscoveryObj.Description
         $C.Properties.Add($P) | Out-Null
     }
-    $C.Description = $C.DiscoveryObj.description
+    $C.Description = Clean-CommentString $C.DiscoveryObj.description
 
     return $C
 }
@@ -474,16 +480,16 @@ function Invoke-GShellReflection ($RestJson, $LibraryIndex) {
 #Write-Host $Method.ReflectedObj.ReturnType.FullName -ForegroundColor Green
 #$test = New-ObjectOfType $Method.ReflectedObj.ReturnType
 
-$RestJson = Load-RestJsonFile admin directory_v1
+#$RestJson = Load-RestJsonFile admin directory_v1
 #$RestJson = Load-RestJsonFile admin reports_v1
 #$RestJson = Load-RestJsonFile discovery v1
-$LibraryIndex = Get-JsonIndex $LibraryIndexRoot
-$Api = Invoke-GShellReflection $RestJson $LibraryIndex
-
-
-$Resources = $Api.Resources
-$Resource = $Resources[0]
-$Methods = $Resource.Methods
-$Method = $Methods[1]
-$M = $Method
-$Init = $M.ReflectedObj.ReturnType.DeclaredMethods | where name -eq "InitParameters"
+#$LibraryIndex = Get-JsonIndex $LibraryIndexRoot
+#$Api = Invoke-GShellReflection $RestJson $LibraryIndex
+#
+#
+#$Resources = $Api.Resources
+#$Resource = $Resources[0]
+#$Methods = $Resource.Methods
+#$Method = $Methods[1]
+#$M = $Method
+#$Init = $M.ReflectedObj.ReturnType.DeclaredMethods | where name -eq "InitParameters"

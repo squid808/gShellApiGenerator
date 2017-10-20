@@ -2,9 +2,9 @@
 #TODO: make each write method take in an [indent] level param to determine indents, and handle tabbing and wrapping before returning?
 #TODO: incorporate set-indent and wrap-text?
 #TODO: determine impact of ApiVersionNoDots on APIs that have underscores already - what are their namespaces?
-#TODO: fix indenting in middle of quote
 #TODO: remove need for StandardParamsCmdletBase by implementing a root class for each API that contains the respective standard params, if any
-
+#TODO: determine when the service account variables should be added and when other similar variables should be added
+#TODO: include logic in reflection to indicate if API should include std query params and service accounts to put it in one place
 
 <#
 
@@ -350,7 +350,7 @@ $Summary
 
 }
 
-function Write-MCProperies ($Method) {
+function Write-MCProperties ($Method) {
     $PropertyTexts = New-Object System.Collections.ArrayList
     
     $PositionInt = 0
@@ -375,16 +375,59 @@ function Write-MCProperies ($Method) {
     return $Text
 }
 
+function Write-MCMethodCallParams ($Method, $Level=0) {
+    $Params = New-Object System.Collections.ArrayList
+
+    foreach ($P in $Method.Parameters){
+        if ($P.Required -eq $true){
+            if ($P.Name -eq "Body") {
+                Add-String $Params ($Method.BodyParameter.Type + "Body")
+            } else {
+                Add-String $Params $P.Name
+            }
+        }
+    }
+
+    if  ($Method.Parameters.Required -contains $False) {
+        Add-String $Params "Properties"
+    }
+
+    if ($Method.Resource.Api.CanUseServiceAccount) {
+        Add-String $Params "ServiceAccount: gShellServiceAccount"
+    }
+    
+    if ($Method.Resource.Api.HasStandardQueryParams) {
+        Add-String $Params "StandardQueryParams: StandardQueryParams"
+    }
+    
+
+    $result = $Params -join ", "
+
+    return $result
+}
+
+function Write-MCMethodPropertiesObject ($Method) {
+    throw "START WORKING ON THIS"
+}
+
 function Write-MCMethod ($Method) {
     $Verb = Get-McVerb $Method.Name
-    $Noun = "G" + $Method.Resource.Api.Name
+    $Noun = "G" + $Method.Resource.Api.Name + $Method.Resource.Name
     $CmdletCommand = "{0}{1}Command" -f $Verb,$Noun
-    $CmdletBase = $Noun + "Base"
-    $ResourceParent = Get-ParentResourceChain -MethodOrResource $Method
+    $CmdletBase = $Method.Resource.Api.Name + "Base"
+    $ResourceParent = Get-ParentResourceChain -MethodOrResource $Method -UpperCase $false
     $ResourceName = $Method.Resource.Name
+    $MethodName = $Method.Name
+    $MethodChain = $ResourceParent, $MethodName -join "."
     
     $CmdletAttribute = Write-MCAttribute $Method
-    $Properties = Write-MCProperies $Method
+    $Properties = Write-MCProperties $Method
+    $MethodCallParams = Write-MCMethodCallParams $Method
+    
+    $WriteObjectOpen = if ($Method.ReturnType.Type -ne "void") { "WriteObject(" }
+    $WriteObjectClose = if ($Method.ReturnType.Type -ne "void") { ")" }
+
+    $PropertyObject = Write-MCMethodPropertiesObject $Method
 
     $text = @"
 {%T}$CmdletAttribute
@@ -400,7 +443,7 @@ $Properties
 {%T}    {
 {%T}        if (ShouldProcess("$Noun $ResourceName", "$Verb-$Noun"))
 {%T}        {
-{%T}            WriteObject(users.Watch(WatchRequestBody, UserId, ServiceAccount: gShellServiceAccount, StandardQueryParams: StandardQueryParams));
+{%T}            $WriteObjectOpen $MethodChain($MethodCallParams)$WriteObjectClose;
 {%T}        }
 {%T}    }
 {%T}}
@@ -413,6 +456,7 @@ $Properties
 function Write-MCResource ($Resource) {
 
     $MethodTexts = New-Object System.Collections.ArrayList
+    $ApiName = $Resource.Api.Name
 
     foreach ($Method in $Resource.Methods) {
         $MText = Write-MCMethod $Method
@@ -422,7 +466,7 @@ function Write-MCResource ($Resource) {
     $MethodBlock = $MethodTexts -join "`r`n`r`n"
 
     $text = @"
-namespace gShell {
+namespace gShell.Cmdlets.$ApiName {
 $MethodBlock
 }
 "@
@@ -471,6 +515,8 @@ using gGmail = gShell.dotNet.Gmail;
 $Resources
 "@
 
+    $text = wrap-text (set-indent $text)
+
     return $text
 }
 
@@ -503,10 +549,20 @@ function Write-DNC_MethodSignatureParams ($Method, $Level=0, [bool]$NameOnly=$fa
         }
     }
 
-    if ($NameOnly) {
-        Add-String $Params "StandardQueryParams"
-    } else {
-        Add-String $Params "StandardQueryParameters StandardQueryParams = null"
+    if ($Method.Resource.Api.CanUseServiceAccount) {
+        if ($NameOnly) {
+            Add-String $Params "ServiceAccount"
+        } else {
+            Add-String $Params "string ServiceAccount = null"
+        }
+    }
+    
+    if ($Method.Resource.Api.HasStandardQueryParams) {
+        if ($NameOnly) {
+            Add-String $Params "StandardQueryParams"
+        } else {
+            Add-String $Params "StandardQueryParameters StandardQueryParams = null"
+        }
     }
 
     $result = $Params -join ", "
@@ -719,7 +775,7 @@ function Write-DNC ($Api, $Level=0) {
     $ResourceInstantiatons = Write-DNSW_ResourceInstantiations $Api.Resources -Level 3
     $ResourceWrappedMethods = Write-DNC_Resources $Api.Resources -Level 2
 
-    $baseClassType = if (-not (Has-ObjProperty $Api.DiscoveryObj "auth")){
+    $baseClassType = if (-not (Has-ObjProperty $Api.DiscoveryObj "auth")){ #discovery API
         "OAuth2CmdletBase"
     } elseif (-not ($Api.RootNamespace.StartsWith("Google.Apis.admin"))) {
         "ServiceAccountCmdletBase"
@@ -884,7 +940,7 @@ function Write-DNSW_PagedResultBlock ($Method, $Level=0) {
 
 #The method signature parameters 
 function Write-DNSW_MethodSignatureParams ($Method, $Level=0, [bool]$RequiredOnly=$false,
-    [bool]$IncludeStandardQueryParams=$false, [bool]$IncludePropertiesObject=$false, [bool]$NameOnly=$false) {
+    [bool]$IncludeGshellParams=$false, [bool]$NameOnly=$false) {
     $Params = New-Object System.Collections.ArrayList
 
     foreach ($P in $Method.Parameters){
@@ -897,7 +953,7 @@ function Write-DNSW_MethodSignatureParams ($Method, $Level=0, [bool]$RequiredOnl
         }
     }
 
-    if ($IncludePropertiesObject -eq $true -and $Method.Parameters.Required -contains $False) {
+    if ($IncludeGshellParams -eq $true -and $Method.Parameters.Required -contains $False) {
         if ($NameOnly) {
             Add-String $Params "Properties"
         } else {
@@ -905,7 +961,15 @@ function Write-DNSW_MethodSignatureParams ($Method, $Level=0, [bool]$RequiredOnl
         }
     }
 
-    if ($IncludeStandardQueryParams -eq $true) {
+    if ($IncludeGshellParams -eq $true -and $Method.Resource.Api.CanUseServiceAccount) {
+        if ($NameOnly) {
+            Add-String $Params "ServiceAccount"
+        } else {
+            Add-String $Params "string ServiceAccount = null"
+        }
+    }
+
+    if ($IncludeGshellParams -eq $true -and $Method.Resource.Api.HasStandardQueryParams) {
         if ($NameOnly) {
             Add-String $Params "StandardQueryParams"
         } else {
@@ -1024,7 +1088,7 @@ function Write-DNSW_Method ($Method, $Level=0) {
     }
 
     $PropertiesObj = if ($Method.Parameters.Count -ne 0) {
-        Write-DNSW_MethodSignatureParams $Method -RequiredOnly $true -IncludeStandardQueryParams $true -IncludePropertiesObject $true
+        Write-DNSW_MethodSignatureParams $Method -RequiredOnly $true -IncludeGshellParams $true -IncludePropertiesObject $true
     }
        
     $sections = New-Object System.Collections.ArrayList
@@ -1033,7 +1097,10 @@ function Write-DNSW_Method ($Method, $Level=0) {
 
     $requestParams = Write-DNSW_MethodSignatureParams $Method -RequiredOnly $true -NameOnly $true
 
-    $request = "var request = GetService().{0}.{1}($requestParams);" -f `
+    $getServiceWithServiceAccount = if ($Method.Resource.Api.HasStandardQueryParams) { "ServiceAccount" } else { $null }
+
+    $request = "var request = GetService({0}).{1}.{2}($requestParams);" -f `
+        $getServiceWithServiceAccount, `
         (Get-ParentResourceChain $Method), $Method.name
 
     Add-String $sections (@"
@@ -1279,7 +1346,8 @@ $ResourceClasses
 #$Path = "Discovery\Discovery.cs"
 
 $RestJson = Load-RestJsonFile gmail v1
-$Path = "Gmail\Gmail.cs"
+$CmdletPath = "Cmdlets\Gmail\Gmail.cs"
+$DotNetPath = "dotNet\Gmail\Google.Apis.Gmail.v1_gshell_dotnet.cs"
 
 $LibraryIndex = Get-JsonIndex $LibraryIndexRoot
 $Api = Invoke-GShellReflection $RestJson $LibraryIndex
@@ -1294,18 +1362,7 @@ $M = $Method
 
 #wrap-text (set-indent (Write-DNSW_MethodComments $F) 0)
 
-#((write-dnc $Api) + "`r`n`r`n`r`n`r`n" + (write-dnsw $Api) ) | Out-File $env:USERPROFILE\Documents\gShell\gShell\gShell\dotNet\$Path -Force
+((write-dnc $Api) + "`r`n`r`n`r`n`r`n" + (write-dnsw $Api) ) | `
+    Out-File $env:USERPROFILE\Documents\gShell\gShell\gShell\$DotNetPath -Force
 
-write-host "writing MC..."
-$MC = write-mc $Api
-
-write-host "indenting..."
-$Indent = Set-Indent $MC 0
-
-write-host "wrapping..."
-$Wrapped = Wrap-Text $Indent
-
-write-host "writing to file..."
-$Wrapped | Out-File $env:USERPROFILE\Documents\gShell\gShell\gShell\Cmdlets\$Path -Force
-
-"...done"
+Write-MC $Api | Out-File $env:USERPROFILE\Documents\gShell\gShell\gShell\$CmdletPath -Force

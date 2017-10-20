@@ -58,6 +58,8 @@ class Api {
     $ReflectedObj
     $DiscoveryObj
     $SchemaObjectsUsed = (New-Object System.Collections.ArrayList)
+    $HasStandardQueryParams
+    $CanUseServiceAccount
 }
 
 function New-Api ([System.Reflection.Assembly]$Assembly, $RestJson) {
@@ -77,6 +79,10 @@ function New-Api ([System.Reflection.Assembly]$Assembly, $RestJson) {
 
     Get-Resources $api | % {$api.Resources.Add($_) | Out-Null}
     $api.Resources | % {$api.ResourcesDict[$_.name] = $_}
+
+    $api.HasStandardQueryParams = Has-ObjProperty $api.DiscoveryObj "parameters"
+    $api.CanUseServiceAccount = (-not $api.RootNamespace.StartsWith("Google.Apis.Discovery") -and `
+        -not $api.RootNamespace.StartsWith("Google.Apis.admin"))
 
     return $api
 }

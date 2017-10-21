@@ -5,6 +5,8 @@
 #TODO: remove need for StandardParamsCmdletBase by implementing a root class for each API that contains the respective standard params, if any
 #TODO: determine when the service account variables should be added and when other similar variables should be added
 #TODO: include logic in reflection to indicate if API should include std query params and service accounts to put it in one place
+#TODO: Fix casing on parameters
+#TODO: Add $PropertiesObjVarName and *Lower to method
 
 <#
 
@@ -368,7 +370,16 @@ function Write-MCProperties ($Method) {
         $BodyText = Write-MCProperty $Method.BodyParameter $PositionInt -AsBodyParameter $true
         $PropertyTexts.Add($BodyText) | Out-Null
         $PositionInt++
-    } 
+    }
+
+    foreach ($Property in ($Method.Parameters | where {$_.Required -eq $false -and `
+            $_.Name -ne "Body"})) {
+        $PropertyText = Write-MCProperty $Property $PositionInt
+        if (-not [string]::IsNullOrWhiteSpace($PropertyText)){
+            $PropertyTexts.Add($PropertyText) | Out-Null
+            $PositionInt++
+        }
+    }
 
     $Text = $PropertyTexts -join "`r`n`r`n"
 
@@ -389,7 +400,8 @@ function Write-MCMethodCallParams ($Method, $Level=0) {
     }
 
     if  ($Method.Parameters.Required -contains $False) {
-        Add-String $Params "Properties"
+        $PropertiesObjectVarName = "{0}{1}Properties" -f $Method.Resource.NameLower, $Method.Name
+        Add-String $Params $PropertiesObjectVarName
     }
 
     if ($Method.Resource.Api.CanUseServiceAccount) {
@@ -407,18 +419,47 @@ function Write-MCMethodCallParams ($Method, $Level=0) {
 }
 
 function Write-MCMethodPropertiesObject ($Method) {
-    throw "START WORKING ON THIS"
+    if ($Method.Parameters.Required -contains $False) {
+        
+        $PropertiesObjectVarName = "{0}{1}Properties" -f $Method.Resource.NameLower, $Method.Name
+        $PropertiesObjectFullName = "g{0}.{1}.{2}{3}Properties" -f `
+                    $Method.Resource.Api.Name, (Get-ParentResourceChain $Method), `
+                    $Method.Resource.Name, $Method.Name
+    
+        $PropertiesObjectParameters = New-Object System.Collections.ArrayList
+
+        foreach ($P in $Method.Parameters) {
+            if ($P.Required -eq $False) {
+                Add-String $PropertiesObjectParameters ("{{%T}}        {0} = this.{0}" -f $P.Name)
+            }
+        }
+
+        $PropertiesObjectParametersText = $PropertiesObjectParameters -join ",`r`n{%T}        "
+
+        $ParametersObj = @"
+`r`n{%T}        var $PropertiesObjectVarName = new $PropertiesObjectFullName()
+{%T}        {
+{%T}        $PropertiesObjectParametersText
+{%T}        };
+
+"@
+
+        return $ParametersObj
+    }
 }
 
 function Write-MCMethod ($Method) {
+    $ResourceParent = Get-ParentResourceChain -MethodOrResource $Method -UpperCase $false
+    $ResourceParentLower = Get-ParentResourceChain -MethodOrResource $Method -UpperCase $false
+    $ResourceName = $Method.Resource.Name
+    
     $Verb = Get-McVerb $Method.Name
-    $Noun = "G" + $Method.Resource.Api.Name + $Method.Resource.Name
+    $Noun = "G" + $ResourceName + $Method.Resource.Name
     $CmdletCommand = "{0}{1}Command" -f $Verb,$Noun
     $CmdletBase = $Method.Resource.Api.Name + "Base"
-    $ResourceParent = Get-ParentResourceChain -MethodOrResource $Method -UpperCase $false
-    $ResourceName = $Method.Resource.Name
+    
     $MethodName = $Method.Name
-    $MethodChain = $ResourceParent, $MethodName -join "."
+    $MethodChainLower = $ResourceParentLower, $MethodName -join "."
     
     $CmdletAttribute = Write-MCAttribute $Method
     $Properties = Write-MCProperties $Method
@@ -428,7 +469,7 @@ function Write-MCMethod ($Method) {
     $WriteObjectClose = if ($Method.ReturnType.Type -ne "void") { ")" }
 
     $PropertyObject = Write-MCMethodPropertiesObject $Method
-
+    
     $text = @"
 {%T}$CmdletAttribute
 {%T}public class $CmdletCommand : $CmdletBase
@@ -440,10 +481,10 @@ $Properties
 {%T}    #endregion
 
 {%T}    protected override void ProcessRecord()
-{%T}    {
+{%T}    {$PropertyObject
 {%T}        if (ShouldProcess("$Noun $ResourceName", "$Verb-$Noun"))
 {%T}        {
-{%T}            $WriteObjectOpen $MethodChain($MethodCallParams)$WriteObjectClose;
+{%T}            $WriteObjectOpen $MethodChainLower($MethodCallParams)$WriteObjectClose;
 {%T}        }
 {%T}    }
 {%T}}
@@ -540,10 +581,12 @@ function Write-DNC_MethodSignatureParams ($Method, $Level=0, [bool]$NameOnly=$fa
     }
 
     if  ($Method.Parameters.Required -contains $False) {
+        $PropertiesObjVarName = "{0}{1}Properties" -f $Method.Resource.NameLower, $Method.Name
+        
         if ($NameOnly) {
-            Add-String $Params "Properties"
+            Add-String $Params $PropertiesObjVarName
         } else {
-            Add-String $Params ("g{0}.{1}.{2}{3}Properties Properties = null" -f `
+            Add-String $Params ("g{0}.{1}.{2}{3}Properties $PropertiesObjVarName = null" -f `
                 $Method.Resource.Api.Name, (Get-ParentResourceChain $Method), `
                 $Method.Resource.Name, $Method.Name)
         }
@@ -596,12 +639,13 @@ function Write-DNC_Method ($Method, $Level=0) {
         $PropertiesObjFullName = "g{0}.{1}.{2}{3}Properties" -f `
             $Api.Name, (Get-ParentResourceChain $Method),
             $Method.Resource.Name, $Method.Name
-        Add-String $sections "{%T}    Properties = Properties ?? new $PropertiesObjFullName();"
+        $PropertiesObjVarName = "{0}{1}Properties" -f $Method.Resource.NameLower, $Method.Name
+        Add-String $sections "{%T}    $PropertiesObjVarName = $PropertiesObjVarName ?? new $PropertiesObjFullName();"
     }
 
     if ($Method.HasPagedResults -eq $true) {
-        Add-String $sections "{%T}    Properties.StartProgressBar = StartProgressBar;"
-        Add-String $sections "{%T}    Properties.UpdateProgressBar = UpdateProgressBar;"
+        Add-String $sections "{%T}    $PropertiesObjVarName.StartProgressBar = StartProgressBar;"
+        Add-String $sections "{%T}    $PropertiesObjVarName.UpdateProgressBar = UpdateProgressBar;"
     }
 
     if ($Method.ReturnType.Type -ne "void") {
@@ -900,12 +944,14 @@ function Write-DNSW_PagedResultBlock ($Method, $Level=0) {
 
     $resultsType = $Method.ReturnType.Type
 
+    $PropertiesObjVarName = "{0}{1}Properties" -f $Method.Resource.NameLower, $Method.Name
+
     $text = @"
 {%T}    var results = new List<$resultsType>(); 
 
-{%T}    if (null != Properties.StartProgressBar)
+{%T}    if (null != $PropertiesObjVarName.StartProgressBar)
 {%T}    {
-{%T}        Properties.StartProgressBar("Gathering $MethodReturnTypeName", string.Format("-Collecting $MethodReturnTypeName page 1"));
+{%T}        $PropertiesObjVarName.StartProgressBar("Gathering $MethodReturnTypeName", string.Format("-Collecting $MethodReturnTypeName page 1"));
 {%T}    }
         
 {%T}    $MethodReturnTypeFullName pagedResult = request.Execute();
@@ -914,21 +960,21 @@ function Write-DNSW_PagedResultBlock ($Method, $Level=0) {
 {%T}    {
 {%T}        results.Add(pagedResult);
         
-{%T}        while (!string.IsNullOrWhiteSpace(pagedResult.NextPageToken) && pagedResult.NextPageToken != request.PageToken && (Properties.TotalResults == 0 || results.Count < Properties.TotalResults))
+{%T}        while (!string.IsNullOrWhiteSpace(pagedResult.NextPageToken) && pagedResult.NextPageToken != request.PageToken && ($PropertiesObjVarName.TotalResults == 0 || results.Count < $PropertiesObjVarName.TotalResults))
 {%T}        {
 {%T}            request.PageToken = pagedResult.NextPageToken;
         
-{%T}            if (null != Properties.UpdateProgressBar)
+{%T}            if (null != $PropertiesObjVarName.UpdateProgressBar)
 {%T}            {
-{%T}                Properties.UpdateProgressBar(5, 10, "Gathering $MethodReturnTypeName", string.Format("-Collecting $MethodReturnTypeName page {0}", (results.Count + 1).ToString()));
+{%T}                $PropertiesObjVarName.UpdateProgressBar(5, 10, "Gathering $MethodReturnTypeName", string.Format("-Collecting $MethodReturnTypeName page {0}", (results.Count + 1).ToString()));
 {%T}            }
 {%T}            pagedResult = request.Execute();
 {%T}            results.Add(pagedResult);
 {%T}        }
         
-{%T}        if (null != Properties.UpdateProgressBar)
+{%T}        if (null != $PropertiesObjVarName.UpdateProgressBar)
 {%T}        {
-{%T}            Properties.UpdateProgressBar(1, 2, "Gathering $MethodReturnTypeName", string.Format("-Returning {0} pages.", results.Count.ToString()));
+{%T}            $PropertiesObjVarName.UpdateProgressBar(1, 2, "Gathering $MethodReturnTypeName", string.Format("-Returning {0} pages.", results.Count.ToString()));
 {%T}        }
 {%T}    }
         
@@ -954,10 +1000,12 @@ function Write-DNSW_MethodSignatureParams ($Method, $Level=0, [bool]$RequiredOnl
     }
 
     if ($IncludeGshellParams -eq $true -and $Method.Parameters.Required -contains $False) {
+        $PropertiesObjVarName = "{0}{1}Properties" -f $Method.Resource.NameLower, $Method.Name
+        
         if ($NameOnly) {
-            Add-String $Params "Properties"
+            Add-String $Params $PropertiesObjVarName
         } else {
-            Add-String $Params ("{0}{1}Properties Properties = null" -f $Method.Resource.Name, $Method.Name)
+            Add-String $Params ("{0}{1}Properties $PropertiesObjVarName = null" -f $Method.Resource.Name, $Method.Name)
         }
     }
 
@@ -1036,16 +1084,18 @@ $pText
 function Write-DNSW_MethodPropertyObjAssignment ($Method, $Level=0) {
     if ($Method.Parameters.Required -contains $false) {
     
+        $PropertiesObjVarName = "{0}{1}Properties" -f $Method.Resource.NameLower, $Method.Name
+
         $Params = New-Object System.Collections.ArrayList
 
         foreach ($P in ($Method.Parameters | where Required -eq $False)){
-            Add-String $Params ("{{%T}}        request.{0} = Properties.{0};" -f $P.Name)
+            Add-String $Params ("{{%T}}        request.{0} = {1}.{0};" -f $P.Name, $PropertiesObjVarName)
         }
 
         $pText = $Params -join "`r`n"
 
         $Text = @"
-{%T}    if (Properties != null) {
+{%T}    if ($PropertiesObjVarName != null) {
 $pText
 {%T}    }
 "@

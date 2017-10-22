@@ -314,7 +314,8 @@ function Get-ApiPropertyType ([ApiMethodProperty]$Property) {
         $InnerString = $inners -join ", "
 
         if ($RefType.Name -eq "Nullable``1") {
-            $Type = "System.Nullable<{0}>" -f $InnerString
+            #$Type = "System.Nullable<{0}>" -f $InnerString
+            $Type = $InnerString + "?"
         }
 
         if ($RefType.Name -eq "Repeatable``1") {

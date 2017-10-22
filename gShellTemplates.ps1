@@ -322,8 +322,9 @@ function Write-MCAttribute ($Method) {
     return $text
 }
 
-function Write-MCProperty ($Property, $Position = $null, [bool]$AsBodyParameter = $false) {
-    
+function Write-MCProeprtyAttribute () {
+    $PropertiesList = New-Object System.Collections.ArrayList
+
     $PropertyDescription = $Property.Description
 
     if ($AsBodyParameter -eq $true) {
@@ -336,15 +337,26 @@ function Write-MCProperty ($Property, $Position = $null, [bool]$AsBodyParameter 
         $PropertyRequired = $Property.Required.ToString().ToLower()
     }
 
-    $Summary = "/// <summary> {0} </summary>" -f $PropertyDescription
+    Add-String $PropertiesList ("Mandatory = $PropertyRequired")
+    if ($Position -ne $null) { Add-String $PropertiesList ("Position = $Position")
+    Add-String $PropertiesList "ValueFromPipelineByPropertyName = true"
+    Add-String $PropertiesList ("HelpMessage = `"$PropertyDescription`"")
 
-    if ($Position -ne $null) { $Position = "`r`n{%T}    Position = $Position," }
+    $PropertiesText = "{%T}" + $PropertiesList -join ", "
+
+    return $PropertiesText
+}
+
+function Write-MCProperty ($Property, $Position = $null, $Mandatory = $null, [bool]$AsBodyParameter = $false, `
+    [string]$ParameterSetName = $null) {
+    
+    
+
+    $Summary = "/// <summary> {0} </summary>" -f $PropertyDescription
 
     $text = @"
 $Summary
-{%T}[Parameter(Mandatory = $PropertyRequired,$Position
-{%T}    ValueFromPipelineByPropertyName = true,
-{%T}    HelpMessage = "$PropertyDescription")]
+{%T}[Parameter($PropertiesText)]
 {%T}public $PropertyType $PropertyName { get; set; }
 "@
 
@@ -364,7 +376,11 @@ function Write-MCProperties ($Method) {
             $PropertyTexts.Add($PropertyText) | Out-Null
             $PositionInt++
         }
-    }
+    }s
+
+    #todo - separate out the creation of the property attributes such that the above foreach loop can provide each one with a 
+    #location and manadatory flag depending on situations like having a body present
+    throw "figure out how to give the option for the body"
 
     if ($Method.HasBodyParameter -eq $true) {
         $BodyText = Write-MCProperty $Method.BodyParameter $PositionInt -AsBodyParameter $true
@@ -454,7 +470,7 @@ function Write-MCMethod ($Method) {
     $ResourceName = $Method.Resource.Name
     
     $Verb = Get-McVerb $Method.Name
-    $Noun = "G" + $ResourceName + $Method.Resource.Name
+    $Noun = "G" + $Method.Resource.Api.Name + $ResourceName
     $CmdletCommand = "{0}{1}Command" -f $Verb,$Noun
     $CmdletBase = $Method.Resource.Api.Name + "Base"
     

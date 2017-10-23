@@ -38,11 +38,22 @@ function Get-CharCountInString([string]$String, $Char) {
 
 #take in a block of text and wrap any lines longer than 120 lines
 function Wrap-Text ($Text, $Level=0, $Padding=0, $PrependText=$null) {
-    $lines =  $Text -split "`r`n"
+
+    $lines = $Text -split "`r`n"
 
     for ($l = 0; $l -lt $lines.Count; $l++){
-        if ($lines[$l].Length -gt 120) {
 
+        #if the prepend text is present, make sure it's applied after whitespace - mostly for multiline comments
+        if (-not [string]::IsNullOrWhiteSpace($PrependText) -and $lines[$l] -notmatch "^\s*$PrependText") {
+            $lines[$l] = $lines[$l].Insert(0,$PrependText)
+        }
+
+        #if padding is not in the line after whitespace, make sure it's applied - mostly for multiline comments
+        if ($level -eq 0 -and $padding -ne 0) {
+            $lines[$l] = $lines[$l].Insert(0,(" "*$Padding))
+        }
+
+        if ($lines[$l].Length -gt 120) {
             $StartInd = 119
 
             $BreakInString = $false
@@ -73,13 +84,13 @@ function Wrap-Text ($Text, $Level=0, $Padding=0, $PrependText=$null) {
             for ($i = $StartInd; $i -ge $Padding+1; $i--) {
                 if ($lines[$l][$i] -match $LineBreakPattern) {
                     
-                    #set the recursive padding for any sub-lines
+                    #set the recursive padding for any sub-lines (which may not be applied if a comment string)
                     if ($Level -eq 0) {
                         $paddingplus = 4
                     }
 
                     #if this is a comment line make sure sub-lines have /// as well
-                    if ($lines[$l] -match "///\s") {
+                    if ($lines[$l] -match "^\s*///") {
                         $ToInsert = "`r`n{0}/// " -f (" "*$padding)
                     } else {
 
@@ -94,7 +105,7 @@ function Wrap-Text ($Text, $Level=0, $Padding=0, $PrependText=$null) {
                     #insert the break string at the breakpoint
                     $lines[$l] = $lines[$l].Insert(($i+1), $ToInsert)
 
-                    $lines[$l] = Wrap-Text $lines[$l] -Level ($Level+1) -Padding ($padding+$paddingplus)
+                    $lines[$l] = Wrap-Text $lines[$l] -Level ($Level+1) -Padding $padding -PrependText $PrependText
                     
                     break;
                 }
@@ -134,7 +145,12 @@ function Get-ParentResourceChain ($MethodOrResource, $JoinChar = ".", [bool]$Upp
 
 #Repairs comment strings such that empty lines and line breaks are replaced with ///
 function Format-CommentString ($String) {
-    $fixed = $string -replace "(?<=[\r\n])","///"
+    $fixed = $string -replace "(?:`n|`r`n?)","`r`n/// "
+    return $fixed
+}
+
+function Format-HelpMessage ($String) {
+    $fixed = $string -replace "(?:`n|`r`n?)","\r\n"
     return $fixed
 }
 
@@ -326,7 +342,7 @@ function Write-MCAttribute ($Method) {
     return $text
 }
 
-function Write-MCPropertyAttribute ($Mandatory, $HelpMessage, $Position, $ParameterSetName) {
+function Write-MCPropertyAttribute ($Mandatory, $HelpMessage, $Position, $ParameterSetName, $Level = 0) {
     $PropertiesList = New-Object System.Collections.ArrayList
 
     Add-String $PropertiesList ("Mandatory = $Mandatory")
@@ -335,29 +351,34 @@ function Write-MCPropertyAttribute ($Mandatory, $HelpMessage, $Position, $Parame
     }
     if ($Position -ne $null) { Add-String $PropertiesList ("Position = $Position") }
     Add-String $PropertiesList "ValueFromPipelineByPropertyName = true"
+    $HelpMessage = Format-HelpMessage $HelpMessage
     Add-String $PropertiesList ("HelpMessage = `"$HelpMessage`"")
 
     $PropertiesText = "{%T}[Parameter(" + ($PropertiesList -join ", ") + ")]"
 
+    $PropertiesText = Wrap-Text (Set-Indent $PropertiesText $Level)
+
     return $PropertiesText
 }
 
-function Write-MCProperties ($Method) {
+#write the parameters for the cmdlet
+function Write-MCProperties ($Method, $Level=0) {
     $PropertyTexts = New-Object System.Collections.ArrayList
     
     $StandardPositionInt = 0
     $BodyPositionInt = 0
 
+    #build, indent and wrap the pieces separately to allow for proper wrapping of comments and long strings
     foreach ($Property in ($Method.Parameters | where { ` #$_.Required -eq $true -and `
             $_.Name -ne "Body"})) {
 
-        $summary = "{{%T}}/// <summary> {0} </summary>" -f $Property.Description
+        $summary = Wrap-Text (Set-Indent ("{{%T}}/// <summary> {0} </summary>" -f (Format-CommentString $Property.Description)) $Level)
 
         $required = $Property.Required.ToString().ToLower()
 
         $attributes = Write-MCPropertyAttribute -Mandatory $required -HelpMessage $Property.Description `
-            -Position $StandardPositionInt
-        $signature  = "{{%T}}public {0} {1} {{ get; set; }}" -f $Property.Type, $Property.Name
+            -Position $StandardPositionInt -Level $Level
+        $signature  = wrap-text (set-indent ("{{%T}}public {0} {1} {{ get; set; }}" -f $Property.Type, $Property.Name) $Level)
 
         $PropertyText = $summary,$attributes,$signature -join "`r`n"
 
@@ -365,27 +386,12 @@ function Write-MCProperties ($Method) {
         $StandardPositionInt++
     }
 
-    #foreach ($Property in ($Method.Parameters | where {$_.Required -eq $false -and `
-    #        $_.Name -ne "Body"})) {
-    #
-    #    $propertyRequired = $Property.Required.ToString().ToLower()
-    #    $summary = "/// <summary> {0} </summary>" -f $Property.Description
-    #    $signature  = "{{%T}}public {0} {1} {{ get; set; }}" -f $Property.Type, $Property.Name
-    #
-    #    $PropertyText = $summary,$attributes,$signature -join "`r`n"
-    #
-    #    if (-not [string]::IsNullOrWhiteSpace($BodyText)){
-    #        $PropertyTexts.Add($BodyText) | Out-Null
-    #        $StandardPositionInt++
-    #    }
-    #}
-
     if ($Method.HasBodyParameter -eq $true) {
         
-        $summary = "{{%T}}/// <summary> {0} </summary>" -f $Property.Description
-        $signature  = "{{%T}}public {0} {1} {{ get; set; }}" -f $Method.BodyParameter.TypeData, ($Method.BodyParameter.Type + "Body")
+        $summary = wrap-text (set-indent ("{{%T}}/// <summary> {0} </summary>" -f (Format-CommentString $Property.Description)) $Level)
+        $signature  = wrap-text (set-indent ("{{%T}}public {0} {1} {{ get; set; }}" -f $Method.BodyParameter.TypeData, ($Method.BodyParameter.Type + "Body")) $Level)
         $attribute = Write-MCPropertyAttribute -Mandatory "true" -HelpMessage $Property.Description `
-            -Position $StandardPositionInt -ParameterSetName "WithBodyObject"
+            -Position $StandardPositionInt -ParameterSetName "WithBodyObject" -Level $Level
             
         $BodyText = $summary,$attribute,$signature -join "`r`n"
         $PropertyTexts.Add($BodyText) | Out-Null
@@ -397,10 +403,11 @@ function Write-MCProperties ($Method) {
 
         foreach ($BodyProperty in $Method.BodyParameter.Properties) {
             
-            $BPsummary = "{{%T}}/// <summary> {0} </summary>" -f $BodyProperty.Description
-            $BPsignature  = "{{%T}}public {0} {1} {{ get; set; }}" -f $BodyProperty.Type, $BodyProperty.Name
+            $BPsummary = wrap-text (Set-Indent ("{{%T}}/// <summary> {0} </summary>" -f (Format-CommentString $BodyProperty.Description)) $Level)
+            
+            $BPsignature  = wrap-text (Set-Indent ("{{%T}}public {0} {1} {{ get; set; }}" -f $BodyProperty.Type, $BodyProperty.Name) $Level)
             $BPAttribute = Write-MCPropertyAttribute -Mandatory "false" -HelpMessage $BodyProperty.Description `
-                -Position $BodyPositionInt -ParameterSetName "NoBodyObject"
+                -Position $BodyPositionInt -ParameterSetName "NoBodyObject" -Level $Level
 
             $BodyPositionInt++
 
@@ -411,9 +418,12 @@ function Write-MCProperties ($Method) {
 
     $Text = $PropertyTexts -join "`r`n`r`n"
 
+    #$text = Wrap-Text (Set-Indent $text -TabCount $Level)
+
     return $Text
 }
 
+#writes the method parameters for within the method call
 function Write-MCMethodCallParams ($Method, $Level=0) {
     $Params = New-Object System.Collections.ArrayList
 
@@ -446,7 +456,8 @@ function Write-MCMethodCallParams ($Method, $Level=0) {
     return $result
 }
 
-function Write-MCMethodPropertiesObject ($Method) {
+#Write the property object in the cmdlet which creates the property object and populates the contents from the cmdlet params
+function Write-MCMethodPropertiesObject ($Method, $Level=0) {
     if ($Method.Parameters.Required -contains $False) {
         
         $PropertiesObjectVarName = "{0}{1}Properties" -f $Method.Resource.NameLower, $Method.Name
@@ -476,7 +487,7 @@ function Write-MCMethodPropertiesObject ($Method) {
     }
 }
 
-function Write-MCMethod ($Method) {
+function Write-MCMethod ($Method, $Level=0) {
     $ResourceParent = Get-ParentResourceChain -MethodOrResource $Method -UpperCase $false
     $ResourceParentLower = Get-ParentResourceChain -MethodOrResource $Method -UpperCase $false
     $ResourceName = $Method.Resource.Name
@@ -490,13 +501,13 @@ function Write-MCMethod ($Method) {
     $MethodChainLower = $ResourceParentLower, $MethodName -join "."
     
     $CmdletAttribute = Write-MCAttribute $Method
-    $Properties = Write-MCProperties $Method
+    $Properties = Write-MCProperties $Method ($Level+1)
     $MethodCallParams = Write-MCMethodCallParams $Method
     
     $WriteObjectOpen = if ($Method.ReturnType.Type -ne "void") { "WriteObject(" }
     $WriteObjectClose = if ($Method.ReturnType.Type -ne "void") { ")" }
 
-    $PropertyObject = Write-MCMethodPropertiesObject $Method
+    $PropertyObject = Write-MCMethodPropertiesObject $Method $Level
     
     $text = @"
 {%T}$CmdletAttribute
@@ -518,6 +529,8 @@ $Properties
 {%T}}
 "@
 
+    $text = Wrap-Text (Set-Indent $text -TabCount $Level)
+
     return $text
 
 }
@@ -528,7 +541,7 @@ function Write-MCResource ($Resource) {
     $ApiName = $Resource.Api.Name
 
     foreach ($Method in $Resource.Methods) {
-        $MText = Write-MCMethod $Method
+        $MText = Write-MCMethod $Method -Level 0
         Add-String $MethodTexts $MText
     }
 
@@ -713,7 +726,7 @@ function Write-DNC_ResourcesAsProperties ($Resources, $Level=0) {
 
     foreach ($R in $Resources)  {
 
-        $summary = "{{%T}}/// <summary> An instance of the {0} gShell dotNet resource. </summary>`r`n" -f $R.Name
+        $summary = wrap-text (set-indent ("{{%T}}/// <summary> An instance of the {0} gShell dotNet resource. </summary>`r`n" -f $R.Name) $level)
         $text = "{0}{{%T}}public {1} {2} {{get; set;}}" -f $summary, $R.Name, $R.NameLower
 
         Add-String $list $text
@@ -933,7 +946,7 @@ function Write-DNSW_ResourcesAsProperties ($Resources, $Level=0) {
 
     foreach ($R in $Resources)  {
 
-        $summary = "{{%T}}/// <summary> Gets or sets the {0} resource class. </summary>`r`n" -f $R.NameLower
+        $summary = wrap-text (set-indent ("{{%T}}/// <summary> Gets or sets the {0} resource class. </summary>`r`n" -f $R.NameLower) $level)
         $text = "{0}{{%T}}public {1} {2} {{get; set;}}" -f $summary, $R.Name, $R.NameLower
 
         Add-String $list $text
@@ -1073,8 +1086,8 @@ function Write-DNSW_MethodPropertyObj ($Method, $Level=0) {
                 $InitValue = "null"
             }
 
-            Add-String $Params ("{{%T}}    /// <summary> {3} </summary>`r`n{{%T}}    public {0} {1} = {2};" `
-                -f $P.Type, $P.Name, $InitValue,  (Format-CommentString $P.Description))
+            Add-String $Params (wrap-text (set-indent ("{{%T}}    /// <summary> {3} </summary>`r`n{{%T}}    public {0} {1} = {2};" `
+                -f $P.Type, $P.Name, $InitValue, (Format-CommentString $P.Description)) $Level))
         }
 
         if ($Method.HasPagedResults -eq $true) {
@@ -1138,13 +1151,13 @@ function Write-DNSW_MethodComments ($Method, $Level=0) {
     #params section
     $CommentsList = New-Object System.Collections.ArrayList
     
-    $summary = "{{%T}}/// <summary> {0} </summary>" -f (Format-CommentString $Method.Description)
+    $summary = wrap-text (set-indent ("{{%T}}/// <summary> {0} </summary>" -f (Format-CommentString $Method.Description)) $Level)
 
     Add-String $CommentsList $summary
 
     foreach ($P in ($Method.Parameters | where Required -eq $true)){
-        Add-String $CommentsList ("{{%T}}/// <param name=`"{0}`"> {1} </param>" -f $P.Name, `
-            (Format-CommentString $P.Description))
+        Add-String $CommentsList (wrap-text (set-indent ("{{%T}}/// <param name=`"{0}`"> {1} </param>" -f $P.Name, `
+            (Format-CommentString $P.Description)) $Level))
     }
 
     if ($Method.Parameters.Required -contains $false) {
@@ -1440,7 +1453,7 @@ $M = $Method
 
 #wrap-text (set-indent (Write-DNSW_MethodComments $F) 0)
 
-((write-dnc $Api) + "`r`n`r`n`r`n`r`n" + (write-dnsw $Api) ) | `
-    Out-File $env:USERPROFILE\Documents\gShell\gShell\gShell\$DotNetPath -Force
-
+#((write-dnc $Api) + "`r`n`r`n`r`n`r`n" + (write-dnsw $Api) ) | `
+#    Out-File $env:USERPROFILE\Documents\gShell\gShell\gShell\$DotNetPath -Force
+#
 Write-MC $Api | Out-File $env:USERPROFILE\Documents\gShell\gShell\gShell\$CmdletPath -Force

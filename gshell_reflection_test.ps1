@@ -1,5 +1,6 @@
 ﻿#region General Functions
 
+#Sanitize comment strings to make sure \n is always \r\n
 function Clean-CommentString($String) {
     $string = $string -replace '"',"'"
 
@@ -378,6 +379,7 @@ function New-ApiClass ($Parameter) {
         $P.Name = $Property.Name
         $P.DiscoveryObj = $C.DiscoveryObj.properties.($P.Name)
         $P.ReflectedObj = $Property
+        $P.Method = $Parameter.Method
         $P.Type = Get-ApiPropertyType $P
         $P.Description = Clean-CommentString $P.DiscoveryObj.Description
         $C.Properties.Add($P) | Out-Null

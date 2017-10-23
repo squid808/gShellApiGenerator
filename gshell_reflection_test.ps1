@@ -299,7 +299,7 @@ function Get-ApiPropertyType ([ApiMethodProperty]$Property) {
         $RefType = $Property.ReflectedObj.PropertyType
     }
 
-    if ($RefType.Name -eq "Nullable``1" -or $RefType.Name -eq "Repeatable``1"){
+    if (@("Nullable``1","Repeatable``1","IList``1") -contains $RefType.Name){
 
         #-replace "``1\[","<" -replace "\]",">"
 
@@ -320,6 +320,10 @@ function Get-ApiPropertyType ([ApiMethodProperty]$Property) {
 
         if ($RefType.Name -eq "Repeatable``1") {
             $Type = "Google.Apis.Util.Repeatable<{0}>" -f $InnerString
+        }
+
+        if ($RefType.Name -eq "IList``1") {
+            $Type = "IList<{0}>" -f $InnerString
         }
 
         return $type
@@ -374,7 +378,7 @@ function New-ApiClass ($Parameter) {
         $P.Name = $Property.Name
         $P.DiscoveryObj = $C.DiscoveryObj.properties.($P.Name)
         $P.ReflectedObj = $Property
-        $P.Type = Get-ApiPropertyTypeShortName $Property.PropertyType
+        $P.Type = Get-ApiPropertyType $P
         $P.Description = Clean-CommentString $P.DiscoveryObj.Description
         $C.Properties.Add($P) | Out-Null
     }

@@ -310,90 +310,102 @@ function Get-MCAttributeVerb ($VerbInput) {
     return "`"$VerbInput`""
 }
 
+#TODO - fix in to using list?
 function Write-MCAttribute ($Method) {
     $Verb = Get-MCAttributeVerb $Method.Name
     $Noun = $Method.Resource.Api.Name
     $DocLink = $Method.Resource.Api.DiscoveryObj.documentationLink
-
-    $text = @"
-[Cmdlet($Verb, "G$Noun", SupportsShouldProcess = true, HelpUri = @"$DocLink")]
-"@
-
-    return $text
-}
-
-function Write-MCProeprtyAttribute () {
-    $PropertiesList = New-Object System.Collections.ArrayList
-
-    $PropertyDescription = $Property.Description
-
-    if ($AsBodyParameter -eq $true) {
-        $PropertyType = $Property.TypeData
-        $PropertyName = $Property.Type + "Body"
-        $PropertyRequired = "true"
-    } else {
-        $PropertyType = $Property.Type
-        $PropertyName = $Property.Name
-        $PropertyRequired = $Property.Required.ToString().ToLower()
+    $DefaultParameterSetName = if ($Method.HasBodyParameter -eq $true) {
+        " DefaultParameterSetName = `"WithBodyObject`","
     }
 
-    Add-String $PropertiesList ("Mandatory = $PropertyRequired")
-    if ($Position -ne $null) { Add-String $PropertiesList ("Position = $Position")
-    Add-String $PropertiesList "ValueFromPipelineByPropertyName = true"
-    Add-String $PropertiesList ("HelpMessage = `"$PropertyDescription`"")
-
-    $PropertiesText = "{%T}" + $PropertiesList -join ", "
-
-    return $PropertiesText
-}
-
-function Write-MCProperty ($Property, $Position = $null, $Mandatory = $null, [bool]$AsBodyParameter = $false, `
-    [string]$ParameterSetName = $null) {
-    
-    
-
-    $Summary = "/// <summary> {0} </summary>" -f $PropertyDescription
-
     $text = @"
-$Summary
-{%T}[Parameter($PropertiesText)]
-{%T}public $PropertyType $PropertyName { get; set; }
+[Cmdlet($Verb, "G$Noun",$DefaultParameterSetName SupportsShouldProcess = true, HelpUri = @"$DocLink")]
 "@
 
     return $text
+}
 
+function Write-MCPropertyAttribute ($Mandatory, $HelpMessage, $Position, $ParameterSetName) {
+    $PropertiesList = New-Object System.Collections.ArrayList
+
+    Add-String $PropertiesList ("Mandatory = $Mandatory")
+    if (-not [string]::IsNullOrWhiteSpace($ParameterSetName)) {
+        Add-String $PropertiesList ("ParameterSetName = `"$ParameterSetName`"")
+    }
+    if ($Position -ne $null) { Add-String $PropertiesList ("Position = $Position") }
+    Add-String $PropertiesList "ValueFromPipelineByPropertyName = true"
+    Add-String $PropertiesList ("HelpMessage = `"$HelpMessage`"")
+
+    $PropertiesText = "{%T}[Parameter(" + ($PropertiesList -join ", ") + ")]"
+
+    return $PropertiesText
 }
 
 function Write-MCProperties ($Method) {
     $PropertyTexts = New-Object System.Collections.ArrayList
     
-    $PositionInt = 0
+    $StandardPositionInt = 0
+    $BodyPositionInt = 0
 
-    foreach ($Property in ($Method.Parameters | where {$_.Required -eq $true -and `
+    foreach ($Property in ($Method.Parameters | where { ` #$_.Required -eq $true -and `
             $_.Name -ne "Body"})) {
-        $PropertyText = Write-MCProperty $Property $PositionInt
-        if (-not [string]::IsNullOrWhiteSpace($PropertyText)){
-            $PropertyTexts.Add($PropertyText) | Out-Null
-            $PositionInt++
-        }
-    }s
 
-    #todo - separate out the creation of the property attributes such that the above foreach loop can provide each one with a 
-    #location and manadatory flag depending on situations like having a body present
-    throw "figure out how to give the option for the body"
+        $summary = "{{%T}}/// <summary> {0} </summary>" -f $Property.Description
 
-    if ($Method.HasBodyParameter -eq $true) {
-        $BodyText = Write-MCProperty $Method.BodyParameter $PositionInt -AsBodyParameter $true
-        $PropertyTexts.Add($BodyText) | Out-Null
-        $PositionInt++
+        $required = $Property.Required.ToString().ToLower()
+
+        $attributes = Write-MCPropertyAttribute -Mandatory $required -HelpMessage $Property.Description `
+            -Position $StandardPositionInt
+        $signature  = "{{%T}}public {0} {1} {{ get; set; }}" -f $Property.Type, $Property.Name
+
+        $PropertyText = $summary,$attributes,$signature -join "`r`n"
+
+        $PropertyTexts.Add($PropertyText) | Out-Null
+        $StandardPositionInt++
     }
 
-    foreach ($Property in ($Method.Parameters | where {$_.Required -eq $false -and `
-            $_.Name -ne "Body"})) {
-        $PropertyText = Write-MCProperty $Property $PositionInt
-        if (-not [string]::IsNullOrWhiteSpace($PropertyText)){
-            $PropertyTexts.Add($PropertyText) | Out-Null
-            $PositionInt++
+    #foreach ($Property in ($Method.Parameters | where {$_.Required -eq $false -and `
+    #        $_.Name -ne "Body"})) {
+    #
+    #    $propertyRequired = $Property.Required.ToString().ToLower()
+    #    $summary = "/// <summary> {0} </summary>" -f $Property.Description
+    #    $signature  = "{{%T}}public {0} {1} {{ get; set; }}" -f $Property.Type, $Property.Name
+    #
+    #    $PropertyText = $summary,$attributes,$signature -join "`r`n"
+    #
+    #    if (-not [string]::IsNullOrWhiteSpace($BodyText)){
+    #        $PropertyTexts.Add($BodyText) | Out-Null
+    #        $StandardPositionInt++
+    #    }
+    #}
+
+    if ($Method.HasBodyParameter -eq $true) {
+        
+        $summary = "{{%T}}/// <summary> {0} </summary>" -f $Property.Description
+        $signature  = "{{%T}}public {0} {1} {{ get; set; }}" -f $Method.BodyParameter.TypeData, ($Method.BodyParameter.Type + "Body")
+        $attribute = Write-MCPropertyAttribute -Mandatory "true" -HelpMessage $Property.Description `
+            -Position $StandardPositionInt -ParameterSetName "WithBodyObject"
+            
+        $BodyText = $summary,$attribute,$signature -join "`r`n"
+        $PropertyTexts.Add($BodyText) | Out-Null
+
+        $BodyPositionInt = $StandardPositionInt
+        $StandardPositionInt++
+
+        $BodyAttributes = New-Object System.Collections.ArrayList
+
+        foreach ($BodyProperty in $Method.BodyParameter.Properties) {
+            
+            $BPsummary = "{{%T}}/// <summary> {0} </summary>" -f $BodyProperty.Description
+            $BPsignature  = "{{%T}}public {0} {1} {{ get; set; }}" -f $BodyProperty.Type, $BodyProperty.Name
+            $BPAttribute = Write-MCPropertyAttribute -Mandatory "false" -HelpMessage $BodyProperty.Description `
+                -Position $BodyPositionInt -ParameterSetName "NoBodyObject"
+
+            $BodyPositionInt++
+
+            $BPText = $BPSummary,$BPAttribute,$BPsignature -join "`r`n"
+            $PropertyTexts.Add($BPText) | Out-Null
         }
     }
 

@@ -422,15 +422,13 @@ function New-ApiClass {
 
         $C.Api = $Api
 
-        $C.DiscoveryObj = $C.Api.DiscoveryObj.schemas.($ReflectedObj.ParameterType.Name)
         $C.ReflectedObj = $ReflectedObj
         $C.Type = $ReflectedObj.Name
+        $C.DiscoveryObj = $C.Api.DiscoveryObj.schemas.($C.Type)
         $C.TypeData = $TypeData
         $C.Description = Clean-CommentString $C.DiscoveryObj.description
         $C.Api.SchemaObjects.Add($C) | Out-Null
         $C.Api.SchemaObjectsDict[$C.TypeData] = $C
-
-        #START HERE - look through things in like IList<> to make sure those are available as well!
 
         foreach ($Property in ($ReflectedObj.DeclaredProperties | where Name -ne "ETag")) {
             $P = New-Object ApiMethodProperty #which can then in turn make their own API classes!

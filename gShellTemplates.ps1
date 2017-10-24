@@ -7,6 +7,14 @@
 #TODO: include logic in reflection to indicate if API should include std query params and service accounts to put it in one place
 #TODO: Fix casing on parameters
 #TODO: Add $PropertiesObjVarName and *Lower to method
+#TODO:  Make links for *Obj cmdlets point to a single wiki page
+#TODO: Anything that is text as a first-line should wrap and indent only itself, and THEN should bring in variables that are also indented. also, anything that has a text
+#       description in it should also be wrapped separately
+#TODO: Update Body Parameter reference to use regular parameter
+#TODO: Rename Api-Class to something about schema
+#TODO: Remove ETag filtering from templates
+#TODO: Update referecens in reflection so all objects have an API reference? clean up Get-ApiPropertyTypeShortName references
+#TODO: Look into datetime options
 
 <#
 
@@ -199,10 +207,135 @@ $GeneralFileHeader = @"
 
 #region Templating
 
-#region ObjCmdlets - 
+#region OC - (Object Cmdlets)
+
+function Write-OCMethodProperties ($SchemaObj, $Level=0) {
+    
+    $PositionInt = 0
+
+    $PropertiesTexts = New-Object System.Collections.ArrayList
+    
+    foreach ($Property in ($SchemaObj.Properties | where Name -ne "ETag")) {
+        $CommentDescription = Format-CommentString $Property.Description
+        $HelpDescription = Format-HelpMessage $Property.Description
+        $Type = $Property.Type
+        $Name = $Property.Name
+        
+        $summary = Wrap-Text (Set-Indent "{%T}/// <summary> $CommentDescription </summary>" $Level)
+        $attribute = Wrap-Text (Set-Indent "{%T}[Parameter(Position = $PositionInt, Mandatory = false, ValueFromPipelineByPropertyName = true, HelpMessage = $HelpDescription)]" $Level)
+        
+        $signature = Wrap-Text (Set-Indent "{%T}public $Type $Name { get; set; }" $Level)
+
+        $PropertyText = $summary,$attribute,$signature -join "`r`n"
+
+        Add-String $PropertiesTexts $PropertyText
+
+        $PositionInt++
+    }
+
+    $PropertiesTexts = $PropertiesTexts -join "`r`n`r`n"
+
+    return $PropertiesTexts
+}
+
+function Write-OCMethod ($SchemaObj, $Level=0) {
+    $Verb = "VerbsCommon.New"
+    $Noun = "G" + $SchemaObj.Api.Name + $SchemaObj.Type + "Obj"
+    $TypeData = $SchemaObj.TypeData
+    $Type = $SchemaObj.Type
+    $ClassName = "New" + $Noun + "Command"
+        
+    #Build out the attribute
+    $attributes = "{%T}[Cmdlet($Verb, `"$Noun`",$DefaultParameterSetName SupportsShouldProcess = true)]"
+    $attributes = Wrap-Text (Set-Indent $attributes $Level)
+
+    $properties = Write-OCMethodProperties $SchemaObj -Level ($Level + 1)
+
+    $BodyProperties = New-Object System.Collections.ArrayList
+
+    foreach ($P in $SchemaObj.Properties) {
+        Add-String $BodyProperties ("{{%T}}        {0} = this.{0}" -f $P.Name)   
+    }
+
+    $BodyPropertyAssignments = $BodyProperties -join ",`r`n"
+
+    $body = @"
+$attributes
+{%T}[OutputType(typeof($TypeData))]
+{%T}public class $ClassName : PSCmdlet
+{%T}{
+{%T}    #region Properties
+
+$Properties
+
+{%T}    #endregion
+
+{%T}    protected override void ProcessRecord()
+{%T}    {
+{%T}        var body = new $TypeData()
+{%T}        {
+$BodyPropertyAssignments
+{%T}        };
+
+{%T}        if (ShouldProcess("$Type"))
+{%T}        {
+{%T}            WriteObject(body);
+{%T}        }
+{%T}    }
+{%T}}
+"@
+
+    $body = Wrap-Text (Set-Indent $Body $Level)
+
+    return $body
+}
+
+function Write-OCResource ($Resources) {
+    foreach ($Resource in $Api.Resources) {
+        
+        foreach ($Child in $Resource.ChildResources) {
+            Write-OCResource $Child
+        }
+        
+        foreach ($Method in $Resource.Methods) {
+              Write-OCMethod $Method
+        }
+    }
+}
+
+function Write-OC ($Api) {
+
+    $SchemaCmdlets = New-Object System.Collections.ArrayList
+
+    foreach ($SchemaObj in ($Api.SchemaObjects | Sort-Object -Property Type)) {
+        $Method = Write-OCMethod $SchemaObj -Level 1
+        Add-String $SchemaCmdlets $Method
+    }
+
+    $Methods = $SchemaCmdlets -join "`r`n`r`n"
+
+    $ApiName = $Api.Name
+    $ApiRootNamespace = $Api.RootNamespace
+
+    $Text = @"
+$GeneralFileHeader
+using System;
+using System.Collections.Generic;
+using System.Management.Automation;
+using Data = $ApiRootNamespace.Data;
+
+namespace gShell.Cmdlets.$ApiName
+{
+
+$Methods
+
+}
+"@
+    return $Text
+
+}
 
 #endregion
-
 
 #region MC (Method Cmdlets)
 
@@ -403,7 +536,7 @@ function Write-MCProperties ($Method, $Level=0) {
 
         $BodyAttributes = New-Object System.Collections.ArrayList
 
-        foreach ($BodyProperty in $Method.BodyParameter.Properties) {
+        foreach ($BodyProperty in ($Method.BodyParameter.Properties | where Name -ne "ETag")) {
             
             $BPName = $BodyProperty.Name
 
@@ -1461,7 +1594,9 @@ $M = $Method
 
 #wrap-text (set-indent (Write-DNSW_MethodComments $F) 0)
 
-((write-dnc $Api) + "`r`n`r`n`r`n`r`n" + (write-dnsw $Api) ) | `
-     Out-File $env:USERPROFILE\Documents\gShell\gShell\gShell\$DotNetPath -Force
+#((write-dnc $Api) + "`r`n`r`n`r`n`r`n" + (write-dnsw $Api) ) | `
+#     Out-File $env:USERPROFILE\Documents\gShell\gShell\gShell\$DotNetPath -Force
 
-Write-MC $Api | Out-File $env:USERPROFILE\Documents\gShell\gShell\gShell\$CmdletPath -Force
+#Write-MC $Api | Out-File $env:USERPROFILE\Documents\gShell\gShell\gShell\$CmdletPath -Force
+
+Write-OC $Api

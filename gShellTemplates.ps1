@@ -39,6 +39,8 @@ function Get-CharCountInString([string]$String, $Char) {
 #take in a block of text and wrap any lines longer than 120 lines
 function Wrap-Text ($Text, $Level=0, $Padding=0, $PrependText=$null) {
 
+    $OriginalPadding = $padding 
+
     $lines = $Text -split "`r`n"
 
     for ($l = 0; $l -lt $lines.Count; $l++){
@@ -49,8 +51,8 @@ function Wrap-Text ($Text, $Level=0, $Padding=0, $PrependText=$null) {
         }
 
         #if padding is not in the line after whitespace, make sure it's applied - mostly for multiline comments
-        if ($level -eq 0 -and $padding -ne 0) {
-            $lines[$l] = $lines[$l].Insert(0,(" "*$Padding))
+        if ($level -eq 0 -and $OriginalPadding -ne 0) {
+            $lines[$l] = $lines[$l].Insert(0,(" "*$OriginalPadding))
         }
 
         if ($lines[$l].Length -gt 120) {
@@ -403,9 +405,15 @@ function Write-MCProperties ($Method, $Level=0) {
 
         foreach ($BodyProperty in $Method.BodyParameter.Properties) {
             
+            $BPName = $BodyProperty.Name
+
+            if ($Method.Parameters.Name -contains $BodyProperty.Name) {
+                $BPName = $Method.BodyParameter.Type + $BodyProperty.Name
+            }
+
             $BPsummary = wrap-text (Set-Indent ("{{%T}}/// <summary> {0} </summary>" -f (Format-CommentString $BodyProperty.Description)) $Level)
             
-            $BPsignature  = wrap-text (Set-Indent ("{{%T}}public {0} {1} {{ get; set; }}" -f $BodyProperty.Type, $BodyProperty.Name) $Level)
+            $BPsignature  = wrap-text (Set-Indent ("{{%T}}public {0} {1} {{ get; set; }}" -f $BodyProperty.Type, $BPName) $Level)
             $BPAttribute = Write-MCPropertyAttribute -Mandatory "false" -HelpMessage $BodyProperty.Description `
                 -Position $BodyPositionInt -ParameterSetName "NoBodyObject" -Level $Level
 
@@ -1453,7 +1461,7 @@ $M = $Method
 
 #wrap-text (set-indent (Write-DNSW_MethodComments $F) 0)
 
-#((write-dnc $Api) + "`r`n`r`n`r`n`r`n" + (write-dnsw $Api) ) | `
-#    Out-File $env:USERPROFILE\Documents\gShell\gShell\gShell\$DotNetPath -Force
-#
+((write-dnc $Api) + "`r`n`r`n`r`n`r`n" + (write-dnsw $Api) ) | `
+     Out-File $env:USERPROFILE\Documents\gShell\gShell\gShell\$DotNetPath -Force
+
 Write-MC $Api | Out-File $env:USERPROFILE\Documents\gShell\gShell\gShell\$CmdletPath -Force

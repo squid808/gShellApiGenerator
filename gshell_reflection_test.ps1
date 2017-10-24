@@ -61,6 +61,8 @@ class Api {
     $SchemaObjectsUsed = (New-Object System.Collections.ArrayList)
     $HasStandardQueryParams
     $CanUseServiceAccount
+    $SchemaObjects = (New-Object System.Collections.ArrayList)
+    $SchemaObjectsDict = @{}
 }
 
 function New-Api ([System.Reflection.Assembly]$Assembly, $RestJson) {
@@ -152,6 +154,8 @@ Remarks - The api method call is broken up in to two parts in the underlying cod
         - a class that contains properties for each API parameter, including those from the virtual method
         - properties include custom attributes that indicate the parameter name and parameter type (path, query, custom)
 #>
+    #Reference to the main Api object
+    $Api
 
     #Reference to the container resource
     $Resource
@@ -202,6 +206,7 @@ Remarks - The api method call is broken up in to two parts in the underlying cod
 function New-ApiMethod ([ApiResource]$Resource, $Method) {
     $M = New-Object ApiMethod
     $M.Resource = $Resource
+    $M.Api = $Resource.Api
     $M.ParentResource = $Resource
     $M.ReflectedObj = $Method
     $M.DiscoveryObj = $Resource.DiscoveryObj.methods.($Method.name)
@@ -212,7 +217,7 @@ function New-ApiMethod ([ApiResource]$Resource, $Method) {
     $M.ReturnType =  New-ApiMethodProperty $M (Get-ApiMethodReturnType $Method)
     
     if (Has-ObjProperty $M.DiscoveryObj "response") {
-        $M.ReturnType.Type = Get-ApiPropertyTypeShortName $M.ReturnType.ReflectedObj $M
+        $M.ReturnType.Type = Get-ApiPropertyTypeShortName $M.ReturnType.ReflectedObj $M.Api
     } else {
         $M.ReturnType.Type = "void"
     }
@@ -245,15 +250,18 @@ function New-ApiMethod ([ApiResource]$Resource, $Method) {
     $M.HasPagedResults = $Method.ReturnType.DeclaredProperties.name -contains "PageToken" -and `
                             $M.ReturnType.ReflectedObject.DeclaredProperties.name -contains "NextPageToken"
 
-    $M.HasBodyParameter = $M.Parameters.name -contains "body"
-    if ($M.HasBodyParameter -eq $true) {
-        $M.BodyParameter = New-ApiClass $M.ParametersDict.Body
-    }
+    #$M.HasBodyParameter = $M.Parameters.name -contains "body"
+    #if ($M.HasBodyParameter -eq $true) {
+    #    $M.BodyParameter = New-ApiClass $M.ParametersDict.Body
+    #}
 
     return $M
 }
 
 class ApiMethodProperty {
+    #Reference to the main Api object
+    $Api
+
     #Reference to the containing method
     $Method
     
@@ -277,9 +285,15 @@ class ApiMethodProperty {
 
     #This property's discovery API representation
     $DiscoveryObj
+
+    #Is this property of a Schema Object type
+    [bool]$IsSchemaObject
+
+    #If applicable, the schema ApiClass representing this object
+    $SchemaObject
 }
 
-function Get-ApiPropertyTypeShortName($Property, $Method) {
+function Get-ApiPropertyTypeShortName($Property, $Api) {
     $Name = $Property.FullName
     
     switch ($Name) {
@@ -288,7 +302,7 @@ function Get-ApiPropertyTypeShortName($Property, $Method) {
         "System.Boolean" {return "bool"}
     }
 
-    $Replaced = $Name -replace ($Method.Resource.Api.RootNamespace + ".")
+    $Replaced = $Name -replace ($Api.RootNamespace + ".")
 
     return $Replaced
 }
@@ -307,7 +321,7 @@ function Get-ApiPropertyType ([ApiMethodProperty]$Property) {
         $inners = New-Object System.Collections.ArrayList
 
         foreach ($I in $RefType.GenericTypeArguments) {
-            $innerType = Get-ApiPropertyTypeShortName $I $Property.Method
+            $innerType = Get-ApiPropertyTypeShortName $I $Property.Api
             $innerType = $innerType -replace "[+]","."
             $inners.Add($innerType) | Out-Null
         }
@@ -331,13 +345,24 @@ function Get-ApiPropertyType ([ApiMethodProperty]$Property) {
 
     } else  {
 
-        return Get-ApiPropertyTypeShortName $RefType $Property.Method
+        return Get-ApiPropertyTypeShortName $RefType $Property.Api
     }
 }
 
-function New-ApiMethodProperty ([ApiMethod]$Method, $Property, [bool]$ForceRequired = $false) {
+function New-ApiMethodProperty {
+#[CmdletBinding(DefaultParameterSetName = 'FromMethod')]
+
+    Param (
+        #[Parameter(ParameterSetName = 'FromMethod')]
+        [ApiMethod]$Method,
+        
+        $Property,
+        
+        [bool]$ForceRequired = $false
+    )
     $P = New-Object ApiMethodProperty
     $P.Method = $Method
+    $P.Api = $Method.Api
     $P.Name = ConvertTo-FirstUpper $Property.Name
     $P.NameLower = ConvertTo-FirstLower $Property.Name
     $P.ReflectedObj = $Property
@@ -345,12 +370,27 @@ function New-ApiMethodProperty ([ApiMethod]$Method, $Property, [bool]$ForceRequi
     $P.Type = Get-ApiPropertyType $P
     $P.Description = Clean-CommentString $P.DiscoveryObj.Description
     $P.Required = if ($ForceRequired -eq $true) {$true} else {[bool]($P.DiscoveryObj.required)}
+    #TODO - is force required really needed?
+
+    #If this is one of the schema objects
+    if ($P.ReflectedObj.ParameterType.ImplementedInterfaces.Name -contains "IDirectResponseSchema") {
+        
+        $P.IsSchemaObject = $true
+        $P.SchemaObject = New-ApiClass -ReflectedObj $P.ReflectedObj.ParameterType -Api $Method.Api
+
+        if ($P.Name -eq "Body") {
+            $Method.HasBodyParameter = $true
+            $Method.BodyParameter = $P
+        } 
+    }
 
     return $P
 }
 
 class ApiClass {
+    #Reference to the main Api object
     $Api
+
     $Name
     $NameLower
     $Type
@@ -364,29 +404,60 @@ class ApiClass {
     $DiscoveryObj
 }
 
-function New-ApiClass ($Parameter) {
-    $ReflectedObj = $Parameter.ReflectedObj
-    $C = New-Object ApiClass
-    $C.Api = $Parameter.Method.Resource.Api
-    $C.DiscoveryObj = $C.Api.DiscoveryObj.schemas.($Parameter.ReflectedObj.ParameterType.Name)
-    $C.ReflectedObj = $Parameter.ReflectedObj
-    $C.Name = $ReflectedObj.Name
-    $C.NameLower = ConvertTo-FirstLower $C.Name
-    $C.Type = $ReflectedObj.ParameterType.Name
-    $C.TypeData = "Data." + $C.Type
-    foreach ($Property in ($ReflectedObj.ParameterType.DeclaredProperties)) {
-        $P = New-Object ApiMethodProperty
-        $P.Name = $Property.Name
-        $P.DiscoveryObj = $C.DiscoveryObj.properties.($P.Name)
-        $P.ReflectedObj = $Property
-        $P.Method = $Parameter.Method
-        $P.Type = Get-ApiPropertyType $P
-        $P.Description = Clean-CommentString $P.DiscoveryObj.Description
-        $C.Properties.Add($P) | Out-Null
-    }
-    $C.Description = Clean-CommentString $C.DiscoveryObj.description
+#The complex class representation for the object behind a property, documented as a 'schema object' in Google's json
+function New-ApiClass {
 
-    return $C
+    Param (
+        $ReflectedObj,
+        $Api
+    )
+
+    $TypeData = Get-ApiPropertyTypeShortName $ReflectedObj $Api
+
+    if ($Api.SchemaObjectsDict.ContainsKey($TypeData)) {
+        return $Api.SchemaObjectsDict[$TypeData]
+    } else {
+
+        $C = New-Object ApiClass
+
+        $C.Api = $Api
+
+        $C.DiscoveryObj = $C.Api.DiscoveryObj.schemas.($ReflectedObj.ParameterType.Name)
+        $C.ReflectedObj = $ReflectedObj
+        $C.Type = $ReflectedObj.Name
+        $C.TypeData = $TypeData
+        $C.Description = Clean-CommentString $C.DiscoveryObj.description
+        $C.Api.SchemaObjects.Add($C) | Out-Null
+        $C.Api.SchemaObjectsDict[$C.TypeData] = $C
+
+        #START HERE - look through things in like IList<> to make sure those are available as well!
+
+        foreach ($Property in ($ReflectedObj.DeclaredProperties | where Name -ne "ETag")) {
+            $P = New-Object ApiMethodProperty #which can then in turn make their own API classes!
+            $P.Name = $Property.Name
+            $P.Api = $Api
+            $P.DiscoveryObj = $C.DiscoveryObj.properties.($P.Name)
+            $P.ReflectedObj = $Property
+            #$P.Method = $Parameter.Method
+            $P.Type = Get-ApiPropertyType $P
+            $P.Description = Clean-CommentString $P.DiscoveryObj.Description
+
+            if ($P.ReflectedObj.PropertyType.ImplementedInterfaces.Name -contains "IDirectResponseSchema") {
+                $P.IsSchemaObject = $true
+                $P.SchemaObject = New-ApiClass -ReflectedObj $P.ReflectedObj.PropertyType -Api $Api
+            }
+
+            foreach ($I in $P.ReflectedObj.PropertyType.GenericTypeArguments) {
+                if  ($I.ImplementedInterfaces.Name -contains "IDirectResponseSchema") {
+                    New-ApiClass $I $Api | Out-Null
+                }
+            }
+
+            $C.Properties.Add($P) | Out-Null
+        }
+
+        return $C
+    }
 }
 
 #endregion

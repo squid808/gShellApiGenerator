@@ -60,9 +60,12 @@ class Api {
     $DiscoveryObj
     $SchemaObjectsUsed = (New-Object System.Collections.ArrayList)
     $HasStandardQueryParams
+    $StandardQueryparams = (New-Object System.Collections.ArrayList)
+    $StandardQueryParamsBaseType
     $CanUseServiceAccount
     $SchemaObjects = (New-Object System.Collections.ArrayList)
     $SchemaObjectsDict = @{}
+    $CmdletBaseType
 }
 
 function New-Api ([System.Reflection.Assembly]$Assembly, $RestJson) {
@@ -84,8 +87,56 @@ function New-Api ([System.Reflection.Assembly]$Assembly, $RestJson) {
     $api.Resources | % {$api.ResourcesDict[$_.name] = $_}
 
     $api.HasStandardQueryParams = Has-ObjProperty $api.DiscoveryObj "parameters"
+    
+    #TODO - throw error if more than one result?
+    foreach ($Param in ($Api.ReflectedObj.ExportedTypes | where {$_.Name -like "*BaseServiceRequest?1" `
+                -and $_.BaseType.Name -eq "ClientServiceRequest``1"} | select -ExpandProperty DeclaredProperties) `
+                | where Name -notlike "alt")
+    {
+        $P = New-Object ApiMethodProperty
+        $P.Api = $api
+        $P.ReflectedObj = $Param
+        $P.Name = $Param.Name
+        $P.NameLower = ConvertTo-FirstLower $Param.Name
+        $P.Type = Get-ApiPropertyType -Property $P
+        $DiscoveryName = $Param.CustomAttributes | where AttributeType -like "*RequestParameterAttribute" | `
+            select -ExpandProperty ConstructorArguments | select -First 1 -ExpandProperty Value
+        $P.Description = $P.Api.DiscoveryObj.parameters.($DiscoveryName).Description
+        $Api.StandardQueryParams.Add($P) | Out-Null
+    }
+
     $api.CanUseServiceAccount = (-not $api.RootNamespace.StartsWith("Google.Apis.Discovery") -and `
         -not $api.RootNamespace.StartsWith("Google.Apis.admin"))
+
+    
+    if ($api.RootNamespace.StartsWith("Google.Apis.Discovery")) {
+        $api.StandardQueryParamsBaseType = "OAuth2CmdletBase" #Todo - double check this?
+        $api.CmdletBaseType = "StandardQueryParametersBase"
+    } elseif ($api.RootNamespace.StartsWith("Google.Apis.admin")) {
+        if ($api.HasStandardQueryParams -eq $true) {
+            $api.StandardQueryParamsBaseType = "AuthenticatedCmdletBase"
+            $api.CmdletBaseType = "StandardQueryParametersBase"
+        } else {
+            $api.CmdletBaseType = "AuthenticatedCmdletBase"
+        }
+    } else {
+        if ($api.HasStandardQueryParams -eq $true) {
+                
+            $api.CmdletBaseType = "StandardQueryParametersBase"
+
+            if ($api.CanUseServiceAccount -eq $true) {
+                $api.StandardQueryParamsBaseType = "ServiceAccountCmdletBase"
+            } else {
+                $api.StandardQueryParamsBaseType = "AuthenticatedCmdletBase"
+            }
+        } else {
+            if ($api.CanUseServiceAccount -eq $true) {
+                $api.CmdletBaseType = "ServiceAccountCmdletBase"
+            } else {
+                $api.CmdletBaseType = "AuthenticatedCmdletBase"
+            }
+        }
+    }
 
     return $api
 }
@@ -217,7 +268,7 @@ function New-ApiMethod ([ApiResource]$Resource, $Method) {
     $M.ReturnType =  New-ApiMethodProperty $M (Get-ApiMethodReturnType $Method)
     
     if (Has-ObjProperty $M.DiscoveryObj "response") {
-        $M.ReturnType.Type = Get-ApiPropertyTypeShortName $M.ReturnType.ReflectedObj $M.Api
+        $M.ReturnType.Type = Get-ApiPropertyTypeShortName $M.ReturnType.ReflectedObj.FullName $M.Api
     } else {
         $M.ReturnType.Type = "void"
     }
@@ -293,13 +344,14 @@ class ApiMethodProperty {
     $SchemaObject
 }
 
-function Get-ApiPropertyTypeShortName($Property, $Api) {
-    $Name = $Property.FullName
+function Get-ApiPropertyTypeShortName($Name, $Api) {
     
     switch ($Name) {
         "System.String" {return "string"}
         "System.Int32" {return "int"}
+        "int32" {return "int"}
         "System.Boolean" {return "bool"}
+        "boolean" {return "bool"}
     }
 
     $Replaced = $Name -replace ($Api.RootNamespace + ".")
@@ -321,7 +373,7 @@ function Get-ApiPropertyType ([ApiMethodProperty]$Property) {
         $inners = New-Object System.Collections.ArrayList
 
         foreach ($I in $RefType.GenericTypeArguments) {
-            $innerType = Get-ApiPropertyTypeShortName $I $Property.Api
+            $innerType = Get-ApiPropertyTypeShortName $I.FullName $Property.Api
             $innerType = $innerType -replace "[+]","."
             $inners.Add($innerType) | Out-Null
         }
@@ -345,7 +397,7 @@ function Get-ApiPropertyType ([ApiMethodProperty]$Property) {
 
     } else  {
 
-        return Get-ApiPropertyTypeShortName $RefType $Property.Api
+        return Get-ApiPropertyTypeShortName $RefType.FullName $Property.Api
     }
 }
 
@@ -412,7 +464,7 @@ function New-ApiClass {
         $Api
     )
 
-    $TypeData = Get-ApiPropertyTypeShortName $ReflectedObj $Api
+    $TypeData = Get-ApiPropertyTypeShortName $ReflectedObj.FullName $Api
 
     if ($Api.SchemaObjectsDict.ContainsKey($TypeData)) {
         return $Api.SchemaObjectsDict[$TypeData]

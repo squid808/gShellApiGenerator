@@ -15,6 +15,7 @@
 #TODO: Remove ETag filtering from templates
 #TODO: Update referecens in reflection so all objects have an API reference? clean up Get-ApiPropertyTypeShortName references
 #TODO: Look into datetime options
+#TODO: Hard-code in the scopes if needed? Will need to figure that out.
 
 <#
 
@@ -207,6 +208,88 @@ $GeneralFileHeader = @"
 
 #region Templating
 
+#region SQP, SQPB - Standard Query Parameters Base
+
+function Write-SQP ($Api) {
+    if ($Api.HasStandardQueryParams -eq $true) {
+        
+        $ApiName = $Api.Name
+        $ApiNameAndVersion = $Api.NameAndVersion
+        $StdQParamsName = $Api.Name + "StandardQueryParameters"
+        $Params = New-Object System.Collections.ArrayList
+
+        foreach ($Param in $Api.StandardQueryParams) {
+            $Summary = Wrap-Text (("        /// <summary> {0} </summary>" -f (Format-CommentString $Param.description)))
+            $Property = "        public {0} {1} {{ get; set; }}" -f $Param.type, $Param.NameLower
+
+            Add-String $Params ($Summary + "`r`n" + $Property)
+        }
+
+        $ParamsText = $Params -join "`r`n`r`n"
+
+        $text = @"
+$GeneralFileHeader
+namespace gShell.$ApiNameAndVersion
+{
+    /// <summary> Standard Query Parameters for the $ApiName Api. </summary>
+    public class $StdQParamsName
+    {
+$ParamsText
+    }
+}
+"@
+
+        return $text
+    } 
+}
+
+function Write-SQPB ($Api) {
+    if ($Api.HasStandardQueryParams -eq $true) {
+        
+        $ApiName = $Api.Name
+        $ApiNameAndVersion = $Api.NameAndVersion
+
+        $StdQParamsName = $Api.Name + "StandardQueryParameters"
+        $StdQParamsBase = $Api.StandardQueryParamsBaseType
+
+        $Params = New-Object System.Collections.ArrayList
+
+        foreach ($Param in $Api.StandardQueryParams) {
+            $Help = Format-HelpMessage $Param.description
+            $ParamAttributes = Wrap-Text "    [Parameter(Mandatory = false, HelpMessage = `"$Help`")]"
+            $Signature = "        public {0} {1} {{ get; set; }}" -f $Param.type, $Param.NameLower
+
+            Add-String $Params ($Summary + "`r`n" + $Property)
+        }
+
+        $ParamsText = $Params -join "`r`n`r`n"
+        $ParamAttribute = Wrap-Text (("        [Parameter(Mandatory = false, HelpMessage = `"The standard query parameters " +
+            "for this Api, created with New-G{0}StandardQueryParameters or by creating a new object of " +
+            "type gShell.{1}.{2}`")]") -f $Api.Name, $Api.NameAndVersion, $StdQParamsName)
+
+        $text = @"
+$GeneralFileHeader
+
+using System.Management.Automation;
+using gShell.Main.PowerShell.Base.v1;
+
+namespace gShell.$ApiNameAndVersion
+{
+    /// <summary> Standard Query Parameters for the $ApiName Api. </summary>
+    public abstract class StandardQueryParametersBase : $StdQParamsBase
+    {
+$ParamAttribute
+        public $StdQParamsName StandardQueryParams { get; set; }
+    }
+}
+"@
+
+        return $text
+    } 
+}
+
+#endregion
+
 #region OC - (Object Cmdlets)
 
 function Write-OCMethodProperties ($SchemaObj, $Level=0) {
@@ -332,7 +415,6 @@ $Methods
 }
 "@
     return $Text
-
 }
 
 #endregion
@@ -524,7 +606,8 @@ function Write-MCProperties ($Method, $Level=0) {
     if ($Method.HasBodyParameter -eq $true) {
         
         $summary = wrap-text (set-indent ("{{%T}}/// <summary> {0} </summary>" -f (Format-CommentString $Property.Description)) $Level)
-        $signature  = wrap-text (set-indent ("{{%T}}public {0} {1} {{ get; set; }}" -f $Method.BodyParameter.TypeData, ($Method.BodyParameter.Type + "Body")) $Level)
+        $signature  = wrap-text (set-indent ("{{%T}}public {0} {1} {{ get; set; }}" -f $Method.BodyParameter.TypeData, `
+            ($Method.BodyParameter.Type + " Body")) $Level)
         $attribute = Write-MCPropertyAttribute -Mandatory "true" -HelpMessage $Property.Description `
             -Position $StandardPositionInt -ParameterSetName "WithBodyObject" -Level $Level
             
@@ -571,7 +654,7 @@ function Write-MCMethodCallParams ($Method, $Level=0) {
     foreach ($P in $Method.Parameters){
         if ($P.Required -eq $true){
             if ($P.Name -eq "Body") {
-                Add-String $Params ($Method.BodyParameter.Type + "Body")
+                Add-String $Params "Body"
             } else {
                 Add-String $Params $P.Name
             }
@@ -602,8 +685,8 @@ function Write-MCMethodPropertiesObject ($Method, $Level=0) {
     if ($Method.Parameters.Required -contains $False) {
         
         $PropertiesObjectVarName = "{0}{1}Properties" -f $Method.Resource.NameLower, $Method.Name
-        $PropertiesObjectFullName = "g{0}.{1}.{2}{3}Properties" -f `
-                    $Method.Resource.Api.Name, (Get-ParentResourceChain $Method), `
+        $PropertiesObjectFullName = "{0}.{1}.{2}{3}Properties" -f `
+                    ($Api.Name + "ServiceWrapper"), (Get-ParentResourceChain $Method), `
                     $Method.Resource.Name, $Method.Name
     
         $PropertiesObjectParameters = New-Object System.Collections.ArrayList
@@ -722,9 +805,11 @@ function Write-MC ($Api) {
     
     $Resources = Write-MCResources $Api.Resources
 
-    $ApiName = $R
+    $ApiName = $Api.Name
+    $ApiNameAndVersion = $Api.NameAndVersion
 
     $text = @"
+$GeneralFileHeader
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -733,7 +818,7 @@ using System.Management.Automation;
 using Google.Apis.Gmail.v1;
 using Data = Google.Apis.Gmail.v1.Data;
 
-using gGmail = gShell.dotNet.Gmail;
+using gShell.$ApiNameAndVersion.DotNet;
 
 $Resources
 "@
@@ -768,13 +853,13 @@ function Write-DNC_MethodSignatureParams ($Method, $Level=0, [bool]$NameOnly=$fa
         if ($NameOnly) {
             Add-String $Params $PropertiesObjVarName
         } else {
-            Add-String $Params ("g{0}.{1}.{2}{3}Properties $PropertiesObjVarName = null" -f `
-                $Method.Resource.Api.Name, (Get-ParentResourceChain $Method), `
+            Add-String $Params ("{0}.{1}.{2}{3}Properties $PropertiesObjVarName = null" -f `
+                ($Api.Name + "ServiceWrapper"), (Get-ParentResourceChain $Method), `
                 $Method.Resource.Name, $Method.Name)
         }
     }
 
-    if ($Method.Resource.Api.CanUseServiceAccount) {
+    if ($Method.Api.CanUseServiceAccount) {
         if ($NameOnly) {
             Add-String $Params "ServiceAccount"
         } else {
@@ -782,11 +867,11 @@ function Write-DNC_MethodSignatureParams ($Method, $Level=0, [bool]$NameOnly=$fa
         }
     }
     
-    if ($Method.Resource.Api.HasStandardQueryParams) {
+    if ($Method.Api.HasStandardQueryParams) {
         if ($NameOnly) {
             Add-String $Params "StandardQueryParams"
         } else {
-            Add-String $Params "StandardQueryParameters StandardQueryParams = null"
+            Add-String $Params ($Method.Api.Name + "StandardQueryParameters StandardQueryParams = null")
         }
     }
 
@@ -818,8 +903,8 @@ function Write-DNC_Method ($Method, $Level=0) {
 "@)
 
     if ($Method.HasPagedResults -eq $true -or $Method.Parameters.Required -contains $False) {
-        $PropertiesObjFullName = "g{0}.{1}.{2}{3}Properties" -f `
-            $Api.Name, (Get-ParentResourceChain $Method),
+        $PropertiesObjFullName = "{0}.{1}.{2}{3}Properties" -f `
+            ($Api.Name + "ServiceWrapper"), (Get-ParentResourceChain $Method),
             $Method.Resource.Name, $Method.Name
         $PropertiesObjVarName = "{0}{1}Properties" -f $Method.Resource.NameLower, $Method.Name
         Add-String $sections "{%T}    $PropertiesObjVarName = $PropertiesObjVarName ?? new $PropertiesObjFullName();"
@@ -840,7 +925,7 @@ function Write-DNC_Method ($Method, $Level=0) {
 
     $ParentResourceChain = Get-ParentResourceChain $Method -UpperCase $False
 
-    $Return = "`{{%T}}    {0}mainBase.{1}.{2}({3});" -f $resultReturn, $ParentResourceChain, $Method.Name, $ReturnProperties
+    $Return = "`{{%T}}    {0}serviceWrapper.{1}.{2}({3});" -f $resultReturn, $ParentResourceChain, $Method.Name, $ReturnProperties
 
     if ($Method.HasPagedResults -eq $true -or $Method.Parameters.Required -contains $False) {
         $Return = "`r`n" + $Return
@@ -995,44 +1080,31 @@ function Write-DNC ($Api, $Level=0) {
     $ApiVersion = $Api.DiscoveryObj.version
     $ApiVersionNoDots = $Api.NameAndVersion -replace "[.]","_"
     $ApiModuleName = $Api.RootNamespace + "." + $ApiVersionNoDots
-    $ApiNameAndVersion = $Api.DiscoveryObj.name + ":" + $ApiVersion
+    $ApiNameAndVersion = $Api.NameAndVersion
+    $ServiceWrapperName = $Api.Name + "ServiceWrapper"
     
     $ResourcesAsProperties = Write-DNC_ResourcesAsProperties $Api.Resources -Level 2
     $ResourceInstantiatons = Write-DNSW_ResourceInstantiations $Api.Resources -Level 3
     $ResourceWrappedMethods = Write-DNC_Resources $Api.Resources -Level 2
 
-    $baseClassType = if (-not (Has-ObjProperty $Api.DiscoveryObj "auth")){ #discovery API
-        "OAuth2CmdletBase"
-    } elseif (-not ($Api.RootNamespace.StartsWith("Google.Apis.admin"))) {
-        "ServiceAccountCmdletBase"
-    } elseif ((Has-ObjProperty $Api.DiscoveryObj "parameters")) {
-        "StandardParamsCmdletBase"
-    } else {
-        "AuthenticatedCmdletBase"
-    }
+    $baseClassType = $Api.CmdletBaseType
+    #if (-not (Has-ObjProperty $Api.DiscoveryObj "auth")){ #discovery API
+    #    "OAuth2CmdletBase"
+    #} elseif (-not ($Api.RootNamespace.StartsWith("Google.Apis.admin"))) {
+    #    "ServiceAccountCmdletBase"
+    #} elseif ((Has-ObjProperty $Api.DiscoveryObj "parameters")) {
+    #    "StandardParamsCmdletBase"
+    #} else {
+    #    "AuthenticatedCmdletBase"
+    #}
 
     $text = @"
 $GeneralFileHeader
-using gShell.Cmdlets.Utilities.OAuth2;
-using gShell.dotNet;
-using gShell.dotNet.Utilities.OAuth2;
-
 using System;
-using System.Collections.Generic;
-//using System.Management.Automation;
-//
-//using Google.Apis.Auth.OAuth2;
-//using Google.Apis.Services;
-using $ApiRootNamespace;
 using Data = $ApiRootNamespace.Data;
-//
-//using gShell.dotNet.Utilities;
-//using gShell.dotNet.Utilities.OAuth2;
-using g$ApiName = gShell.dotNet.$ApiName;
 
-namespace gShell.Cmdlets.$ApiName {
-
-    
+namespace gShell.$ApiNameAndVersion.DotNet
+{
 
     /// <summary>
     /// A PowerShell-ready wrapper for the $ApiName api, as well as the resources and methods therein.
@@ -1043,20 +1115,20 @@ namespace gShell.Cmdlets.$ApiName {
         #region Properties and Constructor
 
         /// <summary>The gShell dotNet class wrapper base.</summary>
-        protected static g$ApiName mainBase { get; set; }
+        protected static $ServiceWrapperName serviceWrapper { get; set; }
 
         /// <summary>
-        /// Required to be able to store and retrieve the mainBase from the ServiceWrapperDictionary
+        /// Required to be able to store and retrieve the serviceWrapper from the ServiceWrapperDictionary
         /// </summary>
-        protected override Type mainBaseType { get { return typeof(g$ApiName); } }
+        protected override Type serviceWrapperType { get { return typeof($ServiceWrapperName); } }
 
 $ResourcesAsProperties
 
         protected $ApiNameBase()
         {
-            mainBase = new g$ApiName();
+            serviceWrapper = new $ServiceWrapperName();
 
-            ServiceWrapperDictionary[mainBaseType] = mainBase;
+            ServiceWrapperDictionary[serviceWrapperType] = serviceWrapper;
             
 $ResourceInstantiatons
         }
@@ -1203,7 +1275,7 @@ function Write-DNSW_MethodSignatureParams ($Method, $Level=0, [bool]$RequiredOnl
         if ($NameOnly) {
             Add-String $Params "StandardQueryParams"
         } else {
-            Add-String $Params "StandardQueryParameters StandardQueryParams = null"
+            Add-String $Params ($Method.Api.Name + "StandardQueryParameters StandardQueryParams = null")
         }
     }
 
@@ -1329,22 +1401,37 @@ function Write-DNSW_Method ($Method, $Level=0) {
 
     $requestParams = Write-DNSW_MethodSignatureParams $Method -RequiredOnly $true -NameOnly $true
 
-    $getServiceWithServiceAccount = if ($Method.Resource.Api.HasStandardQueryParams) { "ServiceAccount" } else { $null }
+    $getServiceWithServiceAccount = if ($Method.Api.CanUseServiceAccount) { "ServiceAccount" } else { $null }
 
     $request = "var request = GetService({0}).{1}.{2}($requestParams);" -f `
         $getServiceWithServiceAccount, `
         (Get-ParentResourceChain $Method), $Method.name
+
+    if ($Method.Api.HasStandardQueryParams) {
+        $SQParams = New-Object System.Collections.ArrayList
+        foreach ($Param in $Api.StandardQueryParams) {
+            $ParamText = "{{%T}}        request.{0} = StandardQueryParams.{1};" -f $Param.Name, $Param.NameLower
+            Add-String $SQParams $ParamText
+        }
+
+        $SQParamsText = $SQParams -join "`r`n"
+
+        $SQAssignment = @"
+{%T}    if (StandardQueryParams != null)
+{%T}    {
+$SQParamsText
+{%T}    }
+"@
+
+        $SQAssignment = wrap-text (set-indent $SQAssignment $Level)
+    }
 
     Add-String $sections (@"
 {%T}public $MethodReturnType $MethodName ($PropertiesObj)
 {%T}{
 {%T}    $request
 
-{%T}    if (StandardQueryParams != null) {
-{%T}        request.Fields = StandardQueryParams.fields;
-{%T}        request.QuotaUser = StandardQueryParams.quotaUser;
-{%T}        request.UserIp = StandardQueryParams.userIp;
-{%T}    }
+$SQAssignment
 "@)
 
     $PropertyAssignments = Write-DNSW_MethodPropertyObjAssignment $Method
@@ -1489,43 +1576,35 @@ function Write-DNSW ($Resource, $Level=0) {
     $ApiClassNameBase = $ApiName + "Base"
     $ApiVersionNoDots = $Api.NameAndVersion -replace "[.]","_"
     $ApiModuleName = $Api.RootNamespace + "." + $ApiVersionNoDots
-    $ApiNameAndVersion = $Api.DiscoveryObj.name + ":" + $ApiVersion
+    $ApiNameAndVersion = $Api.NameAndVersion
+    $ApiNameAndVersionWithColon = $Api.DiscoveryObj.name + ":" + $ApiVersion
+    $ServiceWrapperName = $Api.Name + "ServiceWrapper"
 
     $ResourcesAsProperties = Write-DNSW_ResourcesAsProperties $Api.Resources -Level 2
     $ResourceInstantiatons = Write-DNSW_ResourceInstantiations $Api.Resources -Level 3
     $ResourceClasses = Write-DNSW_Resources $Api.Resources -Level 2
     
-    #TODO: figure out service account
-    if ($Api.Name -eq "Admin") {
-        $UseServiceAccount = $false
-        $WorksWithGmail = "false"
-    } else {
-        $UseServiceAccount = $true
+    if ($Resource.Api.CanUseServiceAccount -eq $true)  {
+        $CreateServiceServiceAccount = ", serviceAccountUser"
         $WorksWithGmail = "true"
-    }
-
-    if ($UseServiceAccount)  {
-        $CreateServiceServiceAccountSignature = ", string gShellServiceAccount = null"
-        $CreateServiceServiceAccount = ", gShellServiceAccount"
+    } else {
+        $WorksWithGmail = "false"
     }
     
     $dotNetBlock = @"
 $GeneralFileHeader
 
-//using System;
-//using System.Collections.Generic;
-//
-//using gShell.dotNet;
-//using gShell.dotNet.Utilities.OAuth2;
-//
-//using $ApiRootNamespace;
-//using Data = $ApiRootNamespace.Data;
+using $ApiRootNamespace;
+using Data = $ApiRootNamespace.Data;
 
-namespace gShell.dotNet
+using gShell.Main.Apis.Services.v1;
+using gShell.Main.Auth.OAuth2.v1;
+
+namespace gShell.$ApiNameAndVersion.DotNet
 {
 
     /// <summary>The dotNet gShell version of the $ApiName api.</summary>
-    public class $ApiName : ServiceWrapper<$ApiNameService>, IServiceWrapper<Google.Apis.Services.IClientService>
+    public class $ServiceWrapperName : ServiceWrapper<$ApiNameService>, IServiceWrapper<Google.Apis.Services.IClientService>
     {
         protected override bool worksWithGmail { get { return $WorksWithGmail; } }
 
@@ -1533,19 +1612,19 @@ namespace gShell.dotNet
         /// <param name="domain">The domain to which this service will be authenticated.</param>
         /// <param name="authInfo">The authenticated AuthInfo for this user and domain.</param>
         /// <param name="gShellServiceAccount">The optional email address the service account should impersonate.</param>
-        protected override $ApiNameService CreateNewService(string domain, AuthenticatedUserInfo authInfo$CreateServiceServiceAccountSignature)
+        protected override $ApiNameService CreateNewService(string domain, AuthenticatedUserInfo authInfo, string serviceAccountUser = null)
         {
             return new $ApiNameService(OAuth2Base.GetInitializer(domain, authInfo$CreateServiceServiceAccount));
         }
 
         /// <summary>Returns the api name and version in {name}:{version} format.</summary>
-        public override string apiNameAndVersion { get { return "$ApiNameAndVersion"; } }
+        public override string apiNameAndVersion { get { return "$ApiNameAndVersionWithColon"; } }
 
         #region Properties and Constructor
 
 $ResourcesAsProperties
 
-        public $ApiName()
+        public $ServiceWrapperName()
         {
 $ResourceInstantiatons
         }
@@ -1594,9 +1673,18 @@ $M = $Method
 
 #wrap-text (set-indent (Write-DNSW_MethodComments $F) 0)
 
-#((write-dnc $Api) + "`r`n`r`n`r`n`r`n" + (write-dnsw $Api) ) | `
-#     Out-File $env:USERPROFILE\Documents\gShell\gShell\gShell\$DotNetPath -Force
+$RootOutPath = "$env:USERPROFILE\Desktop\GenOutput\gShellGmail\"
 
-#Write-MC $Api | Out-File $env:USERPROFILE\Documents\gShell\gShell\gShell\$CmdletPath -Force
+if (-not (Test-Path $RootOutPath)) {
+    New-Item -Path $RootOutPath -ItemType "Directory"
+}
 
-Write-OC $Api
+Write-DNC $Api | Out-File ($RootOutPath + "DotNetCmdlets.cs") -Force
+Write-DNSW $Api | Out-File ($RootOutPath + "DotNetServiceWrapper.cs") -Force
+Write-MC $Api | Out-File ($RootOutPath + "MethodCmdlets.cs") -Force
+#Write-OC $Api | Out-File ($RootOutPath + "ObjectCmdlets.cs") -Force
+
+$SQP = Write-SQP $Api
+if ($SQP -ne $null) {$SQP | Out-File ($RootOutPath + $Api.Name + "StandardQueryParameters.cs") -Force}
+$SQPB = Write-SQPB $Api
+if ($SQPB -ne $null) {$SQPB | Out-File ($RootOutPath + $Api.Name + "StandardQueryParametersBase.cs") -Force}

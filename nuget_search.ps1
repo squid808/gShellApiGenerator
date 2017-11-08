@@ -1,6 +1,8 @@
 ﻿add-type -assembly System.IO.Compression
 add-type -assembly System.IO.Compression.FileSystem
-
+<#
+TODO: Hard-code in versions for APIs for consistency?
+#>
 function Log ($Message, [bool]$ShouldLog=$false) {
     if ($ShouldLog) {
         Write-Host $Message -ForegroundColor Green
@@ -11,19 +13,31 @@ function Log ($Message, [bool]$ShouldLog=$false) {
 #via https://github.com/PowerShell/PowerShell/issues/2736
 function Format-Json([Parameter(Mandatory, ValueFromPipeline)][String] $json) {
   $indent = 0;
-  ($json -Split '\n' |
-    % {
-      if ($_ -match '[\}\]]') {
+  $previousLine = $null
+  $Lines = $json -Split "`r`n"
+
+  for ($i = 0; $i -lt $lines.Length; $i++) {
+    if ($Lines[$i] -match '[\}\]]') {
         # This line contains  ] or }, decrement the indentation level
         $indent--
-      }
-      $line = (' ' * $indent * 2) + $_.TrimStart().Replace(':  ', ': ')
-      if ($_ -match '[\{\[]') {
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($Lines[$i])) {
+        $lines[$i] = ('  ' * $indent) + $Lines[$i].TrimStart().TrimEnd().Replace(':  ', ': ')
+    }
+    
+    if ($Lines[$i] -match '[\{\[]$') {
         # This line contains [ or {, increment the indentation level
         $indent++
-      }
-      $line
-  }) -Join "`n"
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($Lines[$i])) {
+        $lines[$i] = $lines[$i] + "`r`n"
+    }
+
+  }
+  
+  $Lines -Join ""
 }
 
 function SearchForNugetPackage($SearchServiceUri, $Package, $IsExactPackageId=$false, [bool]$Log=$false){
@@ -63,6 +77,10 @@ function Get-CatalogEntry ($Package, $Author = $null, $Version = $null, $IsExact
 
     $CatalogEntry | Add-Member -MemberType NoteProperty -Name "packageInfo" -Value $VersionPackageInfo
 
+    $CatalogEntry | Add-Member -MemberType NoteProperty -Name "dllPath" -Value $null
+    $CatalogEntry | Add-Member -MemberType NoteProperty -Name "xmlPath" -Value $null
+    $CatalogEntry | Add-Member -MemberType NoteProperty -Name "framework" -Value $null
+
     return $CatalogEntry
 }
 
@@ -95,14 +113,21 @@ function Get-DependenciesOf($CatalogEntry, $JsonHash, $CatalogHash = $null, [boo
     }
 
     if (-NOT $CatalogHash[$CatalogEntry.id].ContainsKey($CatalogEntry.version)) {
+        #actual versions here
         $CatalogHash[$CatalogEntry.id][$CatalogEntry.version] = $CatalogEntry
     }
 
     $DependencyInfos = New-Object System.Collections.ArrayList
 
-    $TargetFrameworkDependencies = $CatalogEntry.dependencyGroups | Where-Object targetFramework -eq $TargetFramework
+    if ($CatalogEntry.dependencyGroups.Count -eq 1 -and -not (Has-ObjProperty $CatalogEntry.dependencyGroups "targetFramework")){
+        #in the less often cases where there is only one dependency that has no target framework
+        $TargetFrameworkDependencies = $CatalogEntry.dependencyGroups[0]
+    } else {
+        $TargetFrameworkDependencies = $CatalogEntry.dependencyGroups | Where-Object targetFramework -eq $TargetFramework
+        $CatalogEntry.framework = $TargetFramework
+    }
 
-    if ($TargetFrameworkDependencies -ne $null -AND (Has-Property $TargetFrameworkDependencies "dependencies")) {
+    if ($TargetFrameworkDependencies -ne $null -AND (Has-objProperty $TargetFrameworkDependencies "dependencies")) {
           $TargetFrameworkDependencies | select -expandproperty dependencies | % { $DependencyInfos.Add($_) `
           | Out-Null }
     }
@@ -118,8 +143,10 @@ function Get-DependenciesOf($CatalogEntry, $JsonHash, $CatalogHash = $null, [boo
         if (-NOT $CatalogHash[$Dependency.id].ContainsKey($DependencyVersion)) {
 
             $DependencyCatalogEntry = Get-CatalogEntry $Dependency.id -Version $DependencyVersion -Log $Log
-
+            
+            # save both -1 and the actual version - the -1 is to let us know not to do it again, the version is for later
             $CatalogHash[$Dependency.id][$DependencyVersion] = $DependencyCatalogEntry
+            #$CatalogHash[$Dependency.id][$DependencyCatalogEntry.version] = $DependencyCatalogEntry
 
             <# Run against the APIs no matter what for now, and then only download if they're missing later? #>
             #if (-NOT $JsonHash.HasLibVersion($Dependency.id, $DependencyCatalogEntry.version) `
@@ -130,6 +157,8 @@ function Get-DependenciesOf($CatalogEntry, $JsonHash, $CatalogHash = $null, [boo
             #}
 
             $CatalogHash = Get-DependenciesOf $DependencyCatalogEntry $JsonHash $CatalogHash -Log $Log
+        } else {
+            Log ("The CatalogHash already contains info for {0} version {1}" -f $Dependency.id, $DependencyVersion) $Log
         }
     }
 
@@ -144,15 +173,11 @@ function Download-NupkgDll {
             Mandatory=$true)]
         $PackageDetails,
 
-        [Parameter(Position=2,
-            Mandatory=$true)]
-        [string]$ZipPathSearchString,
-
-        [Parameter(Position=2,
+        [Parameter(Position=1,
             Mandatory=$true)]
         [string]$OutPath,
 
-        [Parameter(Position=3)]
+        [Parameter(Position=2)]
         [bool]$Log=$false
     )
 
@@ -169,13 +194,17 @@ function Download-NupkgDll {
 
         $ZipArchive = New-Object System.IO.Compression.ZipArchive $inputStream, ([System.IO.Compression.ZipArchiveMode]::Read)
 
-        $Dll = $ZipArchive.Entries | where {$_.FullName -like "lib/$ZipPathSearchString/*" -and `
+        if ($PackageDetails.framework -eq ".NetFramework4.5") {
+            $ZipPathSearchString = "/net45"
+        }
+
+        $Dll = $ZipArchive.Entries | where {$_.FullName -like ("lib" + $ZipPathSearchString + "/*") -and `
             ($_.Name -eq ($PackageDetails.id + ".dll") -or $_.Name -eq "_._")}
 
         if ($Dll -ne $Null) {
             $DllPath = [System.IO.Path]::Combine($OutPath, $Dll.Name)
 
-            $PackageDetails | Add-Member -MemberType NoteProperty -Name "dllPath" -Value $DllPath
+            $PackageDetails.dllPath = $DllPath
             
             [System.IO.Compression.ZipFileExtensions]::ExtractToFile($Dll, $DllPath)
 
@@ -186,7 +215,7 @@ function Download-NupkgDll {
             if ($Xml -ne $Null) {
                 $XmlPath = [System.IO.Path]::Combine($OutPath, $Xml.Name)
 
-                $PackageDetails | Add-Member -MemberType NoteProperty -Name "xmlPath" -Value $XmlPath
+                $PackageDetails.xmlPath = $XmlPath
                 if ($XmlName -notlike "*_._") {
                     [System.IO.Compression.ZipFileExtensions]::ExtractToFile($Xml, $XmlPath)
                 }
@@ -409,11 +438,13 @@ function Download-Dependencies ($DependencyHash, $OutPath, $JsonHash, [bool]$Log
             $JsonHash.AddLib($LibKey)
         }
 
-        foreach ($VersionKey in $DependencyHash[$LibKey].Keys){
-
-            if (-NOT $JsonHash.HasLibVersion($LibKey, $DependencyHash[$LibKey][-1].version) `
-                -OR $JsonHash.GetLibVersion($LibKey, $DependencyHash[$LibKey][-1].version).dllPath -eq "missing" `
-                -OR $JsonHash.GetLibVersion($LibKey, $DependencyHash[$LibKey][-1].version).xmlPath -eq "missing") {
+        foreach ($VersionKey in ($DependencyHash[$LibKey].Keys| where {$_ -ne -1})){
+            
+            if (-NOT $JsonHash.HasLibVersion($LibKey, $DependencyHash[$LibKey][$VersionKey].version) `
+                -OR $JsonHash.GetLibVersion($LibKey, $DependencyHash[$LibKey][$VersionKey].version).dllPath -eq "missing" `
+                -OR $JsonHash.GetLibVersion($LibKey, $DependencyHash[$LibKey][$VersionKey].version).dllPath -eq $null `
+                -OR $JsonHash.GetLibVersion($LibKey, $DependencyHash[$LibKey][$VersionKey].version).xmlPath -eq "missing" `
+                -OR $JsonHash.GetLibVersion($LibKey, $DependencyHash[$LibKey][$VersionKey].version).xmlPath -eq $null) {
 
                 $PackageDetails = $DependencyHash[$LibKey][$VersionKey]
 
@@ -425,9 +456,23 @@ function Download-Dependencies ($DependencyHash, $OutPath, $JsonHash, [bool]$Log
                     New-Item -Path $LibOutPath -ItemType "Directory" | Out-Null
                 }
 
-                if  (-NOT (test-path ([System.IO.Path]::Combine($LibOutPath,($PackageDetails.id + ".dll"))))) {
-                    $PackageDetails = Download-NupkgDll -PackageDetails $PackageDetails -ZipPathSearchString "net45" `
+                $Path = [System.IO.Path]::Combine($LibOutPath,$PackageDetails.id)
+
+                #check if the files already exist on disk, just in case the index file is screwed up
+                if  (-NOT (test-path ($Path + ".dll")) -and -NOT (test-path ([System.IO.Path]::Combine($LibOutPath,"_._")))) {
+                    $PackageDetails = Download-NupkgDll -PackageDetails $PackageDetails `
                          -OutPath $LibOutPath -Log $Log
+                } elseif ((test-path ([System.IO.Path]::Combine($LibOutPath,"_._")))) {
+                    #the files exist as _._
+                    $PackageDetails.dllPath = [System.IO.Path]::Combine($LibOutPath,"_._")
+                    $PackageDetails.xmlPath = $null
+                } else {
+                    #for some reason the file exists but isn't in the json file
+                    $PackageDetails.dllPath = $Path + ".dll"
+
+                    if (test-path ($Path + ".xml")) {
+                        $PackageDetails.xmlPath = $Path + ".xml"
+                    }
                 }
 
                 $Test = $JsonHash.HasLibVersion($LibKey, $Version)
@@ -436,11 +481,11 @@ function Download-Dependencies ($DependencyHash, $OutPath, $JsonHash, [bool]$Log
                     $JsonHash.AddLibVersion($LibKey, $Version)
                 }
 
-                if ((Has-Property $PackageDetails "dllPath")) {
+                if ((Has-ObjProperty $PackageDetails "dllPath")) {
                     $JsonHash.GetLibVersion($LibKey, $Version)."dllPath" = $PackageDetails.dllPath
                 }
             
-                if ((Has-Property $PackageDetails "xmlPath")) {
+                if ((Has-ObjProperty $PackageDetails "xmlPath")) {
                     $JsonHash.GetLibVersion($LibKey, $Version)."xmlPath" = $PackageDetails.xmlPath
                 }
 
@@ -448,7 +493,7 @@ function Download-Dependencies ($DependencyHash, $OutPath, $JsonHash, [bool]$Log
 
                 $TargetFrameworkDependencies = $PackageDetails.dependencyGroups | Where-Object targetFramework -eq $TargetFramework
 
-                if ($TargetFrameworkDependencies -ne $null -AND (Has-Property $TargetFrameworkDependencies "dependencies")) {
+                if ($TargetFrameworkDependencies -ne $null -AND (Has-ObjProperty $TargetFrameworkDependencies "dependencies")) {
                       $TargetFrameworkDependencies | select -expandproperty dependencies | % { 
                         $JsonHash.AddLibVersionDependency($LibKey, $Version, $_.id, $_.range)
                       }
@@ -460,11 +505,21 @@ function Download-Dependencies ($DependencyHash, $OutPath, $JsonHash, [bool]$Log
     }
 }
 
+function Get-SearchServiceUri ([bool]$Force=$false) {
+    
+    if ($global:SearchServiceUri -eq $null -or $Force -eq $true) {
+
+        $NugetIndex = Invoke-RestMethod "https://api.nuget.org/v3/index.json"
+
+        $global:SearchServiceUri = $NugetIndex.resources[0].'@id'
+    }
+
+    return $global:SearchServiceUri
+}
+
 function Get-SinglePackageByName ([string]$Package, [bool]$Log=$false) {
 
-    $NugetIndex = Invoke-RestMethod "https://api.nuget.org/v3/index.json"
-
-    $SearchServiceUri = $NugetIndex.resources[0].'@id'
+    $SearchServiceUri = Get-SearchServiceUri
 
     #$Package = "Google.Apis.Youtube.v3" #figure out how to extract this from the google discovery API
     $Author = "Google Inc."
@@ -536,3 +591,22 @@ function Get-AllApiPackages {
 }
 
 $LibraryIndexRoot = "$env:USERPROFILE\Desktop\Libraries"
+
+$SearchServiceUri = Get-SearchServiceUri
+
+#$Package = "Google.Apis.Youtube.v3" #figure out how to extract this from the google discovery API
+$Author = "Google Inc."
+
+$Package = "Google.Apis.Gmail.v1"
+
+$TargetFramework = ".NetFramework4.5"
+
+$Log = $true
+
+$CatalogEntry = Get-CatalogEntry $Package $Author -IsExactPackageId $true -Log $Log
+
+$JsonHash = Get-JsonIndex $LibraryIndexRoot -Log $Log
+
+$DependencyHash = Get-DependenciesOf $CatalogEntry $JsonHash -Log $Log
+
+Download-Dependencies $DependencyHash $LibraryIndexRoot $JsonHash -Log $Log

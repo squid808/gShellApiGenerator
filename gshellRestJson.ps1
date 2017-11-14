@@ -23,10 +23,11 @@ function Get-GoogleRestApi ($Uri, [bool]$RevisionOnly=$false, [bool]$RawContent=
     return $Result
 }
 
-#Params here only sort the results, they don't get passed to the API call
+#Check for any changes to the json files themselves, return a list of any that have been updated and downloaded
 function Get-GoogleApiJsonFiles ($Name = $null, $Version = $null, $Preferred = $null) {
 
     $GoogleApiList = Get-GoogleApiList
+    $ChangeResults = New-Object System.Collections.Arraylist
 
     if ($Name -ne $null) {
         $GoogleApiList = $GoogleApiList | where Name -like $Name
@@ -70,14 +71,19 @@ function Get-GoogleApiJsonFiles ($Name = $null, $Version = $null, $Preferred = $
             }
 
             Get-GoogleRestApi $ApiInfo.discoveryRestUrl -RawContent $true | Out-File -FilePath $JsonFilePath
+
+            $ChangeResults.Add($JsonFileFolderName) | Out-Null
         } else {
             Write-Host "$JsonFileFolderName / $JsonFileName already exists." -ForegroundColor DarkYellow
         }
 
         $JsonFileFolderName, $JsonFileFolderName, $JsonFileName, $JsonFilePath, $ApiInfo = $null
     }
+
+    return $ChangeResults
 }
 
+#Given a folder path, return the most recent json file therein
 function Get-MostRecentJsonFile ($Path) {
     $Files = New-Object System.Collections.ArrayList
     gci $Path | % {$Files.add($_) | Out-Null}
@@ -109,7 +115,7 @@ function Get-JsonApiFile ($Name, $Version) {
     return (Get-MostRecentJsonFile $Folder)
 }
 
-#loads the msot recent json file
+#loads the most recent json file
 function Load-RestJsonFile ($Name, $Version) {
     $file = Get-JsonApiFile $Name $Version
     if ($file -ne $null) {

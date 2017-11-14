@@ -1,4 +1,6 @@
-﻿add-type -assembly System.IO.Compression
+﻿#TODO: Add System.Management.Automation to the json file!
+
+add-type -assembly System.IO.Compression
 add-type -assembly System.IO.Compression.FileSystem
 <#
 TODO: Hard-code in versions for APIs for consistency?
@@ -7,6 +9,18 @@ function Log ($Message, [bool]$ShouldLog=$false) {
     if ($ShouldLog) {
         Write-Host $Message -ForegroundColor Green
     }
+}
+
+function Get-SearchServiceUri ([bool]$Force=$false) {
+    
+    if ($global:SearchServiceUri -eq $null -or $Force -eq $true) {
+
+        $NugetIndex = Invoke-RestMethod "https://api.nuget.org/v3/index.json"
+
+        $global:SearchServiceUri = $NugetIndex.resources[0].'@id'
+    }
+
+    return $global:SearchServiceUri
 }
 
 # Formats JSON in a nicer format than the built-in ConvertTo-Json does.
@@ -40,8 +54,10 @@ function Format-Json([Parameter(Mandatory, ValueFromPipeline)][String] $json) {
   $Lines -Join ""
 }
 
-function SearchForNugetPackage($SearchServiceUri, $Package, $IsExactPackageId=$false, [bool]$Log=$false){
+function SearchForNugetPackage($Package, $IsExactPackageId=$false, [bool]$Log=$false){
     
+    $SearchServiceUri = Get-SearchServiceUri
+
     Log "Searching for Package $Package" $Log
 
     if ($IsExactPackageId) {$PackageSpecifier="packageid:"}
@@ -52,20 +68,20 @@ function SearchForNugetPackage($SearchServiceUri, $Package, $IsExactPackageId=$f
     return $results
 }
 
-function Get-CatalogEntry ($Package, $Author = $null, $Version = $null, $IsExactPackageId = $true, [bool]$Log=$false) {
+function Get-CatalogEntry ($Package, [string]$Author = $null, [string]$Version = $null, $IsExactPackageId = $true, [bool]$Log=$false) {
 
     Log ("Retrieving Catalog Entry for {0} version [{1}], by author [{2}]" -f $Package, $Version, $Author) $Log
 
     #if we can determine the packageid exactly (Google.Apis.Discovery.v1) then use packageid, otherwise if it's missing part (like v1) just use the name
-    $SearchResults = SearchForNugetPackage $SearchServiceUri $Package -IsExactPackageId $IsExactPackageId
+    $SearchResults = SearchForNugetPackage $Package -IsExactPackageId $IsExactPackageId
     
     $VersionInfo = $SearchResults.Data
 
-    if ($Author -ne $null) {
+    if (-not [string]::IsNullOrWhiteSpace($Author)) {
         $VersionInfo = $VersionInfo | where {$_.authors.Contains($Author)}
     }
 
-    if ($Version -eq $null -or $Version -eq -1) {
+    if (([string]::IsNullOrWhiteSpace($Version)) -or $Version -eq -1) {
         $VersionInfo = $VersionInfo | select -ExpandProperty versions | select -Last 1
     } else {
         $VersionInfo = $VersionInfo | select -ExpandProperty versions | where {$_.version -eq $Version}
@@ -287,7 +303,12 @@ function Get-JsonIndex ($Path, [bool]$Log=$false) {
     #GetLibVersion(LibName, Version)
     $JsonHash | Add-Member -MemberType ScriptMethod -Name "GetLibVersion" -Value {
         param( [string]$LibName, [string]$Version)
-        return $this.GetLib($LibName).Versions.$Version
+
+        if ($Version  -eq -1) {
+            return $this.GetLibVersionAll($LibName) | sort -Property Name | select -Last 1
+        } else {    
+            return $this.GetLib($LibName).Versions.$Version
+        }
     }
 
     #GetLibVersionAll(LibName)
@@ -299,11 +320,19 @@ function Get-JsonIndex ($Path, [bool]$Log=$false) {
     #GetLibVersionLatest(LibName)
     $JsonHash | Add-Member -MemberType ScriptMethod -Name "GetLibVersionLatest" -Value {
         param( [string]$LibName)
-        $version = $this.GetLibVersionAll($LibName).name | sort -Descending | select -First 1
+        $version = $this.GetLibVersionLatestName($LibName)
         if ($version -ne $null) {
             $result = $this.GetLibVersion($LibName, $Version)
         }
         return $result
+    }
+
+    #GetLibVersionLatestName(LibName)
+    $JsonHash | Add-Member -MemberType ScriptMethod -Name "GetLibVersionLatestName" -Value {
+        param( [string]$LibName)
+        $version = $this.GetLibVersionAll($LibName).name | sort -Descending | select -First 1
+        
+        return $version
     }
 
     #AddLibVersion(LibName, Version)
@@ -365,8 +394,36 @@ function Get-JsonIndex ($Path, [bool]$Log=$false) {
             }
     }
 
-    #TODO: Add in support for storing dependencies, and then adding that in to checking for missing files!
+    #GetLibVersionDependencyChain(LibName, Version)
+    $JsonHash | Add-Member -MemberType ScriptMethod -Name "GetLibVersionDependencyChain" -Value {
+        param([string]$LibName, [string]$Version)
 
+        $DependenciesHash = @{}
+
+        if ($this.HasLibVersion($LibName, $Version)){
+            
+            if (-not $DependenciesHash.ContainsKey($LibName)) {
+                $DependenciesHash[$LibName] = $Version
+            }
+
+            $Dependencies = $this.GetLibVersion($LibName, $Version).Dependencies
+            foreach ($Dependency in $Dependencies) {
+                $Version = Get-LatestVersionFromRange $Dependency.Versions
+                if  ($version -eq -1) {
+                    $Version = $this.GetLibVersionLatestName($Dependency.Name)
+                }
+
+                $SubDependenciesHash = $this.GetLibVersionDependencyChain($Dependency.Name, $Version)
+
+                foreach ($LibKey in $SubDependenciesHash.Keys) {
+                    $DependenciesHash[$LibKey] = $SubDependenciesHash[$LibKey]
+                }
+            }
+        }
+
+        return $DependenciesHash
+    }
+    
     #check for missing files and update the json index
     $ChangedInfo = $false
 
@@ -381,7 +438,7 @@ function Get-JsonIndex ($Path, [bool]$Log=$false) {
                 }
             }
 
-            if ($Info.xmlPath -notlike "*_._" -AND $Info.xmlPath -ne $null) {
+            if ($Info.xmlPath -notlike "*_._" -AND -not [string]::IsNullOrWhiteSpace($Info.xmlPath)) {
                 if (-NOT (Test-Path $Info.xmlPath)){
                     $Info.xmlPath = "missing"
                     $ChangedInfo = $true
@@ -432,6 +489,8 @@ function Download-Dependencies ($DependencyHash, $OutPath, $JsonHash, [bool]$Log
 
     Log ("Downloading all saved dependencies") $Log
 
+    $FoundUpdate = $false
+
     foreach ($LibKey in $DependencyHash.Keys) {
         
         if (-not $JsonHash.HasLib($LibKey)) {
@@ -465,7 +524,7 @@ function Download-Dependencies ($DependencyHash, $OutPath, $JsonHash, [bool]$Log
                 } elseif ((test-path ([System.IO.Path]::Combine($LibOutPath,"_._")))) {
                     #the files exist as _._
                     $PackageDetails.dllPath = [System.IO.Path]::Combine($LibOutPath,"_._")
-                    $PackageDetails.xmlPath = $null
+                    $PackageDetails.xmlPath = ""
                 } else {
                     #for some reason the file exists but isn't in the json file
                     $PackageDetails.dllPath = $Path + ".dll"
@@ -500,31 +559,25 @@ function Download-Dependencies ($DependencyHash, $OutPath, $JsonHash, [bool]$Log
                 }
 
                 $JsonHash.Save()
+
+                $FoundUpdate = $true
             }
         }
     }
+
+    return $FoundUpdate
 }
 
-function Get-SearchServiceUri ([bool]$Force=$false) {
-    
-    if ($global:SearchServiceUri -eq $null -or $Force -eq $true) {
 
-        $NugetIndex = Invoke-RestMethod "https://api.nuget.org/v3/index.json"
 
-        $global:SearchServiceUri = $NugetIndex.resources[0].'@id'
-    }
-
-    return $global:SearchServiceUri
-}
-
-function Get-SinglePackageByName ([string]$Package, [bool]$Log=$false) {
+function Get-SinglePackageByName ([string]$Package, [bool]$Log=$false, [string]$Version = $null) {
 
     $SearchServiceUri = Get-SearchServiceUri
 
     #$Package = "Google.Apis.Youtube.v3" #figure out how to extract this from the google discovery API
     $Author = "Google Inc."
-
-    $CatalogEntry = Get-CatalogEntry $Package $Author -IsExactPackageId $true -Log $Log
+    
+    $CatalogEntry = Get-CatalogEntry $Package $Author -IsExactPackageId $true -Log $Log -Version $Version
 
     $TargetFramework = ".NetFramework4.5"
 
@@ -532,9 +585,9 @@ function Get-SinglePackageByName ([string]$Package, [bool]$Log=$false) {
 
     $DependencyHash = Get-DependenciesOf $CatalogEntry $JsonHash -Log $Log
 
-    Download-Dependencies $DependencyHash $LibraryIndexRoot $JsonHash -Log $Log
+    $FoundChanges = Download-Dependencies $DependencyHash $LibraryIndexRoot $JsonHash -Log $Log
 
-    return $CatalogEntry
+    return $CatalogEntry,$FoundChanges
 }
 
 <# 
@@ -555,7 +608,7 @@ function Get-NugetPackageIdFromJson ($Json) {
     if ($Json.id -like "admin:*") {
         $PackageId = "{0}.{1}.{2}" -f $Json.name, $Json.canonicalName, $Json.version
     } else {
-        $PackageId = $Json.id -replace "\.","_" -replace ":","."
+        $PackageId = ConvertTo-FirstUpper ($Json.id -replace "\.","_" -replace ":",".")
         #$J.id -match "(?=[a-zA-Z])*[^a-zA-Z:\.0-9]" | Out-Null
         #$PackageId = $J.id -replace $matches[0],":" -replace "\.","_" -replace ":","."
     }
@@ -565,24 +618,25 @@ function Get-NugetPackageIdFromJson ($Json) {
     return $P
 }
 
-function Get-ApiPackage ($Name, $Version) {
+function Get-ApiPackage ($Name, $Version, [bool]$Log = $false) {
     try {
         $Json = Load-RestJsonFile $Name $Version
         $PackageId = (Get-NugetPackageIdFromJson $Json)
-        $CatalogEntry = Get-SinglePackageByName $PackageId -Log $true
+        $CatalogEntry,$FoundChanges = Get-SinglePackageByName $PackageId -Log $Log
+        return $FoundChanges
     } catch {
         throw $_
     }
 }
 
-function Get-AllApiPackages {
+function Get-AllApiPackages ([bool]$Log = $false) {
     foreach ($JsonFileInfo in (gci $JsonRootPath -Recurse -Filter "*.json")){
         $File = Get-MostRecentJsonFile $JsonFileInfo.directory.fullname
         if ($File -ne $null) {
             try {
                 $Json = Get-Content $File.FullName | ConvertFrom-Json
                 $PackageId = (Get-NugetPackageIdFromJson $Json)
-                $CatalogEntry = Get-SinglePackageByName $PackageId -Log $true
+                $CatalogEntry,$FoundChanges = Get-SinglePackageByName $PackageId -Log $Log
             } catch {
                 write-host $_.innerexception.message
             }
@@ -592,21 +646,23 @@ function Get-AllApiPackages {
 
 $LibraryIndexRoot = "$env:USERPROFILE\Desktop\Libraries"
 
-$SearchServiceUri = Get-SearchServiceUri
+#$SearchServiceUri = Get-SearchServiceUri
+#
+##$Package = "Google.Apis.Youtube.v3" #figure out how to extract this from the google discovery API
+#$Author = "Google Inc."
+#
+#$Package = "Google.Apis.Gmail.v1"
+#
+#$TargetFramework = ".NetFramework4.5"
+#
+#$Log = $true
+#
+#$CatalogEntry = Get-CatalogEntry $Package $Author -IsExactPackageId $true -Log $Log
+#
+#$JsonHash = Get-JsonIndex $LibraryIndexRoot -Log $Log
+#
+#$DependencyHash = Get-DependenciesOf $CatalogEntry $JsonHash -Log $Log
+#
+#Download-Dependencies $DependencyHash $LibraryIndexRoot $JsonHash -Log $Log
 
-#$Package = "Google.Apis.Youtube.v3" #figure out how to extract this from the google discovery API
-$Author = "Google Inc."
-
-$Package = "Google.Apis.Gmail.v1"
-
-$TargetFramework = ".NetFramework4.5"
-
-$Log = $true
-
-$CatalogEntry = Get-CatalogEntry $Package $Author -IsExactPackageId $true -Log $Log
-
-$JsonHash = Get-JsonIndex $LibraryIndexRoot -Log $Log
-
-$DependencyHash = Get-DependenciesOf $CatalogEntry $JsonHash -Log $Log
-
-Download-Dependencies $DependencyHash $LibraryIndexRoot $JsonHash -Log $Log
+#Get-AllApiPackages -log $true

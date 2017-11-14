@@ -208,6 +208,165 @@ $GeneralFileHeader = @"
 
 #region Templating
 
+#region CSProj
+
+function Write-CSPReferenceHintPath {
+    param (
+        [Parameter(ParameterSetName = "Created")]
+        $Name,
+        
+        [Parameter(ParameterSetName = "Created")]
+        $Version,
+        
+        [Parameter(ParameterSetName = "Created")]
+        $TargetFramework = "net45",
+
+        [Parameter(ParameterSetName = "Provided")]
+        $HintPath,
+
+        $IsConditional = $false
+    )
+
+    if ($PSCmdlet.ParameterSetName -eq "Created") {
+        $Path = "packages\$Name.$Version\lib\$TargetFramework\$Name.dll"
+    } else {
+        $Path = $HintPath
+    }
+
+    if ($IsConditional -eq $true) {
+        $Folder = [System.IO.Path]::GetDirectoryName($Path)
+        $Conditional = " Condition=`"Exists('$Folder')`""
+    }
+
+    $HintTag = "      <HintPath$Conditional>$Path</HintPath>"
+
+    return $HintTag
+}
+
+function Write-CSPReference($Name, $Version, $HintPath1, $HintPath2 = $null, $Private = $null) {
+
+    if ($private -ne $null) {
+        $Private = $Private.ToString()
+        $PrivateText = "      <Private>$Private</Private>"
+    }
+
+    $text = New-Object system.collections.arraylist
+
+    add-string $text "    <Reference Include=`"$Name, Version=$Version`">"
+    add-string $text $HintPath1
+    add-string $text $HintPath2
+    add-string $text $PrivateText
+    add-string $text "    </Reference>"
+
+    $textBlock = $text -join "`r`n"
+
+    return $textBlock
+}
+
+function Write-CSPReferenceTexts($Api, $LibraryIndex) {
+
+    $ReferencesTexts = New-Object system.collections.arraylist
+
+    $ReferenceChain = $LibraryIndex.GetLibVersionDependencyChain($Api.RootNamespace, $LibraryIndex.GetLibVersionLatestName($Api.RootNamespace))
+
+    foreach ($Key in $ReferenceChain.Keys) {
+        Add-String $ReferencesTexts (Write-CSPReference $Key $ReferenceChain[$Key])
+    }
+
+    $ReferencesTexts = ($ReferencesTexts | Sort) -join "`r`n"
+
+    return $ReferencesTexts
+}
+
+function Write-CSP ($Api) {
+    $CSPTopText = @'
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="12.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+  <PropertyGroup>
+    <MinimumVisualStudioVersion>10.0</MinimumVisualStudioVersion>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <OutputType>Library</OutputType>
+    <AppDesignerFolder>Properties</AppDesignerFolder>
+    <RootNamespace>gShellGmail</RootNamespace>
+    <AssemblyName>gShellGmail</AssemblyName>
+    <TargetFrameworkVersion>v4.5.1</TargetFrameworkVersion>
+    <FileAlignment>512</FileAlignment>
+    <ProjectTypeGuids>{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}</ProjectTypeGuids>
+    <TargetFrameworkProfile />
+    <ProjectGuid>{C614766D-365E-4B93-9E9B-DA62A20E655D}</ProjectGuid>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <ItemGroup>
+'@
+
+    $GShellReferenceText = @"
+    <Reference Include="gShell, Version=0.10.4.0">
+      <HintPath>..\gShell\bin\Debug\gShell.dll</HintPath>
+    </Reference>
+"@
+
+    $CSPBottomText = @'
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Management.Automation, Version=3.0.0.0">
+      <HintPath>packages\System.Management.Automation.dll.10.0.10586.0\lib\net40\System.Management.Automation.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="System.Net.Http" />
+    <Reference Include="System.Xml.Linq" />
+    <Reference Include="System.Data.DataSetExtensions" />
+    <Reference Include="Microsoft.CSharp" />
+    <Reference Include="System.Data" />
+    <Reference Include="System.Xml" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="DotNetCmdlets.cs" />
+    <Compile Include="DotNetServiceWrapper.cs" />
+    <Compile Include="GmailStandardQueryParameters.cs" />
+    <Compile Include="GmailStandardQueryParametersBase.cs" />
+    <Compile Include="MethodCmdlets.cs" />
+    <Compile Include="ObjectCmdlets.cs" />
+    <Compile Include="Properties\AssemblyInfo.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config" />
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
+       Other similar extension points exist, see Microsoft.Common.targets.
+  <Target Name="BeforeBuild">
+  </Target>
+  <Target Name="AfterBuild">
+  </Target>
+  -->
+</Project>
+'@
+    
+    $ReferencesTexts = New-Object System.Collections.ArrayList
+
+    
+}
+
+#endregion
+
 #region SQP, SQPB - Standard Query Parameters Base
 
 function Write-SQP ($Api) {
@@ -305,7 +464,7 @@ function Write-OCMethodProperties ($SchemaObj, $Level=0) {
         $Name = $Property.Name
         
         $summary = Wrap-Text (Set-Indent "{%T}/// <summary> $CommentDescription </summary>" $Level)
-        $attribute = Wrap-Text (Set-Indent "{%T}[Parameter(Position = $PositionInt, Mandatory = false, ValueFromPipelineByPropertyName = true, HelpMessage = $HelpDescription)]" $Level)
+        $attribute = Wrap-Text (Set-Indent "{%T}[Parameter(Position = $PositionInt, Mandatory = false, ValueFromPipelineByPropertyName = true, HelpMessage = `"$HelpDescription`")]" $Level)
         
         $signature = Wrap-Text (Set-Indent "{%T}public $Type $Name { get; set; }" $Level)
 
@@ -1657,10 +1816,12 @@ $ResourceClasses
 #$Path = "Discovery\Discovery.cs"
 
 $RestJson = Load-RestJsonFile gmail v1
+
 $CmdletPath = "Cmdlets\Gmail\Gmail.cs"
 $DotNetPath = "dotNet\Gmail\Google.Apis.Gmail.v1_gshell_dotnet.cs"
 
 $LibraryIndex = Get-JsonIndex $LibraryIndexRoot
+
 $Api = Invoke-GShellReflection $RestJson $LibraryIndex
 
 $Resources = $Api.Resources
@@ -1679,12 +1840,14 @@ if (-not (Test-Path $RootOutPath)) {
     New-Item -Path $RootOutPath -ItemType "Directory"
 }
 
-Write-DNC $Api | Out-File ($RootOutPath + "DotNetCmdlets.cs") -Force
-Write-DNSW $Api | Out-File ($RootOutPath + "DotNetServiceWrapper.cs") -Force
-Write-MC $Api | Out-File ($RootOutPath + "MethodCmdlets.cs") -Force
-#Write-OC $Api | Out-File ($RootOutPath + "ObjectCmdlets.cs") -Force
+# Write-DNC $Api | Out-File ($RootOutPath + "DotNetCmdlets.cs") -Force
+# Write-DNSW $Api | Out-File ($RootOutPath + "DotNetServiceWrapper.cs") -Force
+# Write-MC $Api | Out-File ($RootOutPath + "MethodCmdlets.cs") -Force
+# Write-OC $Api | Out-File ($RootOutPath + "ObjectCmdlets.cs") -Force
 
-$SQP = Write-SQP $Api
-if ($SQP -ne $null) {$SQP | Out-File ($RootOutPath + $Api.Name + "StandardQueryParameters.cs") -Force}
-$SQPB = Write-SQPB $Api
-if ($SQPB -ne $null) {$SQPB | Out-File ($RootOutPath + $Api.Name + "StandardQueryParametersBase.cs") -Force}
+#$SQP = Write-SQP $Api
+#if ($SQP -ne $null) {$SQP | Out-File ($RootOutPath + $Api.Name + "StandardQueryParameters.cs") -Force}
+#$SQPB = Write-SQPB $Api
+#if ($SQPB -ne $null) {$SQPB | Out-File ($RootOutPath + $Api.Name + "StandardQueryParametersBase.cs") -Force}
+
+#Write-CSPReferenceTexts $Api $JsonHash

@@ -4,7 +4,7 @@
 
 #Use main version of Google.Apis.Auth, since GShell depends on that and all dependencies, right?
 
-function Get-GShellPackages {
+function Get-GShellPackagesXml ($LibraryIndex) {
     $Packages = New-Object system.collections.arraylist
 
     $latestGoogleAuthVersion = $LibraryIndex.GetLibVersionLatestName("Google.Apis.Auth")
@@ -25,14 +25,14 @@ function Get-GShellPackages {
     return $PackagesText
 }
 
-function Get-GShellBuildFiles {
-    $FilesList = Get-ChildItem "C:\Users\svarney\Desktop\GenOutput\gShell" -Recurse -Filter "*.cs"| select -ExpandProperty fullname `
+function Get-GShellBuildFiles ($RootProjPath) {
+    $FilesList = Get-ChildItem $RootProjPath -Recurse -Filter "*.cs"| select -ExpandProperty fullname `
         | where {$_ -notlike "*\obj\*"}
 
     $Files = New-Object system.collections.arraylist
 
     foreach ($File in $FilesList) {
-        Add-String $Files ("    <Compile Include = `"" + $File.Replace("C:\Users\svarney\Desktop\GenOutput\gShell\","") + "`" />")
+        Add-String $Files ("    <Compile Include = `"" + $File.Replace(($RootProjPath+"\"),"") + "`" />")
     }
 
     $FilesText = $Files -join "`r`n"
@@ -40,7 +40,7 @@ function Get-GShellBuildFiles {
     return $FilesText
 }
 
-function Get-GShellProjReferences ($RootProjPath) {
+function Get-GShellProjReferences ($RootProjPath, $LibraryIndex) {
     
     $Dependencies = New-Object system.collections.arraylist
 
@@ -54,17 +54,7 @@ function Get-GShellProjReferences ($RootProjPath) {
             
             $HintPath1 = Write-CSPReferenceHintPath -Name $D.Name -Version $D.Value -IsConditional $true
             $HintPath2 = Write-CSPReferenceHintPath -HintPath ("..\..\Libraries\{0}\{1}\{0}.dll" -f $D.Name, $D.Value) -IsConditional $true
-            $ReferenceText = Write-CSPReference $D.Name $Version $HintPath1 $HintPath2
-
-            #$FullRefPath = [System.IO.Path]::Combine($RootProjPath, $HintPath)
-            #$FullRefFolder = [System.IO.Path]::GetDirectoryName($FullRefPath)
-            #
-            #
-            #if (-not (test-path $FullRefPath)) {
-            #    
-            #    #if (-not (test-path ))
-            #
-            #}            
+            $ReferenceText = Write-CSPReference $D.Name $Version $HintPath1 $HintPath2       
 
             Add-String $Dependencies $ReferenceText
         }
@@ -78,10 +68,11 @@ function Get-GShellProjReferences ($RootProjPath) {
         Add-String $Dependencies (Write-CSPReference $Library $AssemblyVersion -HintPath1 $HintPath1 -HintPath2 $HintPath2)
     }
 
+    #TODO: Manually write this out - will it change? Only if MS decides to upload their own version I guess. Who am I talking to? Does this mean I've cracked?
     $SysAutoName = "System.Management.Automation"
-    $SysAutoVersion = "10.0.10586.0"
-    $AutomationHintPath1 = Write-CSPReferenceHintPath -Name $SysAutoName -Version $SysAutoVersion -IsConditional $true
-    $AutomationHintPath2 = Write-CSPReferenceHintPath -HintPath ("..\..\Libraries\{0}\{1}\{0}.dll" -f $SysAutoName, $SysAutoVersion) -IsConditional $true
+    #note - the version pulled from nuget doesn't have a 0 at the end but it does when restored.
+    $AutomationHintPath1 = Write-CSPReferenceHintPath -Name $SysAutoName -Version "10.0.10586.0" -IsConditional $true
+    $AutomationHintPath2 = Write-CSPReferenceHintPath -HintPath ("..\..\Libraries\{0}\10.0.10586\{0}.dll" -f $SysAutoName, $SysAutoVersion) -IsConditional $true
     Add-String $Dependencies (Write-CSPReference $SysAutoName "3.0.0.0" -HintPath1 $AutomationHintPath1 -HintPath2 $AutomationHintPath2 -Private $true)
     
     $DependenciesText = $Dependencies -join "`r`n"
@@ -89,14 +80,14 @@ function Get-GShellProjReferences ($RootProjPath) {
     return $DependenciesText
 }
 
-function BuildGshell ($RootProjPath) {
+function BuildGshell ($RootProjPath, $LibraryIndex) {
 
     $packagesText = @'
 <?xml version="1.0" encoding="utf-8"?>
 <packages>
 {0}
 </packages>
-'@ -f (Get-GShellPackages)
+'@ -f (Get-GShellPackagesXml $LibraryIndex)
 
     $packagesText | Out-File -FilePath ([System.IO.Path]::Combine($RootProjPath, "packages.config")) -Encoding utf8 -Force
 
@@ -159,12 +150,92 @@ function BuildGshell ($RootProjPath) {
   </Target>
   -->
 </Project>
-'@ -f (Get-GShellBuildFiles), (Get-GShellProjReferences $RootProjPath)
+'@ -f (Get-GShellBuildFiles $RootProjPath), (Get-GShellProjReferences $RootProjPath $LibraryIndex)
 
-    $projText | Out-File -FilePath ([System.IO.Path]::Combine($RootProjPath, "gShell.csproj")) -Encoding utf8 -Force
+    $projFilePath = [System.IO.Path]::Combine($RootProjPath, "gShell.csproj")
 
-    #Invoke-MsBuild -Path "C:\Users\svarney\Desktop\GenOutput\gShell\gShell.csproj"
+    $projText | Out-File -FilePath $projFilePath -Encoding utf8 -Force
 
+    #TODO: Update the assembly info to update the year and the file version!
+
+    $BuildResult = Invoke-MsBuild -Path $projFilePath
+
+    if ($BuildResult.BuildSucceeded -eq $true) {
+        #return the path to the resulting dll file
+        $gShellPath = [System.IO.Path]::Combine($RootProjPath,"bin\Debug\gShell.dll")
+        return $gShellPath
+    } else {
+        #todo: throw error and stop process here?
+    }
 }
 
-buildgshell "C:\Users\svarney\Desktop\GenOutput\gShell"
+function SaveGshellToLibraryIndex ($Version, $Location, $LibraryIndex, $Dependencies) {
+    $gShellMain = "gShell.Main"
+    if (-not $LibraryIndex.HasLib($gShellMain)) {
+        $LibraryIndex.AddLib($gShellMain)
+    }
+
+    if (-not $LibraryIndex.HasLibVersion($gShellMain, $Version)) {
+        $LibraryIndex.AddLibVersion($gShellMain, $Version)
+
+        #this is more for the other APIs to be able to know what versions of the files THEY need are referenced,
+        # so it can lack the oauth and the discovery references
+        foreach ($Dependency in $Dependencies.GetEnumerator()) {
+            $LibraryIndex.AddLibVersionDependency($gShellMain, $Version, $Dependency.Name, $Dependency.Value)
+        }
+
+        $LibraryIndex.GetLibVersion($gShellMain, $Version)."dllPath" = $Location
+
+        $LibraryIndex.Save()
+    }
+}
+
+function CheckAndBuildGshell ($RootProjPath, $LibraryIndex) {
+
+    $Dependencies = @{}
+
+    foreach ($D in $LibraryIndex.GetLibVersionDependencyChain("Google.Apis.Auth",$latestGoogleAuthVersion).GetEnumerator()) {
+        if ($D.Name -ne "System.Net.Http") {
+            $Dependencies[$D.Name] = $D.Value
+        }
+    }
+
+    $Dependencies["System.Management.Automation.dll"] = "10.0.10586"
+
+    #We're tying gShell to the version of the Auth package since it and its dependencies all appear to match. If they change this we may need to reevaluate
+    $AuthVersion = $Dependencies["Google.Apis.Auth"]
+    $AuthVersionObj = [System.Version]$AuthVersion
+
+    $gShellMain = "gShell.Main"
+    $gShellVersion = $LibraryIndex.GetLibVersionLatestName($gShellMain)
+    $gShellVersionObj = [System.Version]$gShellVersion
+
+    if (-not $LibraryIndex.HasLib("gShell.Main") -or ($gShellVersionObj -lt $AuthVersionObj)) {
+        $gShellNewVersion = $AuthVersion + ".0"
+
+        #First, try to build
+        $CompiledPath = BuildGshell $RootProjPath $LibraryIndex
+
+        if ($CompiledPath -ne $null) {
+            #copy the file to the library path
+            $LibraryRootPath = [System.IO.Path]::GetDirectoryName($LibraryIndex.RootPath)
+            $NewGShellFolderPath = [System.IO.Path]::Combine($LibraryRootPath, $gShellMain, $gShellNewVersion)
+            $NewGShellPath = [System.IO.Path]::Combine($NewGShellFolderPath, "gShell.dll")
+            if (-not (Test-Path $NewGShellFolderPath)) {
+                New-Item -Path $NewGShellFolderPath -ItemType "Directory" | Out-Null
+            }
+            Copy-Item -Path $CompiledPath -Destination $NewGShellPath | Out-Null
+
+            #update the library
+            SaveGshellToLibraryIndex -Version $gShellNewVersion -Location $NewGShellPath -LibraryIndex $LibraryIndex -Dependencies $Dependencies
+        } else {
+            #throw some error right?
+        }
+
+        $gShellVersion = $LibraryIndex.GetLibVersionLatestName($gShellMain)
+    }
+
+    return $gShellMain, $gShellNewVersion
+}
+
+CheckAndBuildGshell "C:\Users\svarney\Desktop\GenOutput\gShell" $LibraryIndex

@@ -217,6 +217,11 @@ function Download-NupkgDll {
         $Dll = $ZipArchive.Entries | where {$_.FullName -like ("lib" + $ZipPathSearchString + "/*") -and `
             ($_.Name -eq ($PackageDetails.id + ".dll") -or $_.Name -eq "_._")}
 
+        if ($Dll -eq $null) {
+            $Dll = $ZipArchive.Entries | where {$_.FullName -like ("lib/*") -and `
+            ($_.Name -eq ($PackageDetails.id + ".dll") -or $_.Name -eq "_._")}
+        }
+
         if ($Dll -ne $Null) {
             $DllPath = [System.IO.Path]::Combine($OutPath, $Dll.Name)
 
@@ -509,7 +514,11 @@ function Download-Dependencies ($DependencyHash, $OutPath, $JsonHash, [bool]$Log
 
                 $Version = $PackageDetails.version
 
-                $LibOutPath = [System.IO.Path]::Combine($OutPath,$LibKey,$Version)
+                if ($PackageDetails.id -like "*.dll") {
+                    $PackageDetails.id = $PackageDetails.id.Replace(".dll","")
+                }
+
+                $LibOutPath = [System.IO.Path]::Combine($OutPath,$PackageDetails.id,$Version)
 
                 if (-not (Test-Path $LibOutPath)) {
                     New-Item -Path $LibOutPath -ItemType "Directory" | Out-Null
@@ -570,22 +579,23 @@ function Download-Dependencies ($DependencyHash, $OutPath, $JsonHash, [bool]$Log
 
 
 
-function Get-SinglePackageByName ([string]$Package, [bool]$Log=$false, [string]$Version = $null) {
+function Get-SinglePackageByName ([string]$Package, [bool]$Log=$false, [string]$Version = $null, $Author = "Google Inc.",  $LibraryIndex = $null) {
 
-    $SearchServiceUri = Get-SearchServiceUri
+    #$SearchServiceUri = Get-SearchServiceUri
 
     #$Package = "Google.Apis.Youtube.v3" #figure out how to extract this from the google discovery API
-    $Author = "Google Inc."
     
     $CatalogEntry = Get-CatalogEntry $Package $Author -IsExactPackageId $true -Log $Log -Version $Version
 
     $TargetFramework = ".NetFramework4.5"
 
-    $JsonHash = Get-JsonIndex $LibraryIndexRoot -Log $Log
+    if ($LibraryIndex -eq $null) {
+        $LibraryIndex = Get-JsonIndex $LibraryIndexRoot -Log $Log
+    }
 
-    $DependencyHash = Get-DependenciesOf $CatalogEntry $JsonHash -Log $Log
+    $DependencyHash = Get-DependenciesOf $CatalogEntry $LibraryIndex -Log $Log
 
-    $FoundChanges = Download-Dependencies $DependencyHash $LibraryIndexRoot $JsonHash -Log $Log
+    $FoundChanges = Download-Dependencies $DependencyHash $LibraryIndexRoot $LibraryIndex -Log $Log
 
     return $CatalogEntry,$FoundChanges
 }
@@ -630,17 +640,29 @@ function Get-ApiPackage ($Name, $Version, [bool]$Log = $false) {
 }
 
 function Get-AllApiPackages ([bool]$Log = $false) {
+    $LibraryIndex = Get-JsonIndex $LibraryIndexRoot
+
     foreach ($JsonFileInfo in (gci $JsonRootPath -Recurse -Filter "*.json")){
         $File = Get-MostRecentJsonFile $JsonFileInfo.directory.fullname
         if ($File -ne $null) {
             try {
                 $Json = Get-Content $File.FullName | ConvertFrom-Json
                 $PackageId = (Get-NugetPackageIdFromJson $Json)
-                $CatalogEntry,$FoundChanges = Get-SinglePackageByName $PackageId -Log $Log
+                $CatalogEntry,$FoundChanges = Get-SinglePackageByName $PackageId -Log $Log -LibraryIndex $LibraryIndex
             } catch {
                 write-host $_.innerexception.message
             }
         }
+    }
+
+    Get-SystemMgmtAuto $LibraryIndex $Log
+}
+
+function Get-SystemMgmtAuto ($LibraryIndex, [bool]$Log = $false) {
+    $SMA = "System.Management.Automation.dll"
+    
+    if (-not $LibraryIndex.HasLib($SMA)) {
+        Get-SinglePackageByName $SMA -Author $null -Log $Log -Version "10.0.10586"
     }
 }
 
@@ -666,3 +688,6 @@ $LibraryIndexRoot = "$env:USERPROFILE\Desktop\Libraries"
 #Download-Dependencies $DependencyHash $LibraryIndexRoot $JsonHash -Log $Log
 
 #Get-AllApiPackages -log $true
+
+
+#Get-SinglePackageByName "Google.Apis" -Log $true

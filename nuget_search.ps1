@@ -629,6 +629,7 @@ function Get-NugetPackageIdFromJson ($Json) {
 }
 
 function Get-ApiPackage ($Name, $Version, [bool]$Log = $false) {
+    Log ("Getting the Nuget package for $Name $Version") $Log
     try {
         $Json = Load-RestJsonFile $Name $Version
         $PackageId = (Get-NugetPackageIdFromJson $Json)
@@ -691,3 +692,5 @@ $LibraryIndexRoot = "$env:USERPROFILE\Desktop\Libraries"
 
 
 #Get-SinglePackageByName "Google.Apis" -Log $true
+
+$CatalogEntry = Get-CatalogEntry "Google.Apis.Gmail.v1" "Google Inc." -IsExactPackageId $true -Log $Log

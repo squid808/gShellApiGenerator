@@ -80,7 +80,7 @@ function Get-GShellProjReferences ($RootProjPath, $LibraryIndex) {
     return $DependenciesText
 }
 
-function BuildGshell ($RootProjPath, $LibraryIndex) {
+function BuildGshell ($RootProjPath, $LibraryIndex, [bool]$Log = $false) {
 
     $packagesText = @'
 <?xml version="1.0" encoding="utf-8"?>
@@ -157,25 +157,30 @@ function BuildGshell ($RootProjPath, $LibraryIndex) {
     $projText | Out-File -FilePath $projFilePath -Encoding utf8 -Force
 
     #TODO: Update the assembly info to update the year and the file version!
+    Log ("Building gShell.Main") $Log
 
     $BuildResult = Invoke-MsBuild -Path $projFilePath
 
     if ($BuildResult.BuildSucceeded -eq $true) {
+        Log ("Building succeeded") $Log
         #return the path to the resulting dll file
         $gShellPath = [System.IO.Path]::Combine($RootProjPath,"bin\Debug\gShell.dll")
         return $gShellPath
     } else {
+        Log ("Build failed") $Log
         #todo: throw error and stop process here?
     }
 }
 
-function SaveGshellToLibraryIndex ($Version, $Location, $LibraryIndex, $Dependencies) {
+function SaveGshellToLibraryIndex ($Version, $Location, $LibraryIndex, $Dependencies, [bool]$Log = $false) {
     $gShellMain = "gShell.Main"
     if (-not $LibraryIndex.HasLib($gShellMain)) {
+        Log ("gShell.Main doesn't exist in the Library Index - adding entry") $Log
         $LibraryIndex.AddLib($gShellMain)
     }
 
     if (-not $LibraryIndex.HasLibVersion($gShellMain, $Version)) {
+        Log ("gShell.Main doesn't have an entry for version $Version - adding with dependencies") $Log
         $LibraryIndex.AddLibVersion($gShellMain, $Version)
 
         #this is more for the other APIs to be able to know what versions of the files THEY need are referenced,
@@ -190,7 +195,7 @@ function SaveGshellToLibraryIndex ($Version, $Location, $LibraryIndex, $Dependen
     }
 }
 
-function CheckAndBuildGshell ($RootProjPath, $LibraryIndex) {
+function CheckAndBuildGshell ($RootProjPath, $LibraryIndex, [bool]$Log = $false) {
 
     $Dependencies = @{}
 
@@ -211,12 +216,15 @@ function CheckAndBuildGshell ($RootProjPath, $LibraryIndex) {
     $gShellVersionObj = [System.Version]$gShellVersion
 
     if (-not $LibraryIndex.HasLib("gShell.Main") -or ($gShellVersionObj -lt $AuthVersionObj)) {
+
+        Log ("$gShellMain $gShellVersion either doesn't exist or needs to be updated to $AuthVersion.") $Log
         $gShellNewVersion = $AuthVersion + ".0"
 
         #First, try to build
         $CompiledPath = BuildGshell $RootProjPath $LibraryIndex
 
         if ($CompiledPath -ne $null) {
+            Log ("Copying the compiled $gShellMain.dll file to the Library Index path") $Log
             #copy the file to the library path
             $LibraryRootPath = [System.IO.Path]::GetDirectoryName($LibraryIndex.RootPath)
             $NewGShellFolderPath = [System.IO.Path]::Combine($LibraryRootPath, $gShellMain, $gShellNewVersion)
@@ -233,9 +241,9 @@ function CheckAndBuildGshell ($RootProjPath, $LibraryIndex) {
         }
 
         $gShellVersion = $LibraryIndex.GetLibVersionLatestName($gShellMain)
+    } else {
+        Log ("$gShellMain $gShellVersion appears to be up to date") $Log
     }
 
     return $gShellMain, $gShellNewVersion
 }
-
-CheckAndBuildGshell "C:\Users\svarney\Desktop\GenOutput\gShell" $LibraryIndex

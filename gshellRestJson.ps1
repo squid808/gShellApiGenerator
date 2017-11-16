@@ -1,6 +1,8 @@
 ﻿$JsonRootPath = "$env:USERPROFILE\Desktop\DiscoveryRestJson"
 
-function Get-GoogleApiList ($Preferred = $false, $Name = $null) {
+function Get-GoogleApiList ($Preferred = $false, $Name = $null, [bool]$Log = $false) {
+    
+    Log ("Getting full list of APIs from Google's Discovery List API.") $Log
     $Uri = "https://www.googleapis.com/discovery/v1/apis?preferred=$Preferred&fields=items(id,name,version,discoveryRestUrl,preferred)"
 
     if ($Name -ne $null) {$Uri += "&name=$Name"}
@@ -9,7 +11,9 @@ function Get-GoogleApiList ($Preferred = $false, $Name = $null) {
     return $List.Items
 }
 
-function Get-GoogleRestApi ($Uri, [bool]$RevisionOnly=$false, [bool]$RawContent=$false) {
+function Get-GoogleRestApi ($Uri, [bool]$RevisionOnly=$false, [bool]$RawContent=$false, [bool]$Log = $false) {
+    
+    Log ("Getting individual REST API metadata for $Uri") $Log
     if ($RevisionOnly) {
         $Uri += "?fields=version,revision"
     }
@@ -23,10 +27,11 @@ function Get-GoogleRestApi ($Uri, [bool]$RevisionOnly=$false, [bool]$RawContent=
     return $Result
 }
 
-#Check for any changes to the json files themselves, return a list of any that have been updated and downloaded
-function Get-GoogleApiJsonFiles ($Name = $null, $Version = $null, $Preferred = $null) {
-
-    $GoogleApiList = Get-GoogleApiList
+#Check for any changes to the json files themselves from Google, return a list of any that have been updated and downloaded
+function Get-GoogleApiJsonFiles ($Name = $null, $Version = $null, $Preferred = $null, [bool]$Log = $false) {
+    
+    Log ("Checking against Google to determine if any JSON files have a version not found locally.") $Log
+    $GoogleApiList = Get-GoogleApiList $Log
     $ChangeResults = New-Object System.Collections.Arraylist
 
     if ($Name -ne $null) {
@@ -64,8 +69,9 @@ function Get-GoogleApiJsonFiles ($Name = $null, $Version = $null, $Preferred = $
         
         #if the file folder doesn't exist, create it
         if (-not (Test-Path $JsonFilePath)) {
-            write-host "Downloading $JsonFileFolderName / $JsonFileName" -ForegroundColor Green
-            #write-host $RestRevision
+
+            Log ("Downloading $JsonFileName for $JsonFileFolderName") $Log
+
             if (-not (Test-Path ($JsonFileFolder))) {
                 New-Item -Path $JsonFileFolder -ItemType "Directory" | Out-Null
             }
@@ -74,7 +80,7 @@ function Get-GoogleApiJsonFiles ($Name = $null, $Version = $null, $Preferred = $
 
             $ChangeResults.Add($JsonFileFolderName) | Out-Null
         } else {
-            Write-Host "$JsonFileFolderName / $JsonFileName already exists." -ForegroundColor DarkYellow
+            Log ("$JsonFileFolderName / $JsonFileName already exists.") $false #$Log
         }
 
         $JsonFileFolderName, $JsonFileFolderName, $JsonFileName, $JsonFilePath, $ApiInfo = $null
@@ -84,9 +90,13 @@ function Get-GoogleApiJsonFiles ($Name = $null, $Version = $null, $Preferred = $
 }
 
 #Given a folder path, return the most recent json file therein
-function Get-MostRecentJsonFile ($Path) {
+function Get-MostRecentJsonFile ($Path, [bool]$Log = $false) {
+    
+    Log ("Finding the most recent Json file in $Path") $Log
+    
     $Files = New-Object System.Collections.ArrayList
-    gci $Path | % {$Files.add($_) | Out-Null}
+    
+    Get-ChildItem $Path | % {$Files.add($_) | Out-Null}
 
     if ($Files.Count -eq 1) {
         return $Files[0]
@@ -107,19 +117,25 @@ function Get-MostRecentJsonFile ($Path) {
 
         return $File
     }
+
+    Log ("No Json file found in $Path") $Log
 }
 
 #loads the most recent json file path
-function Get-JsonApiFile ($Name, $Version) {
+function Get-JsonApiFile ($Name, $Version, [bool]$Log = $false) {
     $Folder = [System.IO.Path]::Combine($JsonRootPath, ("$Name.$Version"))
-    return (Get-MostRecentJsonFile $Folder)
+    return (Get-MostRecentJsonFile $Folder $Log)
 }
 
 #loads the most recent json file
-function Load-RestJsonFile ($Name, $Version) {
+function Load-RestJsonFile ($Name, $Version, [bool]$Log = $false) {
+    
+    Log ("Loading the most recent Json info for $Name $Version") $Log
     $file = Get-JsonApiFile $Name $Version
+
     if ($file -ne $null) {
         $Json = Get-Content $file.FullName | ConvertFrom-Json
     }
+
     return $Json
 }

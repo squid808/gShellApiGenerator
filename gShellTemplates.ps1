@@ -1834,7 +1834,7 @@ $M = $Method
 
 #wrap-text (set-indent (Write-DNSW_MethodComments $F) 0)
 
-$RootOutPath = "$env:USERPROFILE\Desktop\GenOutput\gShellGmail\"
+
 
 if (-not (Test-Path $RootOutPath)) {
     New-Item -Path $RootOutPath -ItemType "Directory"

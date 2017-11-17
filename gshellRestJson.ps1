@@ -1,4 +1,5 @@
-﻿$JsonRootPath = "$env:USERPROFILE\Desktop\DiscoveryRestJson"
+﻿#TODO: make this path relative from the project itself
+$JsonRootPath = "$env:USERPROFILE\Desktop\DiscoveryRestJson"
 
 function Get-GoogleApiList ($Preferred = $false, $Name = $null, [bool]$Log = $false) {
     

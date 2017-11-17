@@ -23,71 +23,47 @@ function Get-SearchServiceUri ([bool]$Force=$false) {
     return $global:SearchServiceUri
 }
 
-# Formats JSON in a nicer format than the built-in ConvertTo-Json does.
-#via https://github.com/PowerShell/PowerShell/issues/2736
-function Format-Json([Parameter(Mandatory, ValueFromPipeline)][String] $json) {
-  $indent = 0;
-  $previousLine = $null
-  $Lines = $json -Split "`r`n"
 
-  for ($i = 0; $i -lt $lines.Length; $i++) {
-    if ($Lines[$i] -match '[\}\]]') {
-        # This line contains  ] or }, decrement the indentation level
-        $indent--
-    }
-
-    if (-not [string]::IsNullOrWhiteSpace($Lines[$i])) {
-        $lines[$i] = ('  ' * $indent) + $Lines[$i].TrimStart().TrimEnd().Replace(':  ', ': ')
-    }
-    
-    if ($Lines[$i] -match '[\{\[]$') {
-        # This line contains [ or {, increment the indentation level
-        $indent++
-    }
-
-    if (-not [string]::IsNullOrWhiteSpace($Lines[$i])) {
-        $lines[$i] = $lines[$i] + "`r`n"
-    }
-
-  }
-  
-  $Lines -Join ""
-}
-
-function SearchForNugetPackage($Package, $IsExactPackageId=$false, [bool]$Log=$false){
+#run a search against nuget for a package name
+function Invoke-NugetApiPackageSearch($PackageName, [string]$Author = $null, [string]$Version = $null, $IsExactPackageId=$false, [bool]$Log=$false) {
     
     $SearchServiceUri = Get-SearchServiceUri
 
-    Log "Searching for Package $Package" $Log
+    if (-not [string]::IsNullOrWhiteSpace($Author)) {
+        $AuthorLog = "by author $Author"
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($Version)) {
+        $VersionLog = " version $Version of"
+    }
+
+    Log "Searching for$VersionLog Package $PackageName $AuthorLog" $Log
 
     if ($IsExactPackageId) {$PackageSpecifier="packageid:"}
-    $Uri = ("{0}?q={1}{2}&prerelease=false&includeDelisted=false" -f $SearchServiceUri, $PackageSpecifier, $Package)
+    $Uri = ("{0}?q={1}{2}&prerelease=false&includeDelisted=false" -f $SearchServiceUri, $PackageSpecifier, $PackageName)
     
     $results = Invoke-RestMethod $Uri
 
-    return $results
-}
-
-function Get-CatalogEntry ($Package, [string]$Author = $null, [string]$Version = $null, $IsExactPackageId = $true, [bool]$Log=$false) {
-
-    Log ("Retrieving Catalog Entry for {0} version [{1}], by author [{2}]" -f $Package, $Version, $Author) $Log
-
-    #if we can determine the packageid exactly (Google.Apis.Discovery.v1) then use packageid, otherwise if it's missing part (like v1) just use the name
-    $SearchResults = SearchForNugetPackage $Package -IsExactPackageId $IsExactPackageId
-    
-    $VersionInfo = $SearchResults.Data
-
     if (-not [string]::IsNullOrWhiteSpace($Author)) {
-        $VersionInfo = $VersionInfo | where {$_.authors.Contains($Author)}
+        $Data = $results.Data | where {$_.authors.Contains($Author)}
+    } else {
+        $Data = $results.Data
     }
 
     if (([string]::IsNullOrWhiteSpace($Version)) -or $Version -eq -1) {
-        $VersionInfo = $VersionInfo | select -ExpandProperty versions | select -Last 1
+        $Data = $Data | select -ExpandProperty versions | select -Last 1
     } else {
-        $VersionInfo = $VersionInfo | select -ExpandProperty versions | where {$_.version -eq $Version}
+        $Data = $Data | select -ExpandProperty versions | where {$_.version -eq $Version}
     }
 
-    $VersionPackageInfo = Invoke-RestMethod $VersionInfo.'@id'
+    return $Data
+}
+
+function Get-CatalogEntry ($SearchResult, [bool]$Log=$false) {
+
+    Log ("Retrieving Catalog Entry for version {0} of {1}" -f $SearchResult.version, $VersionInfo.'@id') $Log
+
+    $VersionPackageInfo = Invoke-RestMethod $SearchResult.'@id'
 
     $CatalogEntry = Invoke-RestMethod $VersionPackageInfo.catalogEntry
 
@@ -158,7 +134,9 @@ function Get-DependenciesOf($CatalogEntry, $JsonHash, $CatalogHash = $null, [boo
 
         if (-NOT $CatalogHash[$Dependency.id].ContainsKey($DependencyVersion)) {
 
-            $DependencyCatalogEntry = Get-CatalogEntry $Dependency.id -Version $DependencyVersion -Log $Log
+            $DependencyVersionInfo = Get-VersionInfo -PackageName $Dependency.id -Version $DependencyVersion -Log $Log
+
+            $DependencyCatalogEntry = Get-CatalogEntry -VersionInfo $DependencyVersionInfo -Log $Log
             
             # save both -1 and the actual version - the -1 is to let us know not to do it again, the version is for later
             $CatalogHash[$Dependency.id][$DependencyVersion] = $DependencyCatalogEntry
@@ -248,215 +226,6 @@ function Download-NupkgDll {
     }
     
     return $PackageDetails
-}
-
-function Get-JsonIndex ($Path, [bool]$Log=$false) {
-
-    Log "Loading or Creating Json Index File" $Log
-
-    $DllPathsJsonPath = [System.IO.Path]::Combine($Path, "LibPaths.json")
-    
-    if (-not (Test-Path ($DllPathsJsonPath))){
-        @{} | ConvertTo-Json | Out-File $DllPathsJsonPath
-    }
-
-    $JsonHash = Get-Content $DllPathsJsonPath -Raw | ConvertFrom-Json
-
-    $JsonHash | Add-Member -MemberType NoteProperty -Name "RootPath" -Value $DllPathsJsonPath -Force
-
-    if (-NOT (Has-ObjProperty $JsonHash "Libraries")) {
-        $JsonHash | Add-Member -MemberType NoteProperty -Name "Libraries" -Value (New-Object psobject)
-    }
-
-    #Save()
-    $JsonHash | Add-Member -MemberType ScriptMethod -Name "Save" -Value {
-        $this | ConvertTo-Json -Depth 20 | Format-Json | Out-File $this.RootPath -Force
-    }
-
-    #HasLib(LibName)
-    $JsonHash | Add-Member -MemberType ScriptMethod -Name "HasLib" -Value {
-        param( [string]$LibName)
-        return (Has-ObjProperty $this.Libraries $LibName)
-    }
-
-    #GetLib(LibName)
-    $JsonHash | Add-Member -MemberType ScriptMethod -Name "GetLib" -Value {
-        param( [string]$LibName)
-        return $this.Libraries.$LibName
-    }
-
-    #GetLibAll()
-    $JsonHash | Add-Member -MemberType ScriptMethod -Name "GetLibAll" -Value {
-        return $this.Libraries.psobject.Properties.Name
-    }
-
-    #AddLib(LibName)
-    $JsonHash | Add-Member -MemberType ScriptMethod -Name "AddLib" -Value {
-        param( [string]$LibName )
-        $L = New-Object PSCustomObject
-        $L | Add-Member -MemberType NoteProperty -Name "Versions" -Value (New-Object psobject)
-        $this.Libraries | Add-Member -NotePropertyName $LibName -NotePropertyValue $L
-    }
-    
-    #HasLibVersion(LibName, Version)
-    $JsonHash | Add-Member -MemberType ScriptMethod -Name "HasLibVersion" -Value {
-        param( [string]$LibName, [string]$Version)
-        return ($this.HasLib($LibName) -and `
-            (Has-ObjProperty $this.GetLib($LibName).Versions $Version))
-    }
-
-    #GetLibVersion(LibName, Version)
-    $JsonHash | Add-Member -MemberType ScriptMethod -Name "GetLibVersion" -Value {
-        param( [string]$LibName, [string]$Version)
-
-        if ($Version  -eq -1) {
-            return $this.GetLibVersionAll($LibName) | sort -Property Name | select -Last 1
-        } else {    
-            return $this.GetLib($LibName).Versions.$Version
-        }
-    }
-
-    #GetLibVersionAll(LibName)
-    $JsonHash | Add-Member -MemberType ScriptMethod -Name "GetLibVersionAll" -Value {
-        param( [string]$LibName)
-        return $this.GetLib($LibName).Versions.psobject.Properties
-    }
-
-    #GetLibVersionLatest(LibName)
-    $JsonHash | Add-Member -MemberType ScriptMethod -Name "GetLibVersionLatest" -Value {
-        param( [string]$LibName)
-        $version = $this.GetLibVersionLatestName($LibName)
-        if ($version -ne $null) {
-            $result = $this.GetLibVersion($LibName, $Version)
-        }
-        return $result
-    }
-
-    #GetLibVersionLatestName(LibName)
-    $JsonHash | Add-Member -MemberType ScriptMethod -Name "GetLibVersionLatestName" -Value {
-        param( [string]$LibName)
-        $version = $this.GetLibVersionAll($LibName).name | sort -Descending | select -First 1
-        
-        return $version
-    }
-
-    #AddLibVersion(LibName, Version)
-    $JsonHash | Add-Member -MemberType ScriptMethod -Name "AddLibVersion" -Value {
-        param( [string]$LibName, [string]$Version)
-        if (-not $This.HasLib($LibName)){
-            $this.AddLib($LibName)
-        }
-
-        $this.GetLib($LibName).Versions | Add-Member -NotePropertyName $Version -NotePropertyValue `
-                    (New-Object PSCustomObject -Property ([ordered]@{
-                        "dllPath"=$null
-                        "xmlPath"=$null
-                        "Dependencies"=@()
-                        }))
-    }
-
-    #HasLibVersionDependency(LibName, Version, DependencyName, DependencyVersion)
-    $JsonHash | Add-Member -MemberType ScriptMethod -Name "HasLibVersionDependency" -Value {
-        param([string]$LibName, [string]$Version,
-            [string]$DependencyName, [string]$DependencyVersions)
-
-        if ($this.HasLibVersion($LibName, $Version)){
-            return (($this.GetLibVersion($LibName, $Version).Dependencies `
-                | where {$_.Name -eq $DependencyName -and $_.Version -eq $DependencyVersions}) `
-                -ne $null)
-        }
-
-    }
-
-    #GetLibVersionDependencies(LibName, Version)
-    $JsonHash | Add-Member -MemberType ScriptMethod -Name "GetLibVersionDependencies" -Value {
-        param([string]$LibName, [string]$Version)
-
-        if ($this.HasLibVersion($LibName, $Version)){
-            return $this.GetLibVersion($LibName, $Version).Dependencies
-        }
-    }
-
-    #AddLibVersionDependency(LibName, Version, DependencyName, DependencyVersion)
-    $JsonHash | Add-Member -MemberType ScriptMethod -Name "AddLibVersionDependency" -Value {
-        param([string]$LibName, [string]$Version,
-            [string]$DependencyName, [string]$DependencyVersions)
-            if (-not ($this.HasLibVersion($LibName, $Version))) {
-                $this.AddLibVersion($LibName, $Version)
-            }
-
-            if (-not ($this.HasLibVersionDependency($LibName, $Version,
-                $DependencyName, $DependencyVersions))) {
-
-                $D = $this.GetLibVersion($LibName, $Version)
-                
-                $O = New-Object psobject -Property ([ordered]@{
-                    Name = $DependencyName
-                    Versions = $DependencyVersions
-                })
-                
-                $D.Dependencies += $O
-            }
-    }
-
-    #GetLibVersionDependencyChain(LibName, Version)
-    $JsonHash | Add-Member -MemberType ScriptMethod -Name "GetLibVersionDependencyChain" -Value {
-        param([string]$LibName, [string]$Version)
-
-        $DependenciesHash = @{}
-
-        if ($this.HasLibVersion($LibName, $Version)){
-            
-            if (-not $DependenciesHash.ContainsKey($LibName)) {
-                $DependenciesHash[$LibName] = $Version
-            }
-
-            $Dependencies = $this.GetLibVersion($LibName, $Version).Dependencies
-            foreach ($Dependency in $Dependencies) {
-                $Version = Get-LatestVersionFromRange $Dependency.Versions
-                if  ($version -eq -1) {
-                    $Version = $this.GetLibVersionLatestName($Dependency.Name)
-                }
-
-                $SubDependenciesHash = $this.GetLibVersionDependencyChain($Dependency.Name, $Version)
-
-                foreach ($LibKey in $SubDependenciesHash.Keys) {
-                    $DependenciesHash[$LibKey] = $SubDependenciesHash[$LibKey]
-                }
-            }
-        }
-
-        return $DependenciesHash
-    }
-    
-    #check for missing files and update the json index
-    $ChangedInfo = $false
-
-    foreach ($L in $JsonHash.GetLibAll()) {
-        foreach ($V in $JsonHash.GetLibVersionAll($L).Name){
-            $Info = $JsonHash.GetLibVersion($L, $V)
-            
-            if ($Info.dllPath -notlike "*_._" -AND $Info.dllPath -ne $null) {
-                if (-NOT (Test-Path $Info.dllPath)){
-                    $Info.dllPath = "missing"
-                    $ChangedInfo = $true
-                }
-            }
-
-            if ($Info.xmlPath -notlike "*_._" -AND -not [string]::IsNullOrWhiteSpace($Info.xmlPath)) {
-                if (-NOT (Test-Path $Info.xmlPath)){
-                    $Info.xmlPath = "missing"
-                    $ChangedInfo = $true
-                }
-            }
-        }
-    }
-
-    if ($ChangedInfo) {
-        $JsonHash.Save()
-    }
-
-    return $JsonHash
 }
 
 #TODO: Finish this? Make it something to manually run
@@ -577,21 +346,24 @@ function Download-Dependencies ($DependencyHash, $OutPath, $JsonHash, [bool]$Log
     return $FoundUpdate
 }
 
-
-
-function Get-SinglePackageByName ([string]$Package, [bool]$Log=$false, [string]$Version = $null, $Author = "Google Inc.",  $LibraryIndex = $null) {
-
-    #$SearchServiceUri = Get-SearchServiceUri
-
-    #$Package = "Google.Apis.Youtube.v3" #figure out how to extract this from the google discovery API
+function Download-PackageFromSearchResult ($LibraryIndex, $SearchResult, $OutPathRoot, $TargetFramework = ".NetFramework4.5", [bool]$Log=$false) {
     
-    $CatalogEntry = Get-CatalogEntry $Package $Author -IsExactPackageId $true -Log $Log -Version $Version
+    $CatalogEntry = Get-CatalogEntry -SearchResult $SearchResult -Log $Log
 
-    $TargetFramework = ".NetFramework4.5"
+    $DependencyHash = Get-DependenciesOf $CatalogEntry $LibraryIndex -Log $Log
 
-    if ($LibraryIndex -eq $null) {
-        $LibraryIndex = Get-JsonIndex $LibraryIndexRoot -Log $Log
-    }
+    $FoundChanges = Download-Dependencies $DependencyHash $OutPathRoot $LibraryIndex -Log $Log
+
+    return $CatalogEntry, $FoundChanges
+}
+
+function Get-SinglePackageByName ($LibraryIndex, [string]$PackageName, [bool]$Log=$false, [string]$Version = $null, $Author = "Google Inc.") {
+
+    
+
+    Download-PackageFromSearchResult
+
+    $CatalogEntry = Get-CatalogEntry -SearchResult $SearchResult -Log $Log
 
     $DependencyHash = Get-DependenciesOf $CatalogEntry $LibraryIndex -Log $Log
 
@@ -610,8 +382,6 @@ TODO:
      to allow caching of dlls for at least that session
 5) Improve logging, fix function formatting and params
 #>
-
-#Get-SinglePackageByName "Google.Apis.Admin.Directory_v1" -Log $true | Out-Null
 
 #determine a likely nuget package name based on json info
 function Get-NugetPackageIdFromJson ($Json) {
@@ -641,7 +411,7 @@ function Get-ApiPackage ($Name, $Version, [bool]$Log = $false) {
 }
 
 function Get-AllApiPackages ([bool]$Log = $false) {
-    $LibraryIndex = Get-JsonIndex $LibraryIndexRoot
+    $LibraryIndex = Get-LibraryIndex $LibraryIndexRoot
 
     foreach ($JsonFileInfo in (gci $JsonRootPath -Recurse -Filter "*.json")){
         $File = Get-MostRecentJsonFile $JsonFileInfo.directory.fullname
@@ -659,15 +429,51 @@ function Get-AllApiPackages ([bool]$Log = $false) {
     Get-SystemMgmtAuto $LibraryIndex $Log
 }
 
+#Start here - do we need 'found changes' now? ~458
+# need to set the 'LastVersionBuilt' if downloaded? no, compare 
+
+function Check-AllApiPackages($LibraryIndex, $JsonRootPath, $LibrarySaveFolderPath, [bool]$Log = $false) {
+    foreach ($Directory in (gci $JsonRootPath -Directory)){
+        $File = Get-MostRecentJsonFile $Directory.fullname
+
+        if ($File -ne $null) {
+            try {
+                $Json = Get-Content $File.FullName | ConvertFrom-Json
+                $PackageId = (Get-NugetPackageIdFromJson $Json)
+                $SearchResult = Invoke-NugetApiPackageSearch -PackageName $PackageId -Author "Google Inc." -Version -1 -IsExactPackageId $true -Log $Log
+                
+                $ShouldDownloadNewest = $false
+                
+                if ($LibraryIndex.HasLib($PackageId)){
+                    $SearchResultVersionObj = [System.Version]$SearchResult.version
+                    $LatestVersionObj = [System.Version]$LibraryIndex.GetLibVersionLatestName($PackageId)
+                    if ($LatestVersionObj -ne $null -and $LatestVersionObj -lt $SearchResultVersionObj) {
+                        $ShouldDownloadNewest = $true
+                    }
+                } else {
+                    $ShouldDownloadNewest = $true
+                }
+
+                if ($ShouldDownloadNewest -eq $true) {
+                    #START HERE
+                    $CatalogEntry,$FoundChanges = Download-PackageFromSearchResult -LibraryIndex $LibraryIndex -SearchResult $SearchResult -OutPathRoot $LibrarySaveFolderPath -Log $Log
+                }
+            } catch {
+                write-host $_.innerexception.message
+            }
+        }
+    }
+
+    Get-SystemMgmtAuto $LibraryIndex $Log
+}
+
 function Get-SystemMgmtAuto ($LibraryIndex, [bool]$Log = $false) {
     $SMA = "System.Management.Automation.dll"
     
     if (-not $LibraryIndex.HasLib($SMA)) {
-        Get-SinglePackageByName $SMA -Author $null -Log $Log -Version "10.0.10586"
+        Get-SinglePackageByName -LibraryIndex $LibraryIndex -PackageName $SMA -Author $null -Log $Log -Version "10.0.10586"
     }
 }
-
-$LibraryIndexRoot = "$env:USERPROFILE\Desktop\Libraries"
 
 #$SearchServiceUri = Get-SearchServiceUri
 #
@@ -682,7 +488,7 @@ $LibraryIndexRoot = "$env:USERPROFILE\Desktop\Libraries"
 #
 #$CatalogEntry = Get-CatalogEntry $Package $Author -IsExactPackageId $true -Log $Log
 #
-#$JsonHash = Get-JsonIndex $LibraryIndexRoot -Log $Log
+#$JsonHash = Get-LibraryIndex $LibraryIndexRoot -Log $Log
 #
 #$DependencyHash = Get-DependenciesOf $CatalogEntry $JsonHash -Log $Log
 #
@@ -693,4 +499,9 @@ $LibraryIndexRoot = "$env:USERPROFILE\Desktop\Libraries"
 
 #Get-SinglePackageByName "Google.Apis" -Log $true
 
-$CatalogEntry = Get-CatalogEntry "Google.Apis.Gmail.v1" "Google Inc." -IsExactPackageId $true -Log $Log
+#$VersionInfo = Get-VersionInfo "Google.Apis.Gmail.v1" "Google Inc." -IsExactPackageId $true -Log $Log
+
+#$CatalogEntry = Get-CatalogEntry $VersionInfo -Log $Log
+
+#Get-VersionInfo -PackageName $PackageId -Author $Author -IsExactPackageId $true -Log $Log
+Invoke-NugetApiPackageSearch -PackageName $PackageId -Author "Google Inc." -Version -1 -IsExactPackageId $true -Log $Log

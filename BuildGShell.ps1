@@ -1,4 +1,6 @@
-﻿#First check for updated versions of the dependencies
+﻿#TODO: Add -Force switch?
+
+#First check for updated versions of the dependencies
 
 #Foreach gshell dependency, check existing version of most recent build and compare to what is available from nuget
 
@@ -189,13 +191,16 @@ function SaveGshellToLibraryIndex ($Version, $Location, $LibraryIndex, $Dependen
             $LibraryIndex.AddLibVersionDependency($gShellMain, $Version, $Dependency.Name, $Dependency.Value)
         }
 
-        $LibraryIndex.GetLibVersion($gShellMain, $Version)."dllPath" = $Location
-
-        $LibraryIndex.Save()
+        
     }
+
+    $LibraryIndex.GetLibVersion($gShellMain, $Version)."dllPath" = $Location
+    $LibraryIndex.SetLibLastVersionBuilt($gShellMain, $Version)
+
+    $LibraryIndex.Save()
 }
 
-function CheckAndBuildGshell ($RootProjPath, $LibraryIndex, [bool]$Log = $false) {
+function CheckAndBuildGshell ($RootProjPath, $LibraryIndex, [bool]$Log = $false, [bool]$Force = $false) {
 
     $Dependencies = @{}
 
@@ -215,7 +220,7 @@ function CheckAndBuildGshell ($RootProjPath, $LibraryIndex, [bool]$Log = $false)
     $gShellVersion = $LibraryIndex.GetLibVersionLatestName($gShellMain)
     $gShellVersionObj = [System.Version]$gShellVersion
 
-    if (-not $LibraryIndex.HasLib("gShell.Main") -or ($gShellVersionObj -lt $AuthVersionObj)) {
+    if (-not $LibraryIndex.HasLib("gShell.Main") -or ($gShellVersionObj -lt $AuthVersionObj) -or $Force) {
 
         Log ("$gShellMain $gShellVersion either doesn't exist or needs to be updated to $AuthVersion.") $Log
         $gShellNewVersion = $AuthVersion + ".0"
@@ -235,7 +240,9 @@ function CheckAndBuildGshell ($RootProjPath, $LibraryIndex, [bool]$Log = $false)
             Copy-Item -Path $CompiledPath -Destination $NewGShellPath | Out-Null
 
             #update the library
+            $LibraryIndex.SetLibLastVersionBuilt("Google.Apis.Auth", $AuthVersion)
             SaveGshellToLibraryIndex -Version $gShellNewVersion -Location $NewGShellPath -LibraryIndex $LibraryIndex -Dependencies $Dependencies
+            
         } else {
             #throw some error right?
         }

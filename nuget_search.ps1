@@ -23,24 +23,35 @@ function Get-SearchServiceUri ([bool]$Force=$false) {
     return $global:SearchServiceUri
 }
 
-
 #run a search against nuget for a package name
-function Invoke-NugetApiPackageSearch($PackageName, [string]$Author = $null, [string]$Version = $null, $IsExactPackageId=$false, [bool]$Log=$false) {
+function Invoke-NugetApiPackageSearch {
     
+    param  (
+        $SearchString,
+        
+        [string]$Author = $null,
+
+        [bool]$IsExactPackageId = $false,
+
+        [string]$DescriptionSearchString = $null,
+
+        [bool]$Log=$false
+    )
+
     $SearchServiceUri = Get-SearchServiceUri
 
     if (-not [string]::IsNullOrWhiteSpace($Author)) {
         $AuthorLog = "by author $Author"
     }
 
-    if (-not [string]::IsNullOrWhiteSpace($Version)) {
-        $VersionLog = " version $Version of"
+    Log "Searching for $Package $SearchString $AuthorLog" $Log
+
+    if ($SearchString.Contains(" ")) {
+        $SearchString = $SearchString.Replace(" ","+")
     }
 
-    Log "Searching for$VersionLog Package $PackageName $AuthorLog" $Log
-
     if ($IsExactPackageId) {$PackageSpecifier="packageid:"}
-    $Uri = ("{0}?q={1}{2}&prerelease=false&includeDelisted=false" -f $SearchServiceUri, $PackageSpecifier, $PackageName)
+    $Uri = ("{0}?q={1}{2}&prerelease=false&includeDelisted=false" -f $SearchServiceUri, $PackageSpecifier, $SearchString)
     
     $results = Invoke-RestMethod $Uri
 
@@ -50,20 +61,29 @@ function Invoke-NugetApiPackageSearch($PackageName, [string]$Author = $null, [st
         $Data = $results.Data
     }
 
-    if (([string]::IsNullOrWhiteSpace($Version)) -or $Version -eq -1) {
-        $Data = $Data | select -ExpandProperty versions | select -Last 1
-    } else {
-        $Data = $Data | select -ExpandProperty versions | where {$_.version -eq $Version}
+    if (-not [string]::IsNullOrWhiteSpace($DescriptionSearchString)) {
+        $Data = $Data | where {$_.description.ToLower().Contains($DescriptionSearchString.ToLower())}
     }
 
     return $Data
 }
 
-function Get-CatalogEntry ($SearchResult, [bool]$Log=$false) {
+function Get-SearchResultVersion ($SearchResult, $Version) {
+    if (([string]::IsNullOrWhiteSpace($Version)) -or $Version -eq -1) {
+        $VersionData = $SearchResult | select -ExpandProperty versions | select -Last 1
+    } else {
+        $VersionData = $SearchResult | select -ExpandProperty versions | where {$_.version -eq $Version}
+    }
 
-    Log ("Retrieving Catalog Entry for version {0} of {1}" -f $SearchResult.version, $VersionInfo.'@id') $Log
+    return $VersionData
+}
 
-    $VersionPackageInfo = Invoke-RestMethod $SearchResult.'@id'
+function Get-CatalogEntry ($SearchResultVersionData, [bool]$Log=$false) {
+
+    Log ("Retrieving Catalog Entry for version {0} of {1}" -f $SearchResultVersionData.version, `
+        ($SearchResultVersionData.'@id' -split "/" | where {$_ -like "*google*"})) $Log
+
+    $VersionPackageInfo = Invoke-RestMethod $SearchResultVersionData.'@id'
 
     $CatalogEntry = Invoke-RestMethod $VersionPackageInfo.catalogEntry
 
@@ -91,6 +111,7 @@ function Get-LatestVersionFromRange ($VersionRange) {
     return $Version
 }
 
+#TODO: Make sure this is only responsible for figuring out the nuget dependencies, which goes hand in hand with downloading them?
 function Get-DependenciesOf($CatalogEntry, $JsonHash, $CatalogHash = $null, [bool]$Log=$false){
     
     Log ("Retrieving Dependencies for {0}" -f $CatalogEntry.id) $Log
@@ -134,9 +155,14 @@ function Get-DependenciesOf($CatalogEntry, $JsonHash, $CatalogHash = $null, [boo
 
         if (-NOT $CatalogHash[$Dependency.id].ContainsKey($DependencyVersion)) {
 
-            $DependencyVersionInfo = Get-VersionInfo -PackageName $Dependency.id -Version $DependencyVersion -Log $Log
+            #$DependencyVersionInfo = Get-VersionInfo -PackageName $Dependency.id -Version $DependencyVersion -Log $Log
 
-            $DependencyCatalogEntry = Get-CatalogEntry -VersionInfo $DependencyVersionInfo -Log $Log
+            $SearchResult = Invoke-NugetApiPackageSearch -SearchString $Dependency.id `
+                -IsExactPackageId $true -Log $Log
+
+            $VersionData = Get-SearchResultVersion $SearchResult -Version $DependencyVersion
+
+            $DependencyCatalogEntry = Get-CatalogEntry -SearchResultVersionData $VersionData -Log $Log
             
             # save both -1 and the actual version - the -1 is to let us know not to do it again, the version is for later
             $CatalogHash[$Dependency.id][$DependencyVersion] = $DependencyCatalogEntry
@@ -259,7 +285,7 @@ function Check-JsonLibraryExists ($JsonHash, $DependencyInfo){
     #if ($JsonHash.HasLibVersion($DependencyInfo.Name, $DependencyInfo.Versions)
 }
 
-function Download-Dependencies ($DependencyHash, $OutPath, $JsonHash, [bool]$Log=$false) {
+function Download-Dependencies ($DependencyHash, $OutPath, $JsonHash, [bool]$Log=$false, [bool]$Force=$false) {
 
     Log ("Downloading all saved dependencies") $Log
 
@@ -273,13 +299,14 @@ function Download-Dependencies ($DependencyHash, $OutPath, $JsonHash, [bool]$Log
 
         foreach ($VersionKey in ($DependencyHash[$LibKey].Keys| where {$_ -ne -1})){
             
+            $PackageDetails = $DependencyHash[$LibKey][$VersionKey]
+
             if (-NOT $JsonHash.HasLibVersion($LibKey, $DependencyHash[$LibKey][$VersionKey].version) `
                 -OR $JsonHash.GetLibVersion($LibKey, $DependencyHash[$LibKey][$VersionKey].version).dllPath -eq "missing" `
                 -OR $JsonHash.GetLibVersion($LibKey, $DependencyHash[$LibKey][$VersionKey].version).dllPath -eq $null `
                 -OR $JsonHash.GetLibVersion($LibKey, $DependencyHash[$LibKey][$VersionKey].version).xmlPath -eq "missing" `
-                -OR $JsonHash.GetLibVersion($LibKey, $DependencyHash[$LibKey][$VersionKey].version).xmlPath -eq $null) {
-
-                $PackageDetails = $DependencyHash[$LibKey][$VersionKey]
+                -OR $JsonHash.GetLibVersion($LibKey, $DependencyHash[$LibKey][$VersionKey].version).xmlPath -eq $null `
+                -OR $Force -eq $true) {
 
                 $Version = $PackageDetails.version
 
@@ -339,6 +366,9 @@ function Download-Dependencies ($DependencyHash, $OutPath, $JsonHash, [bool]$Log
                 $JsonHash.Save()
 
                 $FoundUpdate = $true
+            } else {
+                $PackageDetails.dllPath = $JsonHash.GetLibVersion($LibKey, $DependencyHash[$LibKey][$VersionKey].version).dllPath
+                $PackageDetails.xmlPath = $JsonHash.GetLibVersion($LibKey, $DependencyHash[$LibKey][$VersionKey].version).xmlPath
             }
         }
     }
@@ -346,22 +376,26 @@ function Download-Dependencies ($DependencyHash, $OutPath, $JsonHash, [bool]$Log
     return $FoundUpdate
 }
 
-function Download-PackageFromSearchResult ($LibraryIndex, $SearchResult, $OutPathRoot, $TargetFramework = ".NetFramework4.5", [bool]$Log=$false) {
+function Download-PackageFromSearchResult ($LibraryIndex, $VersionData, $OutPathRoot, $TargetFramework = ".NetFramework4.5", [bool]$Log=$false, [bool]$Force=$false) {
     
-    $CatalogEntry = Get-CatalogEntry -SearchResult $SearchResult -Log $Log
+    $CatalogEntry = Get-CatalogEntry -SearchResultVersionData $VersionData -Log $Log
 
     $DependencyHash = Get-DependenciesOf $CatalogEntry $LibraryIndex -Log $Log
 
-    $FoundChanges = Download-Dependencies $DependencyHash $OutPathRoot $LibraryIndex -Log $Log
+    $FoundChanges = Download-Dependencies $DependencyHash $OutPathRoot $LibraryIndex -Log $Log -Force $Force
 
     return $CatalogEntry, $FoundChanges
 }
 
-function Get-SinglePackageByName ($LibraryIndex, [string]$PackageName, [bool]$Log=$false, [string]$Version = $null, $Author = "Google Inc.") {
+function Get-SinglePackageByName ($LibraryIndex, [string]$PackageName, [string]$Version = $null, $OutPathRoot, $TargetFramework = ".NetFramework4.5",
+        $Author = "Google Inc.", [bool]$Log=$false,  [bool]$Force=$false) {
 
-    
+    $SearchResult = Invoke-NugetApiPackageSearch -SearchString $PackageName -Author $Author -IsExactPackageId $true -Log $Log
 
-    Download-PackageFromSearchResult
+    $VersionData = Get-SearchResultVersion -SearchResult $SearchResult
+
+    return (Download-PackageFromSearchResult -LibraryIndex $LibraryIndex -VersionData $VersionData -OutPathRoot $OutPathRoot -TargetFramework $TargetFramework `
+        -Log $Log -Force $Force)
 
     $CatalogEntry = Get-CatalogEntry -SearchResult $SearchResult -Log $Log
 
@@ -383,6 +417,27 @@ TODO:
 5) Improve logging, fix function formatting and params
 #>
 
+$NugetPackageAlternateIds = @{
+    "Google.Apis.Adexchangebuyer2.v2beta1" = "Google.Apis.AdexchangebuyerII.v2beta1"
+    "Google.Apis.Androiddeviceprovisioning.v1" = "Google.Apis.AndroidProvisioningPartner.v1"
+    "Google.Apis.Content.v2sandbox" = "Google.Apis.ShoppingContent.v2sandbox"
+    "Google.Apis.Deploymentmanager.alpha" = "Google.Apis.DeploymentManagerAlpha.alpha"
+    "Google.Apis.Deploymentmanager.v2beta" = "Google.Apis.DeploymentManagerV2Beta.v2beta"
+    "Google.Apis.Dialogflow.v2beta1" = ""
+    "Google.Apis.Firestore.v1beta1" = ""
+    "Google.Apis.Language.v1" = ""
+    "Google.Apis.Language.v1beta1" = ""
+    "Google.Apis.Language.v1beta2" = ""
+    "Google.Apis.Manufacturers.v1" = ""
+    "Google.Apis.Ml.v1" = ""
+    "Google.Apis.Oslogin.v1alpha" = ""
+    "Google.Apis.Oslogin.v1beta" = ""
+    "Google.Apis.Runtimeconfig.v1" = ""
+    "Google.Apis.Sourcerepo.v1" = ""
+    "Google.Apis.Videointelligence.v1beta1" = ""
+
+}
+
 #determine a likely nuget package name based on json info
 function Get-NugetPackageIdFromJson ($Json) {
     if ($Json.id -like "admin:*") {
@@ -394,6 +449,10 @@ function Get-NugetPackageIdFromJson ($Json) {
     }
 
     $P = "Google.Apis.$PackageId"
+
+    #if ($NugetPackageAlternateIds.ContainsKey($P)) {
+    #    $P = $NugetPackageAlternateIds[$P]
+    #}
 
     return $P
 }
@@ -432,37 +491,81 @@ function Get-AllApiPackages ([bool]$Log = $false) {
 #Start here - do we need 'found changes' now? ~458
 # need to set the 'LastVersionBuilt' if downloaded? no, compare 
 
-function Check-AllApiPackages($LibraryIndex, $JsonRootPath, $LibrarySaveFolderPath, [bool]$Log = $false) {
-    foreach ($Directory in (gci $JsonRootPath -Directory)){
-        $File = Get-MostRecentJsonFile $Directory.fullname
-
-        if ($File -ne $null) {
-            try {
-                $Json = Get-Content $File.FullName | ConvertFrom-Json
-                $PackageId = (Get-NugetPackageIdFromJson $Json)
-                $SearchResult = Invoke-NugetApiPackageSearch -PackageName $PackageId -Author "Google Inc." -Version -1 -IsExactPackageId $true -Log $Log
-                
-                $ShouldDownloadNewest = $false
-                
-                if ($LibraryIndex.HasLib($PackageId)){
-                    $SearchResultVersionObj = [System.Version]$SearchResult.version
-                    $LatestVersionObj = [System.Version]$LibraryIndex.GetLibVersionLatestName($PackageId)
-                    if ($LatestVersionObj -ne $null -and $LatestVersionObj -lt $SearchResultVersionObj) {
-                        $ShouldDownloadNewest = $true
-                    }
-                } else {
-                    $ShouldDownloadNewest = $true
-                }
-
-                if ($ShouldDownloadNewest -eq $true) {
-                    #START HERE
-                    $CatalogEntry,$FoundChanges = Download-PackageFromSearchResult -LibraryIndex $LibraryIndex -SearchResult $SearchResult -OutPathRoot $LibrarySaveFolderPath -Log $Log
-                }
-            } catch {
-                write-host $_.innerexception.message
-            }
+#a three-pronged approach to searching for Google API packages when searching for the first time, returns a new package ID if the default isn't found.
+function Invoke-BroadGoogleSearchOnNuget ($PackageId, $Json, [bool]$Log = $false){
+    Log "Attempting to find $PackageId through a direct search" $Log
+    $SearchResult = Invoke-NugetApiPackageSearch -SearchString $PackageId -Author "Google Inc." -Version -1 -IsExactPackageId $true -Log $Log
+    
+    if ($SearchResult -eq $null) {
+        if (-not [string]::IsNullOrWhiteSpace($json.CanonicalName)) {
+            $PackageId = "Google.Apis." + $Json.canonicalName.Replace(" ","") + "." + $json.version
+            Log "No results. Attempting to find $PackageId through a direct search" $Log
+            $SearchResult = Invoke-NugetApiPackageSearch -SearchString $PackageId -Author "Google Inc." -Version -1 -IsExactPackageId $true -Log $Log
         }
     }
+
+    if ($SearchResult -eq $null) {
+        Log ("No results. Attempting to find {0} {1} through a broad search via descriptions" -f $Json.Name, $Json.Version) $Log
+        $DescriptionSearch = "Google APIs Client Library for working with {0} {1}." -f $Json.Name, $Json.Version
+        $SearchResult = Invoke-NugetApiPackageSearch -SearchString ("Google {0} {1}" -f $Json.Name, $Json.Version) `
+            -Author "Google Inc." -IsExactPackageId $false -DescriptionSearchString $DescriptionSearch
+    }
+
+    return $SearchResult
+}
+
+function Check-AllApiPackages($LibraryIndex, $JsonRootPath, $LibrarySaveFolderPath, [bool]$Log = $false) {
+    #foreach ($Directory in (gci $JsonRootPath -Directory)){
+        #$File = Get-MostRecentJsonFile $Directory.fullname
+
+        #testing
+        $File = Get-MostRecentJsonFile "$env:USERPROFILE\Desktop\DiscoveryRestJson\adexchangebuyer2.v2beta1"
+        $Json = Get-Content $File.FullName | ConvertFrom-Json
+
+        if ($File -ne $null) {
+            $Json = Get-Content $File.FullName | ConvertFrom-Json
+            $PackageId = (Get-NugetPackageIdFromJson $Json)
+                
+            $ShouldDownloadNewest = $false
+                
+            if ($LibraryIndex.HasLib($PackageId)){
+                write-host $PackageId
+                $SearchResult = Invoke-NugetApiPackageSearch -SearchString $PackageId -Author "Google Inc." -IsExactPackageId $true -Log $Log
+                $VersionData = Get-SearchResultVersion -SearchResult $SearchResult -Version -1
+                $VersionDataObj = [System.Version]$VersionData.version
+                $LatestVersion = $LibraryIndex.GetLibVersionLatestName($PackageId)
+                $LatestVersionObj = [System.Version]$LatestVersion
+                if ($LatestVersionObj -ne $null -and $LatestVersionObj -lt $VersionDataObj) {
+                    $ShouldDownloadNewest = $true
+                    Log ("({0} => {1}) Old version of $PackageId found locally." -f $VersionData.version, $LatestVersion) $Log
+                } else {
+                    Log ("$PackageId is up to date.") $Log
+                }
+            } else {
+                #since this is the first time we've encountered it, let's run a big search to make sure we can find it
+                $SearchResult = Invoke-BroadGoogleSearchOnNuget -PackageId $PackageId -Json $Json -Log $True
+                $VersionData = Get-SearchResultVersion -SearchResult $SearchResult -Version -1
+                
+                if ($SearchResult.id -ne $PackageId) {
+                    $LibraryIndex.SetLibNameRedirect($PackageId, $SearchResult.id)
+                    #$LibraryIndex.Save()
+                    $PackageId = $SearchResult.id
+                }
+
+                $ShouldDownloadNewest = $true
+                Log ("$PackageId is not found in the library index.") $Log
+            }
+
+            if ($ShouldDownloadNewest -eq $true) {
+                if ($SearchResult -ne $null) {
+                    $CatalogEntry, $FoundChanges = Download-PackageFromSearchResult -LibraryIndex $LibraryIndex -VersionData $VersionData `
+                        -OutPathRoot $LibraryIndexRoot -TargetFramework ".NetFramework4.5" -Log $Log
+                } else {
+                    Log ("No nuget results found for $PackageId.") $true
+                }
+            }
+        }
+    #}
 
     Get-SystemMgmtAuto $LibraryIndex $Log
 }
@@ -504,4 +607,15 @@ function Get-SystemMgmtAuto ($LibraryIndex, [bool]$Log = $false) {
 #$CatalogEntry = Get-CatalogEntry $VersionInfo -Log $Log
 
 #Get-VersionInfo -PackageName $PackageId -Author $Author -IsExactPackageId $true -Log $Log
-Invoke-NugetApiPackageSearch -PackageName $PackageId -Author "Google Inc." -Version -1 -IsExactPackageId $true -Log $Log
+
+#$PackageId = "Google.Apis.Acceleratedmobilepageurl.v1"
+#$SearchResult = Invoke-NugetApiPackageSearch -SearchString $PackageId -Author "Google Inc." -Version -1 -IsExactPackageId $true -Log $Log
+#$CatalogEntry = Get-CatalogEntry -SearchResult $SearchResult -Log $Log
+
+#Download-PackageFromSearchResult -LibraryIndex $LibraryIndex -SearchResult $SearchResult `
+#    -OutPathRoot $LibraryIndexRoot -TargetFramework ".NetFramework4.5" -Log $Log #-Force $true
+
+$LibraryIndex = Get-LibraryIndex $LibraryIndexRoot -Log $Log
+Check-AllApiPackages -LibraryIndex $LibraryIndex -JsonRootPath $JsonRootPath -LibrarySaveFolderPath $LibraryIndexRoot -Log $false
+
+

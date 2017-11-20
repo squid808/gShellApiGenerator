@@ -3,6 +3,7 @@
 
 $RootOutPath = "$env:USERPROFILE\Desktop\GenOutput\gShellGmail\"
 $LibraryIndexRoot = "$env:USERPROFILE\Desktop\Libraries"
+$Log = $true
 
 #To Run All Files
 function Update-AllFiles ($Log = $false) {
@@ -33,7 +34,7 @@ function Update-AllFiles ($Log = $false) {
     }
 
     #CheckAndBuildGshell "C:\Users\svarney\Desktop\GenOutput\gShell" $LibraryIndex -Log $true
-
+    #$LibraryIndex.Libraries.psobject.Properties.Name | where {$_ -like "Google.Apis*"}
 }
 
 #Update-AllFiles

@@ -75,6 +75,18 @@ function Get-LibraryIndex ($Path, [bool]$Log=$false) {
         return Add-LibraryIndexLib $this $LibName
     }
 
+    #GetLibNameRedirect
+    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "GetLibNameRedirect" -Value {
+        param([string]$LibName)
+        return Get-LibraryIndexLibNameRedirect $this $LibName
+    }
+
+    #SetLibNameRedirect
+    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "SetLibNameRedirect" -Value {
+        param([string]$LibName, [string]$RedirectName)
+        return Set-LibraryIndexLibNameRedirect $this $LibName $RedirectName
+    }
+
     #GetLibSource(LibName, Source)
     $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "GetLibSource" -Value {
         param([string]$LibName)
@@ -202,6 +214,29 @@ function Add-LibraryIndexLib {
     $L | Add-Member -MemberType NoteProperty -Name "Source" -Value $null
     $L | Add-Member -MemberType NoteProperty -Name "Versions" -Value (New-Object psobject)
     $LibraryIndex.Libraries | Add-Member -NotePropertyName $LibName -NotePropertyValue $L
+}
+
+
+#GetLibNameRedirect
+function Get-LibraryIndexLibNameRedirect {
+    param($LibraryIndex, [string]$RedirectName)
+
+    return $LibraryIndex.Libraries.$LibName.RedirectName
+}
+
+#SetLibNameRedirect
+function Set-LibraryIndexLibNameRedirect {
+    param($LibraryIndex, [string]$LibName, [string]$RedirectName)
+
+    if (-not (Test-LibraryIndexLib -LibraryIndex $LibraryIndex -LibName $LibName)) {
+        Add-LibraryIndexLib -LibraryIndex $LibraryIndex -LibName $LibName
+    }
+
+    $LibraryIndex.Libraries.$LibName | Add-Member -NotePropertyName "RedirectName" -NotePropertyValue $RedirectName
+
+    if (-not (Test-LibraryIndexLib -LibraryIndex $LibraryIndex -LibName $RedirectName)) {
+        Add-LibraryIndexLib -LibraryIndex $LibraryIndex -LibName $RedirectName
+    }
 }
 
 #GetLibSource

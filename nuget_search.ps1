@@ -5,9 +5,9 @@ add-type -assembly System.IO.Compression.FileSystem
 <#
 TODO: Hard-code in versions for APIs for consistency?
 #>
-function Log ($Message, [bool]$ShouldLog=$false) {
+function Log ($Message, [bool]$ShouldLog=$false, [string]$ForegroundColor = "Green") {
     if ($ShouldLog) {
-        Write-Host $Message -ForegroundColor Green
+        Write-Host $Message -ForegroundColor $ForegroundColor
     }
 }
 
@@ -515,21 +515,28 @@ function Invoke-BroadGoogleSearchOnNuget ($PackageId, $Json, [bool]$Log = $false
 }
 
 function Check-AllApiPackages($LibraryIndex, $JsonRootPath, $LibrarySaveFolderPath, [bool]$Log = $false) {
-    #foreach ($Directory in (gci $JsonRootPath -Directory)){
-        #$File = Get-MostRecentJsonFile $Directory.fullname
+    foreach ($Directory in (gci $JsonRootPath -Directory)){
+        $File = Get-MostRecentJsonFile $Directory.fullname
 
         #testing
-        $File = Get-MostRecentJsonFile "$env:USERPROFILE\Desktop\DiscoveryRestJson\adexchangebuyer2.v2beta1"
-        $Json = Get-Content $File.FullName | ConvertFrom-Json
+        #$File = Get-MostRecentJsonFile "$env:USERPROFILE\Desktop\DiscoveryRestJson\adexchangebuyer2.v2beta1"
+        #$Json = Get-Content $File.FullName | ConvertFrom-Json
 
         if ($File -ne $null) {
+            $File.FullName
             $Json = Get-Content $File.FullName | ConvertFrom-Json
             $PackageId = (Get-NugetPackageIdFromJson $Json)
                 
             $ShouldDownloadNewest = $false
+
+            $NameRedirect = $LibraryIndex.GetLibNameRedirect($PackageId)
+
+            if (-not [string]::IsNullOrWhiteSpace($NameRedirect)) {
+                Log ("Redirecting to $NameRedirect") $Log
+                $PackageId = $NameRedirect
+            }
                 
             if ($LibraryIndex.HasLib($PackageId)){
-                write-host $PackageId
                 $SearchResult = Invoke-NugetApiPackageSearch -SearchString $PackageId -Author "Google Inc." -IsExactPackageId $true -Log $Log
                 $VersionData = Get-SearchResultVersion -SearchResult $SearchResult -Version -1
                 $VersionDataObj = [System.Version]$VersionData.version
@@ -547,8 +554,9 @@ function Check-AllApiPackages($LibraryIndex, $JsonRootPath, $LibrarySaveFolderPa
                 $VersionData = Get-SearchResultVersion -SearchResult $SearchResult -Version -1
                 
                 if ($SearchResult.id -ne $PackageId) {
+                    Log ("Adding name redirect of {0} => {1}" -f $PackageId, $SearchResult.id) $Log
                     $LibraryIndex.SetLibNameRedirect($PackageId, $SearchResult.id)
-                    #$LibraryIndex.Save()
+                    $LibraryIndex.Save()
                     $PackageId = $SearchResult.id
                 }
 
@@ -561,11 +569,12 @@ function Check-AllApiPackages($LibraryIndex, $JsonRootPath, $LibrarySaveFolderPa
                     $CatalogEntry, $FoundChanges = Download-PackageFromSearchResult -LibraryIndex $LibraryIndex -VersionData $VersionData `
                         -OutPathRoot $LibraryIndexRoot -TargetFramework ".NetFramework4.5" -Log $Log
                 } else {
-                    Log ("No nuget results found for $PackageId.") $true
+                    Log ("No nuget results found for $PackageId.") $Log
+                    Write-Host $PackageId -ForegroundColor Red
                 }
             }
         }
-    #}
+    }
 
     Get-SystemMgmtAuto $LibraryIndex $Log
 }
@@ -577,6 +586,8 @@ function Get-SystemMgmtAuto ($LibraryIndex, [bool]$Log = $false) {
         Get-SinglePackageByName -LibraryIndex $LibraryIndex -PackageName $SMA -Author $null -Log $Log -Version "10.0.10586"
     }
 }
+
+
 
 #$SearchServiceUri = Get-SearchServiceUri
 #
@@ -615,7 +626,101 @@ function Get-SystemMgmtAuto ($LibraryIndex, [bool]$Log = $false) {
 #Download-PackageFromSearchResult -LibraryIndex $LibraryIndex -SearchResult $SearchResult `
 #    -OutPathRoot $LibraryIndexRoot -TargetFramework ".NetFramework4.5" -Log $Log #-Force $true
 
-$LibraryIndex = Get-LibraryIndex $LibraryIndexRoot -Log $Log
-Check-AllApiPackages -LibraryIndex $LibraryIndex -JsonRootPath $JsonRootPath -LibrarySaveFolderPath $LibraryIndexRoot -Log $false
+#$LibraryIndex = Get-LibraryIndex $LibraryIndexRoot -Log $Log
+#Check-AllApiPackages -LibraryIndex $LibraryIndex -JsonRootPath $JsonRootPath -LibrarySaveFolderPath $LibraryIndexRoot -Log $true
 
 
+$TestJson = @"
+{
+	"first": {
+		"inner1": {
+			"thinga": "",
+            "thingA": ""
+		}
+	},
+	"second": {
+		"inner1": {
+		
+		},
+		"inner2": [
+			"thinga": "",
+			"thingB": ""
+		]
+	},
+	"third": {
+		"inner1": {
+			"thinga": ""
+		},
+		"INNER1": {
+			"thinga": ""
+		}
+	}
+}
+"@
+
+function Parse-JsonForDups ($Json, [bool]$Log=$false) {
+    $Lines = $Json -split "`r`n"
+
+    $Parsed = Parse-JsonForDupsInner ([ref]$Lines) -Log $Log
+
+    return ($Lines -join "`r`n")
+}
+
+function Parse-JsonForDupsInner ([ref]$LinesRef, [int]$Start = 0, $AsList = $false, [int]$Level = 0, [bool]$Log=$false) {
+    $Keys = New-Object 'System.Collections.Generic.HashSet[string]'
+
+    for ($i = $Start;  $i -lt $Lines.Count; $i++) {
+        Log ("Level $Level, $i " + $Lines[$i]) $Log
+
+        if ($AsList -eq $false -and $LinesRef.Value[$i] -match '\s*"\w+"\s*:.*') {
+            $Key = $Matches[0] -split '"' | where {-not [string]::IsNullOrWhiteSpace($_)} | select -First 1
+            
+            $Padding = 0
+
+            Log $key $Log -ForegroundColor Cyan
+            
+            if ($Keys.Contains($Key.ToLower())) {
+                $OriginalKey = $Key
+
+                while ($Keys.Contains($Key.ToLower()) ) {
+                    Log "$Key exists, padding +1" $Log
+                    $Padding++
+
+                    $Key = $OriginalKey + ("_"*$Padding)
+                }
+
+                $LinesRef.Value[$i] = $LinesRef.Value[$i].Replace($OriginalKey,$Key)
+                Log "Replacing $OriginalKey with $Key" $true -ForegroundColor Red
+            }
+
+            
+
+            Log "Adding $Key to the hash" $Log -ForegroundColor DarkYellow
+            $Keys.Add($Key.ToLower()) | Out-Null
+        }
+
+        if ($LinesRef.Value[$i] -like '*{') {
+            Log "This is an opening bracket, recursing" $Log -ForegroundColor "DarkRed"
+            $i = Parse-JsonForDupsInner ([ref]$LinesRef.Value) -Start ($i+1) -Level ($Level + 1) -Log $Log #return the last line checked already
+        } elseif ($LinesRef.Value[$i] -like '*[\[]') {
+            Log "This is an opening bracket, recursing as list" $Log -ForegroundColor "DarkRed"
+            $i = Parse-JsonForDupsInner ([ref]$LinesRef.Value) -Start ($i+1) -Level ($Level + 1) -Log $Log -AsList $true
+        } elseif ($LinesRef.Value[$i] -match '[\]}][,]*$') {
+            Log "Found closing bracket. Backing out." $Log -ForegroundColor "DarkRed"
+            return $i
+        }
+    }
+}
+
+$Content = Get-Content "$env:USERPROFILE\Desktop\DiscoveryRestJson\compute.alpha\20171026.json"
+
+cls
+$Parsed = Parse-JsonForDups $Content -Log $false
+
+try {
+    $Json = $Parsed | ConvertFrom-Json
+    "It worked"
+} catch {
+    "Didn't Work"
+    $_
+}

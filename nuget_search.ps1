@@ -514,17 +514,18 @@ function Invoke-BroadGoogleSearchOnNuget ($PackageId, $Json, [bool]$Log = $false
     return $SearchResult
 }
 
-function Check-AllApiPackages($LibraryIndex, $JsonRootPath, $LibrarySaveFolderPath, [bool]$Log = $false) {
-    foreach ($Directory in (gci $JsonRootPath -Directory)){
+function Check-AllApiPackages($LibraryIndex, $JsonRootPath, $LibrarySaveFolderPath, [string]$filter=$null, [bool]$Log = $false) {
+    foreach ($Directory in (gci $JsonRootPath -Directory -Filter $filter)){
+        Log "" $Log
         $File = Get-MostRecentJsonFile $Directory.fullname
 
         #testing
         #$File = Get-MostRecentJsonFile "$env:USERPROFILE\Desktop\DiscoveryRestJson\adexchangebuyer2.v2beta1"
-        #$Json = Get-Content $File.FullName | ConvertFrom-Json
+        #$File = Get-MostRecentJsonFile "$env:USERPROFILE\Desktop\DiscoveryRestJson\compute.alpha\"
+        
 
         if ($File -ne $null) {
-            $File.FullName
-            $Json = Get-Content $File.FullName | ConvertFrom-Json
+            $Json = Try-ConvertFromJson $File.FullName -Log $Log
             $PackageId = (Get-NugetPackageIdFromJson $Json)
                 
             $ShouldDownloadNewest = $false
@@ -576,7 +577,7 @@ function Check-AllApiPackages($LibraryIndex, $JsonRootPath, $LibrarySaveFolderPa
         }
     }
 
-    Get-SystemMgmtAuto $LibraryIndex $Log
+    #Get-SystemMgmtAuto $LibraryIndex $Log
 }
 
 function Get-SystemMgmtAuto ($LibraryIndex, [bool]$Log = $false) {
@@ -588,139 +589,7 @@ function Get-SystemMgmtAuto ($LibraryIndex, [bool]$Log = $false) {
 }
 
 
-
-#$SearchServiceUri = Get-SearchServiceUri
-#
-##$Package = "Google.Apis.Youtube.v3" #figure out how to extract this from the google discovery API
-#$Author = "Google Inc."
-#
-#$Package = "Google.Apis.Gmail.v1"
-#
-#$TargetFramework = ".NetFramework4.5"
-#
-#$Log = $true
-#
-#$CatalogEntry = Get-CatalogEntry $Package $Author -IsExactPackageId $true -Log $Log
-#
-#$JsonHash = Get-LibraryIndex $LibraryIndexRoot -Log $Log
-#
-#$DependencyHash = Get-DependenciesOf $CatalogEntry $JsonHash -Log $Log
-#
-#Download-Dependencies $DependencyHash $LibraryIndexRoot $JsonHash -Log $Log
-
-#Get-AllApiPackages -log $true
-
-
-#Get-SinglePackageByName "Google.Apis" -Log $true
-
-#$VersionInfo = Get-VersionInfo "Google.Apis.Gmail.v1" "Google Inc." -IsExactPackageId $true -Log $Log
-
-#$CatalogEntry = Get-CatalogEntry $VersionInfo -Log $Log
-
-#Get-VersionInfo -PackageName $PackageId -Author $Author -IsExactPackageId $true -Log $Log
-
-#$PackageId = "Google.Apis.Acceleratedmobilepageurl.v1"
-#$SearchResult = Invoke-NugetApiPackageSearch -SearchString $PackageId -Author "Google Inc." -Version -1 -IsExactPackageId $true -Log $Log
-#$CatalogEntry = Get-CatalogEntry -SearchResult $SearchResult -Log $Log
-
-#Download-PackageFromSearchResult -LibraryIndex $LibraryIndex -SearchResult $SearchResult `
-#    -OutPathRoot $LibraryIndexRoot -TargetFramework ".NetFramework4.5" -Log $Log #-Force $true
+#Get-NugetPackageIdFromJson $Json
 
 #$LibraryIndex = Get-LibraryIndex $LibraryIndexRoot -Log $Log
 #Check-AllApiPackages -LibraryIndex $LibraryIndex -JsonRootPath $JsonRootPath -LibrarySaveFolderPath $LibraryIndexRoot -Log $true
-
-
-$TestJson = @"
-{
-	"first": {
-		"inner1": {
-			"thinga": "",
-            "thingA": ""
-		}
-	},
-	"second": {
-		"inner1": {
-		
-		},
-		"inner2": [
-			"thinga": "",
-			"thingB": ""
-		]
-	},
-	"third": {
-		"inner1": {
-			"thinga": ""
-		},
-		"INNER1": {
-			"thinga": ""
-		}
-	}
-}
-"@
-
-function Parse-JsonForDups ($Json, [bool]$Log=$false) {
-    $Lines = $Json -split "`r`n"
-
-    $Parsed = Parse-JsonForDupsInner ([ref]$Lines) -Log $Log
-
-    return ($Lines -join "`r`n")
-}
-
-function Parse-JsonForDupsInner ([ref]$LinesRef, [int]$Start = 0, $AsList = $false, [int]$Level = 0, [bool]$Log=$false) {
-    $Keys = New-Object 'System.Collections.Generic.HashSet[string]'
-
-    for ($i = $Start;  $i -lt $Lines.Count; $i++) {
-        Log ("Level $Level, $i " + $Lines[$i]) $Log
-
-        if ($AsList -eq $false -and $LinesRef.Value[$i] -match '\s*"\w+"\s*:.*') {
-            $Key = $Matches[0] -split '"' | where {-not [string]::IsNullOrWhiteSpace($_)} | select -First 1
-            
-            $Padding = 0
-
-            Log $key $Log -ForegroundColor Cyan
-            
-            if ($Keys.Contains($Key.ToLower())) {
-                $OriginalKey = $Key
-
-                while ($Keys.Contains($Key.ToLower()) ) {
-                    Log "$Key exists, padding +1" $Log
-                    $Padding++
-
-                    $Key = $OriginalKey + ("_"*$Padding)
-                }
-
-                $LinesRef.Value[$i] = $LinesRef.Value[$i].Replace($OriginalKey,$Key)
-                Log "Replacing $OriginalKey with $Key" $true -ForegroundColor Red
-            }
-
-            
-
-            Log "Adding $Key to the hash" $Log -ForegroundColor DarkYellow
-            $Keys.Add($Key.ToLower()) | Out-Null
-        }
-
-        if ($LinesRef.Value[$i] -like '*{') {
-            Log "This is an opening bracket, recursing" $Log -ForegroundColor "DarkRed"
-            $i = Parse-JsonForDupsInner ([ref]$LinesRef.Value) -Start ($i+1) -Level ($Level + 1) -Log $Log #return the last line checked already
-        } elseif ($LinesRef.Value[$i] -like '*[\[]') {
-            Log "This is an opening bracket, recursing as list" $Log -ForegroundColor "DarkRed"
-            $i = Parse-JsonForDupsInner ([ref]$LinesRef.Value) -Start ($i+1) -Level ($Level + 1) -Log $Log -AsList $true
-        } elseif ($LinesRef.Value[$i] -match '[\]}][,]*$') {
-            Log "Found closing bracket. Backing out." $Log -ForegroundColor "DarkRed"
-            return $i
-        }
-    }
-}
-
-$Content = Get-Content "$env:USERPROFILE\Desktop\DiscoveryRestJson\compute.alpha\20171026.json"
-
-cls
-$Parsed = Parse-JsonForDups $Content -Log $false
-
-try {
-    $Json = $Parsed | ConvertFrom-Json
-    "It worked"
-} catch {
-    "Didn't Work"
-    $_
-}

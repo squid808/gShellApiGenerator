@@ -140,3 +140,80 @@ function Load-RestJsonFile ($Name, $Version, [bool]$Log = $false) {
 
     return $Json
 }
+
+#Start parsing json that contains duplicate keys
+function Parse-JsonForDups ($Json, [bool]$Log=$false, [bool]$Debug=$false) {
+    $Lines = $Json -split "`r`n"
+
+    $Parsed = Parse-JsonForDupsInner ([ref]$Lines) -Log $Log -Debug $Debug
+
+    return ($Lines -join "`r`n")
+}
+
+#the inner recursive function to parse json duplicate keys, do not use except within parse-jsonfordups
+function Parse-JsonForDupsInner ([ref]$LinesRef, [int]$Start = 0, $AsList = $false, [int]$Level = 0, [bool]$Log=$false, [bool]$Debug=$false) {
+    $Keys = New-Object 'System.Collections.Generic.HashSet[string]'
+
+    for ($i = $Start;  $i -lt $Lines.Count; $i++) {
+        Log ("Level $Level, $i " + $Lines[$i]) $Debug
+
+        if ($AsList -eq $false -and $LinesRef.Value[$i] -match '\s*"\w+"\s*:.*') {
+            $Key = $Matches[0] -split '"' | where {-not [string]::IsNullOrWhiteSpace($_)} | select -First 1
+            
+            $Padding = 0
+
+            Log $key $Debug -ForegroundColor Cyan
+            
+            if ($Keys.Contains($Key.ToLower())) {
+                $OriginalKey = $Key
+
+                while ($Keys.Contains($Key.ToLower()) ) {
+                    Log "$Key exists, padding +1" $Debug
+                    $Padding++
+
+                    $Key = $OriginalKey + ("_"*$Padding)
+                }
+
+                $LinesRef.Value[$i] = $LinesRef.Value[$i].Replace($OriginalKey,$Key)
+                Log "Replacing $OriginalKey with $Key" $true -ForegroundColor Red
+            }
+
+            
+
+            Log "Adding $Key to the hash" $Debug -ForegroundColor DarkYellow
+            $Keys.Add($Key.ToLower()) | Out-Null
+        }
+
+        if ($LinesRef.Value[$i] -like '*{') {
+            Log "This is an opening bracket, recursing" $Debug -ForegroundColor "DarkRed"
+            $i = Parse-JsonForDupsInner ([ref]$LinesRef.Value) -Start ($i+1) -Level ($Level + 1) -Log $Log -Debug $Debug #return the last line checked already
+        } elseif ($LinesRef.Value[$i] -like '*[\[]') {
+            Log "This is an opening bracket, recursing as list" $Debug -ForegroundColor "DarkRed"
+            $i = Parse-JsonForDupsInner ([ref]$LinesRef.Value) -Start ($i+1) -Level ($Level + 1) -Log $Log -Debug $Debug -AsList $true
+        } elseif ($LinesRef.Value[$i] -match '[\]}][,]*$') {
+            Log "Found closing bracket. Backing out." $Debug -ForegroundColor "DarkRed"
+            return $i
+        }
+    }
+}
+
+function Try-ConvertFromJson ($JsonPath, [bool]$Log=$false, [bool]$Debug=$false) {
+    $Content = Get-Content $JsonPath
+    
+    try {
+        $Json = ($Content | ConvertFrom-Json)
+        return $json
+    } catch {
+        if ($_.Exception.Message.Contains("duplicated keys")) {
+            Log "Json couldn't be loaded due to duplicate keys. Attempting to sanitize, this may take a few minutes..." $Log
+            $NoDupsContent = Parse-JsonForDups $Content $Log $Debug
+            $Json = $NoDupsContent | ConvertFrom-Json
+            $NoDupsContent | Out-File $JsonPath -Force
+            Log "...sanitizing keys successful. File updated." $Log
+        } else {
+            throw $_
+        }
+    }
+
+    return $Json
+}

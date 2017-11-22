@@ -519,11 +519,6 @@ function Check-AllApiPackages($LibraryIndex, $JsonRootPath, $LibrarySaveFolderPa
         Log "" $Log
         $File = Get-MostRecentJsonFile $Directory.fullname
 
-        #testing
-        #$File = Get-MostRecentJsonFile "$env:USERPROFILE\Desktop\DiscoveryRestJson\adexchangebuyer2.v2beta1"
-        #$File = Get-MostRecentJsonFile "$env:USERPROFILE\Desktop\DiscoveryRestJson\compute.alpha\"
-        
-
         if ($File -ne $null) {
             $Json = Try-ConvertFromJson $File.FullName -Log $Log
             $PackageId = (Get-NugetPackageIdFromJson $Json)
@@ -577,7 +572,7 @@ function Check-AllApiPackages($LibraryIndex, $JsonRootPath, $LibrarySaveFolderPa
         }
     }
 
-    #Get-SystemMgmtAuto $LibraryIndex $Log
+    Get-SystemMgmtAuto $LibraryIndex $Log
 }
 
 function Get-SystemMgmtAuto ($LibraryIndex, [bool]$Log = $false) {
@@ -592,4 +587,4 @@ function Get-SystemMgmtAuto ($LibraryIndex, [bool]$Log = $false) {
 #Get-NugetPackageIdFromJson $Json
 
 #$LibraryIndex = Get-LibraryIndex $LibraryIndexRoot -Log $Log
-#Check-AllApiPackages -LibraryIndex $LibraryIndex -JsonRootPath $JsonRootPath -LibrarySaveFolderPath $LibraryIndexRoot -Log $true
+#

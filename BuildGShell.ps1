@@ -204,7 +204,9 @@ function CheckAndBuildGshell ($RootProjPath, $LibraryIndex, [bool]$Log = $false,
 
     $Dependencies = @{}
 
-    foreach ($D in $LibraryIndex.GetLibVersionDependencyChain("Google.Apis.Auth",$latestGoogleAuthVersion).GetEnumerator()) {
+    $LatestGoogleAuthVersion = $LibraryIndex.GetLibVersionLatestName("Google.Apis.Auth")
+
+    foreach ($D in $LibraryIndex.GetLibVersionDependencyChain("Google.Apis.Auth",$LatestGoogleAuthVersion).GetEnumerator()) {
         if ($D.Name -ne "System.Net.Http") {
             $Dependencies[$D.Name] = $D.Value
         }

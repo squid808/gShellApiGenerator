@@ -16,25 +16,14 @@ function Update-AllFiles ($Log = $false) {
 
     #Load the Library Index
     $LibraryIndex = Get-LibraryIndex $LibraryIndexRoot -Log $Log
+    
+    #Now that all the json files are up to date (right?) let's see if the nuget files are too
+    #Check-AllApiPackages -LibraryIndex $LibraryIndex -JsonRootPath $JsonRootPath `
+    #    -LibrarySaveFolderPath $LibraryIndexRoot -Log $log
 
-    #Let's keep track of files from Nuget that were updated
-    $NugetChanges = @()
-
-    foreach ($DiscoveryChange in $DiscoveryChanges) {
-        Log ("Change found for $DiscoveryChange, checking for related Nuget") $Log
-        #Download any updates to this
-        #$FoundChanges = Get-ApiPackage $DiscoveryChange -Log $Log
-        
-        #For Testing, let's pretend we found a change
-        $FoundChanges = $true
-
-        if ($FoundChanges -eq $true) {
-            
-        }
-    }
-
-    #CheckAndBuildGshell "C:\Users\svarney\Desktop\GenOutput\gShell" $LibraryIndex -Log $true
+    #START HERE - why is this breaking now
+    CheckAndBuildGshell "C:\Users\svarney\Desktop\GenOutput\gShell" $LibraryIndex -Log $true
     #$LibraryIndex.Libraries.psobject.Properties.Name | where {$_ -like "Google.Apis*"}
 }
 
-#Update-AllFiles
+Update-AllFiles

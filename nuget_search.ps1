@@ -100,12 +100,10 @@ function Get-LatestVersionFromRange ($VersionRange) {
     
     $matches = $null
 
-    $VersionRange -match '(?<=,\s).*(?=[\]\)])' | Out-Null
-
-    if  ([string]::IsNullOrWhiteSpace($matches[0])){
-        $Version = -1 #if no end version supplied, get most recent
-    } else  {
+    if ($VersionRange -match '(?<=,\s).*(?=[\]\)])' -and -not [string]::IsNullOrWhiteSpace($matches[0])) {
         $Version = $Matches[0]
+    } else {
+        $version = -1
     }
 
     return $Version
@@ -488,9 +486,6 @@ function Get-AllApiPackages ([bool]$Log = $false) {
     Get-SystemMgmtAuto $LibraryIndex $Log
 }
 
-#Start here - do we need 'found changes' now? ~458
-# need to set the 'LastVersionBuilt' if downloaded? no, compare 
-
 #a three-pronged approach to searching for Google API packages when searching for the first time, returns a new package ID if the default isn't found.
 function Invoke-BroadGoogleSearchOnNuget ($PackageId, $Json, [bool]$Log = $false){
     Log "Attempting to find $PackageId through a direct search" $Log
@@ -548,18 +543,22 @@ function Check-AllApiPackages($LibraryIndex, $JsonRootPath, $LibrarySaveFolderPa
                 #since this is the first time we've encountered it, let's run a big search to make sure we can find it
                 $SearchResult = Invoke-BroadGoogleSearchOnNuget -PackageId $PackageId -Json $Json -Log $True
                 $VersionData = Get-SearchResultVersion -SearchResult $SearchResult -Version -1
-                
+                $LibraryIndex.SetLibRestNameAndVersion($PackageId, $Directory.Name)
+
                 if ($SearchResult.id -ne $PackageId) {
                     Log ("Adding name redirect of {0} => {1}" -f $PackageId, $SearchResult.id) $Log
                     $LibraryIndex.SetLibNameRedirect($PackageId, $SearchResult.id)
-                    $LibraryIndex.Save()
+                    $LibraryIndex.SetLibRestNameAndVersion($SearchResult.id, $Directory.Name)
                     $PackageId = $SearchResult.id
                 }
+
+                $LibraryIndex.Save()
 
                 $ShouldDownloadNewest = $true
                 Log ("$PackageId is not found in the library index.") $Log
             }
 
+            #download the newest version
             if ($ShouldDownloadNewest -eq $true) {
                 if ($SearchResult -ne $null) {
                     $CatalogEntry, $FoundChanges = Download-PackageFromSearchResult -LibraryIndex $LibraryIndex -VersionData $VersionData `

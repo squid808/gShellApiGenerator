@@ -1,8 +1,9 @@
 ﻿#TODO: This may not work - what if a json file is updated, but not the nuget file? Do we now make a note of it and check it again every day until it has an update?
 #      Maybe resolve this by checking each nuget anyways once a week?
 
-$RootOutPath = "$env:USERPROFILE\Desktop\GenOutput\gShellGmail\"
 $LibraryIndexRoot = "$env:USERPROFILE\Desktop\Libraries"
+$RootProjPath = "$env:USERPROFILE\Desktop\GenOutput\"
+$JsonRootPath = "$env:USERPROFILE\Desktop\DiscoveryRestJson"
 $Log = $true
 
 #To Run All Files
@@ -22,8 +23,23 @@ function Update-AllFiles ($Log = $false) {
     #    -LibrarySaveFolderPath $LibraryIndexRoot -Log $log
 
     #START HERE - why is this breaking now
-    CheckAndBuildGshell "C:\Users\svarney\Desktop\GenOutput\gShell" $LibraryIndex -Log $true
-    #$LibraryIndex.Libraries.psobject.Properties.Name | where {$_ -like "Google.Apis*"}
+    #CheckAndBuildGshell ([System.IO.Path]::Combine($rootProjPath,"gShell")) $LibraryIndex -Log $true
+    
+    #pull out all google apis for which we have an entry in the index
+    #$ApisFromNuget = $LibraryIndex.Libraries.psobject.Properties.Name | where {$_ -like "Google.Apis*"}
+    
+    #TESTING:
+    $ApiName = "Google.Apis.Gmail.v1"
+
+    
+
+    #foreach ($ApiName in $ApisFromNuget) {
+        
+    #}
 }
 
-Update-AllFiles
+
+
+#Update-AllFiles
+
+Build-ApiLibrary -LibraryIndex $LibraryIndex -ApiName "Google.Apis.Gmail.v1"

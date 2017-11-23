@@ -582,6 +582,7 @@ function Import-GShellAssemblies($LibraryIndex, $LibraryIndexVersionInfo){
         $Assembly = [System.Reflection.Assembly]::LoadFrom($LibraryIndexVersionInfo.dllPath)
 
         foreach ($D in $LibraryIndexVersionInfo.Dependencies) {
+
             $VersionNumber = Get-LatestVersionFromRange -VersionRange $D.Versions
 
             if ($VersionNumber -eq -1) {
@@ -598,13 +599,26 @@ function Import-GShellAssemblies($LibraryIndex, $LibraryIndexVersionInfo){
 }
 
 #to be called after loading from discovery and nuget happens. should have a handle on the files at this point
-function Invoke-GShellReflection ($RestJson, $LibraryIndex) {
-    
-    $AssemblyName = Get-NugetPackageIdFromJson $RestJson
+function Invoke-GShellReflection {
 
-    $LatestVersionInfo = $LibraryIndex.GetLibVersionLatest($AssemblyName)
+    param (
+        [PSCustomObject]$RestJson,
 
-    $Assembly = Import-GShellAssemblies $LibraryIndex $LatestVersionInfo
+        [string]$DllPath,
+
+        $LibraryIndex
+    )
+
+    if ([string]::IsNullOrEmpty($DllPath)) {    
+
+        $AssemblyName = Get-NugetPackageIdFromJson $RestJson
+
+        $LatestVersionInfo = $LibraryIndex.GetLibVersionLatest($AssemblyName)
+
+        $Assembly = Import-GShellAssemblies $LibraryIndex $LatestVersionInfo
+    } else {
+        $Assembly = [System.Reflection.Assembly]::LoadFrom($DllPath)
+    }
 
     $Api = New-Api $Assembly $RestJson
 

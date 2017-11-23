@@ -1805,49 +1805,22 @@ $ResourceClasses
 #endregion
 
 
+function Create-TemplatesFromDll ($LibraryIndex, $RestJson, $DllPath, $OutPath) {
+    $Api = Invoke-GShellReflection -RestJson $RestJson -DllPath $DllPath -LibraryIndex $LibraryIndex
 
-#$RestJson = Load-RestJsonFile admin directory_v1
-#$Path = "Directory\Google.Apis.admin.Directory.directory_v1_gshell_dotnet.cs"
+    if (-not (Test-Path $OutPath)) {
+        New-Item -Path $OutPath -ItemType "Directory"
+    }
 
-#$RestJson = Load-RestJsonFile admin reports_v1
-#$Path = "Reports\Google.Apis.admin.Reports.reports_v1_gshell_dotnet.cs"
+    Write-DNC $Api | Out-File ($OutPath + "DotNetCmdlets.cs") -Force
+    Write-DNSW $Api | Out-File ($OutPath + "DotNetServiceWrapper.cs") -Force
+    Write-MC $Api | Out-File ($OutPath + "MethodCmdlets.cs") -Force
+    Write-OC $Api | Out-File ($OutPath + "ObjectCmdlets.cs") -Force
 
-#$RestJson = Load-RestJsonFile discovery v1
-#$Path = "Discovery\Discovery.cs"
+    $SQP = Write-SQP $Api
+    if ($SQP -ne $null) {$SQP | Out-File ($OutPath + $Api.Name + "StandardQueryParameters.cs") -Force}
+    $SQPB = Write-SQPB $Api
+    if ($SQPB -ne $null) {$SQPB | Out-File ($OutPath + $Api.Name + "StandardQueryParametersBase.cs") -Force}
 
-$RestJson = Load-RestJsonFile gmail v1
-
-$CmdletPath = "Cmdlets\Gmail\Gmail.cs"
-$DotNetPath = "dotNet\Gmail\Google.Apis.Gmail.v1_gshell_dotnet.cs"
-
-$LibraryIndex = Get-JsonIndex $LibraryIndexRoot
-
-$Api = Invoke-GShellReflection $RestJson $LibraryIndex
-
-$Resources = $Api.Resources
-$Resource = $Resources[0]
-$Methods = $Resource.Methods
-$Method = $Methods[2]
-$M = $Method
-#
-#$F = $Api.ResourcesDict.Users.ChildResourcesDict.Settings.ChildResourcesDict.ForwardingAddresses.MethodsDict.Create
-
-#wrap-text (set-indent (Write-DNSW_MethodComments $F) 0)
-
-
-
-if (-not (Test-Path $RootOutPath)) {
-    New-Item -Path $RootOutPath -ItemType "Directory"
+    Write-CSPReferenceTexts $Api $LibraryIndex
 }
-
-# Write-DNC $Api | Out-File ($RootOutPath + "DotNetCmdlets.cs") -Force
-# Write-DNSW $Api | Out-File ($RootOutPath + "DotNetServiceWrapper.cs") -Force
-# Write-MC $Api | Out-File ($RootOutPath + "MethodCmdlets.cs") -Force
-# Write-OC $Api | Out-File ($RootOutPath + "ObjectCmdlets.cs") -Force
-
-#$SQP = Write-SQP $Api
-#if ($SQP -ne $null) {$SQP | Out-File ($RootOutPath + $Api.Name + "StandardQueryParameters.cs") -Force}
-#$SQPB = Write-SQPB $Api
-#if ($SQPB -ne $null) {$SQPB | Out-File ($RootOutPath + $Api.Name + "StandardQueryParametersBase.cs") -Force}
-
-#Write-CSPReferenceTexts $Api $JsonHash

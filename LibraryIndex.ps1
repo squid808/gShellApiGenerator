@@ -99,7 +99,7 @@ function Get-LibraryIndex ($Path, [bool]$Log=$false) {
         return Set-LibraryIndexLibSource $this $LibName $Source
     }
 
-    #GetLibLastVersionBuilt(LibName, Version)
+    #GetLibLastVersionBuilt(LibName)
     $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "GetLibLastVersionBuilt" -Value {
         param([string]$LibName)
         return Get-LibraryIndexLibLastVersionBuilt $this $LibName
@@ -109,6 +109,18 @@ function Get-LibraryIndex ($Path, [bool]$Log=$false) {
     $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "SetLibLastVersionBuilt" -Value {
         param([string]$LibName, [string]$Version = $null)
         return Set-LibraryIndexLibLastVersionBuilt $this $LibName $Version
+    }
+
+    #GetLibRestNameAndVersion(LibName)
+    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "GetLibRestNameAndVersion" -Value {
+        param([string]$LibName)
+        return Get-LibraryIndexLibRestNameAndVersion $this $LibName
+    }
+
+    #SetLibRestNameAndVersion(LibName, RestNameAndVersion)
+    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "SetLibRestNameAndVersion" -Value {
+        param([string]$LibName, [string]$RestNameAndVersion)
+        return Set-LibraryIndexLibRestNameAndVersion $this $LibName $RestNameAndVersion
     }
 
     #HasLibVersion(LibName, Version)
@@ -265,6 +277,24 @@ function Set-LibraryIndexLibLastVersionBuilt {
     param($LibraryIndex, [string]$LibName, $Version = $null)
 
     $LibraryIndex.Libraries.$LibName.LastVersionBuilt = $Version
+}
+
+#GetLibRestNameAndVersion
+function Get-LibraryIndexLibRestNameAndVersion {
+    param($LibraryIndex, [string]$LibName)
+
+    return $LibraryIndex.Libraries.$LibName.RestNameAndVersion
+}
+
+#SetLibRestNameAndVersion
+function Set-LibraryIndexLibRestNameAndVersion {
+    param($LibraryIndex, [string]$LibName, [string]$RestNameAndVersion)
+
+    if (-not (Has-ObjProperty $LibraryIndex.Libraries.$LibName "RestNameAndVersion")) {
+        $LibraryIndex.Libraries.$LibName | Add-Member -NotePropertyName "RestNameAndVersion" -NotePropertyValue $null
+    }
+
+    $LibraryIndex.Libraries.$LibName.RestNameAndVersion = $RestNameAndVersion
 }
     
 #HasLibVersion(LibName, Version)

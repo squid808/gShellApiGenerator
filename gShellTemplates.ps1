@@ -1805,22 +1805,22 @@ $ResourceClasses
 #endregion
 
 
-function Create-TemplatesFromDll ($LibraryIndex, $RestJson, $DllPath, $OutPath) {
-    $Api = Invoke-GShellReflection -RestJson $RestJson -DllPath $DllPath -LibraryIndex $LibraryIndex
+function Create-TemplatesFromDll ($LibraryIndex, $RestJson, $ApiName, $ApiFileVersion, $OutPath) {
+    $Api = Invoke-GShellReflection -RestJson $RestJson -ApiName $ApiName -ApiFileVersion $ApiFileVersion -LibraryIndex $LibraryIndex
 
     if (-not (Test-Path $OutPath)) {
-        New-Item -Path $OutPath -ItemType "Directory"
+        New-Item -Path $OutPath -ItemType "Directory" | Out-Null
     }
 
-    Write-DNC $Api | Out-File ($OutPath + "DotNetCmdlets.cs") -Force
-    Write-DNSW $Api | Out-File ($OutPath + "DotNetServiceWrapper.cs") -Force
-    Write-MC $Api | Out-File ($OutPath + "MethodCmdlets.cs") -Force
-    Write-OC $Api | Out-File ($OutPath + "ObjectCmdlets.cs") -Force
+    Write-DNC $Api | Out-File ([System.IO.Path]::Combine($OutPath, "DotNetCmdlets.cs")) -Force
+    Write-DNSW $Api | Out-File ([System.IO.Path]::Combine($OutPath, "DotNetServiceWrapper.cs")) -Force
+    Write-MC $Api | Out-File ([System.IO.Path]::Combine($OutPath, "MethodCmdlets.cs")) -Force
+    Write-OC $Api | Out-File ([System.IO.Path]::Combine($OutPath, "ObjectCmdlets.cs")) -Force
 
     $SQP = Write-SQP $Api
-    if ($SQP -ne $null) {$SQP | Out-File ($OutPath + $Api.Name + "StandardQueryParameters.cs") -Force}
+    if ($SQP -ne $null) {$SQP | Out-File ([System.IO.Path]::Combine($OutPath, "StandardQueryParameters.cs")) -Force}
     $SQPB = Write-SQPB $Api
-    if ($SQPB -ne $null) {$SQPB | Out-File ($OutPath + $Api.Name + "StandardQueryParametersBase.cs") -Force}
+    if ($SQPB -ne $null) {$SQPB | Out-File ([System.IO.Path]::Combine($OutPath, "StandardQueryParametersBase.cs")) -Force}
 
     Write-CSPReferenceTexts $Api $LibraryIndex
 }

@@ -42,4 +42,3 @@ function Update-AllFiles ($Log = $false) {
 
 #Update-AllFiles
 
-Build-ApiLibrary -LibraryIndex $LibraryIndex -ApiName "Google.Apis.Gmail.v1"

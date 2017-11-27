@@ -604,21 +604,17 @@ function Invoke-GShellReflection {
     param (
         [PSCustomObject]$RestJson,
 
-        [string]$DllPath,
+        [string]$ApiName,
+
+        [string]$ApiFileVersion,
 
         $LibraryIndex
     )
+    $AssemblyName = Get-NugetPackageIdFromJson $RestJson
 
-    if ([string]::IsNullOrEmpty($DllPath)) {    
+    $LatestVersionInfo = $LibraryIndex.GetLibVersion($ApiName, $ApiFileVersion)
 
-        $AssemblyName = Get-NugetPackageIdFromJson $RestJson
-
-        $LatestVersionInfo = $LibraryIndex.GetLibVersionLatest($AssemblyName)
-
-        $Assembly = Import-GShellAssemblies $LibraryIndex $LatestVersionInfo
-    } else {
-        $Assembly = [System.Reflection.Assembly]::LoadFrom($DllPath)
-    }
+    $Assembly = Import-GShellAssemblies $LibraryIndex $LatestVersionInfo
 
     $Api = New-Api $Assembly $RestJson
 

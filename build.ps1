@@ -52,10 +52,22 @@ function Build-ApiLibrary ($LibraryIndex, $ApiName, $RootOutPath) {
             #Now we need to generate the files and get the csproj location
             $dllPath = $LibraryIndex.GetLibVersion($ApiName, $LatestDllVersion).dllPath
 
-            Create-TemplatesFromDll -LibraryIndex $LibraryIndex -DllPath $dllPath -OutPath
+            $RestNameAndVersion = $LibraryIndex.GetLibRestNameAndVersion($ApiName)
+
+            $JsonFileInfo = Get-MostRecentJsonFile -Path ([System.IO.Path]::Combine($JsonRootPath, $RestNameAndVersion))
+
+            $RestJson = Get-Content $JsonFileInfo.FullName | ConvertFrom-Json
+
+            #START HERE
+            Create-TemplatesFromDll -LibraryIndex $LibraryIndex -ApiName $ApiName -ApiFileVersion $LatestDllVersion `
+                -OutPath ([System.IO.Path]::Combine($RootOutPath, ("gShell.$RestNameAndVersion"))) `
+                -RestJson $RestJson
 
         } else {
             throw "gShell version $LatestAuthVersion not found for $ApiName"
         }
     }
 }
+
+$LibraryIndex = Get-LibraryIndex $LibraryIndexRoot -Log $Log
+Build-ApiLibrary -LibraryIndex $LibraryIndex -ApiName "Google.Apis.Gmail.v1" -RootOutPath $RootProjPath

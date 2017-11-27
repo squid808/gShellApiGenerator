@@ -6,7 +6,7 @@
 
 #Use main version of Google.Apis.Auth, since GShell depends on that and all dependencies, right?
 
-function Get-GShellPackagesXml ($LibraryIndex) {
+function New-GShellPackagesXml ($LibraryIndex, $OutPath) {
     $Packages = New-Object system.collections.arraylist
 
     $latestGoogleAuthVersion = $LibraryIndex.GetLibVersionLatestName("Google.Apis.Auth")
@@ -22,24 +22,16 @@ function Get-GShellPackagesXml ($LibraryIndex) {
     Add-String $Packages ($packageFormatString -f "Google.Apis.Oauth2.v2", $LibraryIndex.GetLibVersionLatestName("Google.Apis.Oauth2.v2"))
     Add-String $Packages ($packageFormatString -f "System.Management.Automation.dll", "10.0.10586.0")
 
-    $PackagesText = $Packages -join "`r`n"
+    $PackagesXml = $Packages -join "`r`n"
 
-    return $PackagesText
-}
+    $packagesText = @'
+<?xml version="1.0" encoding="utf-8"?>
+<packages>
+{0}
+</packages>
+'@ -f $PackagesXml
 
-function Get-GShellBuildFiles ($RootProjPath) {
-    $FilesList = Get-ChildItem $RootProjPath -Recurse -Filter "*.cs"| select -ExpandProperty fullname `
-        | where {$_ -notlike "*\obj\*"}
-
-    $Files = New-Object system.collections.arraylist
-
-    foreach ($File in $FilesList) {
-        Add-String $Files ("    <Compile Include = `"" + $File.Replace(($RootProjPath+"\"),"") + "`" />")
-    }
-
-    $FilesText = $Files -join "`r`n"
-
-    return $FilesText
+    $packagesText | Out-File -FilePath ([System.IO.Path]::Combine($OutPath, "packages.config")) -Encoding utf8 -Force
 }
 
 function Get-GShellProjReferences ($RootProjPath, $LibraryIndex) {
@@ -82,17 +74,7 @@ function Get-GShellProjReferences ($RootProjPath, $LibraryIndex) {
     return $DependenciesText
 }
 
-function BuildGshell ($RootProjPath, $LibraryIndex, [bool]$Log = $false) {
-
-    $packagesText = @'
-<?xml version="1.0" encoding="utf-8"?>
-<packages>
-{0}
-</packages>
-'@ -f (Get-GShellPackagesXml $LibraryIndex)
-
-    $packagesText | Out-File -FilePath ([System.IO.Path]::Combine($RootProjPath, "packages.config")) -Encoding utf8 -Force
-
+function New-GShellCSProjFile ($LibraryIndex, $RootProjPath) {
     $projText = @'
 <?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="12.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
@@ -152,11 +134,18 @@ function BuildGshell ($RootProjPath, $LibraryIndex, [bool]$Log = $false) {
   </Target>
   -->
 </Project>
-'@ -f (Get-GShellBuildFiles $RootProjPath), (Get-GShellProjReferences $RootProjPath $LibraryIndex)
+'@ -f (Get-CsProjBuildFiles $RootProjPath), (Get-GShellProjReferences $RootProjPath $LibraryIndex)
 
     $projFilePath = [System.IO.Path]::Combine($RootProjPath, "gShell.csproj")
 
     $projText | Out-File -FilePath $projFilePath -Encoding utf8 -Force
+}
+
+function BuildGshell ($RootProjPath, $LibraryIndex, [bool]$Log = $false) {
+
+    New-GShellPackagesXml $LibraryIndex -OutPath $RootProjPath
+
+    New-GShellCSProjFile -LibraryIndex $LibraryIndex -RootProjPath $RootProjPath
 
     #TODO: Update the assembly info to update the year and the file version!
     Log ("Building gShell.Main") $Log

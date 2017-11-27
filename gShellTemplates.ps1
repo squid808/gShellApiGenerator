@@ -1822,5 +1822,5 @@ function Create-TemplatesFromDll ($LibraryIndex, $RestJson, $ApiName, $ApiFileVe
     $SQPB = Write-SQPB $Api
     if ($SQPB -ne $null) {$SQPB | Out-File ([System.IO.Path]::Combine($OutPath, "StandardQueryParametersBase.cs")) -Force}
 
-    Write-CSPReferenceTexts $Api $LibraryIndex
+    return $Api
 }

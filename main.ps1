@@ -2,7 +2,7 @@
 #      Maybe resolve this by checking each nuget anyways once a week?
 
 $LibraryIndexRoot = "$env:USERPROFILE\Desktop\Libraries"
-$RootProjPath = "$env:USERPROFILE\Desktop\GenOutput\"
+$RootProjPath = "$env:USERPROFILE\Desktop\GenOutput"
 $JsonRootPath = "$env:USERPROFILE\Desktop\DiscoveryRestJson"
 $Log = $true
 

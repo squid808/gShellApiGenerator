@@ -87,7 +87,7 @@ function New-GShellCSProjFile ($LibraryIndex, $RootProjPath) {
     <OutputType>Library</OutputType>
     <AppDesignerFolder>Properties</AppDesignerFolder>
     <RootNamespace>gShell.Main</RootNamespace>
-    <AssemblyName>gShell</AssemblyName>
+    <AssemblyName>gShell.Main</AssemblyName>
     <TargetFrameworkVersion>v4.5.1</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <TargetFrameworkProfile />
@@ -136,26 +136,29 @@ function New-GShellCSProjFile ($LibraryIndex, $RootProjPath) {
 </Project>
 '@ -f (Get-CsProjBuildFiles $RootProjPath), (Get-GShellProjReferences $RootProjPath $LibraryIndex)
 
-    $projFilePath = [System.IO.Path]::Combine($RootProjPath, "gShell.csproj")
+    $projFilePath = [System.IO.Path]::Combine($RootProjPath, "gShell.Main.csproj")
 
     $projText | Out-File -FilePath $projFilePath -Encoding utf8 -Force
 }
 
-function BuildGshell ($RootProjPath, $LibraryIndex, [bool]$Log = $false) {
+function BuildGshell ($RootProjPath, $LibraryIndex, $BuildVersion, [bool]$Log = $false) {
 
     New-GShellPackagesXml $LibraryIndex -OutPath $RootProjPath
 
     New-GShellCSProjFile -LibraryIndex $LibraryIndex -RootProjPath $RootProjPath
 
-    #TODO: Update the assembly info to update the year and the file version!
+    New-AssemblyInfoFile -AssemblyTitle "gShell.Main" `
+            -AssemblyDescription "PowerShell Clients for Google Apis - main functionality" `
+            -AssemblyVersion $BuildVersion -RootProjPath $RootProjPath
+
     Log ("Building gShell.Main") $Log
 
-    $BuildResult = Invoke-MsBuild -Path $projFilePath
+    $BuildResult = Invoke-MsBuild -Path ([System.IO.Path]::Combine($RootProjPath, "gShell.Main.csproj"))
 
     if ($BuildResult.BuildSucceeded -eq $true) {
         Log ("Building succeeded") $Log
         #return the path to the resulting dll file
-        $gShellPath = [System.IO.Path]::Combine($RootProjPath,"bin\Debug\gShell.dll")
+        $gShellPath = [System.IO.Path]::Combine($RootProjPath,"bin\Debug\gShell.Main.dll")
         return $gShellPath
     } else {
         Log ("Build failed") $Log
@@ -211,20 +214,20 @@ function CheckAndBuildGshell ($RootProjPath, $LibraryIndex, [bool]$Log = $false,
     $gShellVersion = $LibraryIndex.GetLibVersionLatestName($gShellMain)
     $gShellVersionObj = [System.Version]$gShellVersion
 
-    if (-not $LibraryIndex.HasLib("gShell.Main") -or ($gShellVersionObj -lt $AuthVersionObj) -or $Force) {
+    if (-not $LibraryIndex.HasLib($gShellMain) -or ($gShellVersionObj -lt $AuthVersionObj) -or $Force) {
 
         Log ("$gShellMain $gShellVersion either doesn't exist or needs to be updated to $AuthVersion.") $Log
         $gShellNewVersion = $AuthVersion + ".0"
 
         #First, try to build
-        $CompiledPath = BuildGshell $RootProjPath $LibraryIndex
+        $CompiledPath = BuildGshell -RootProjPath $RootProjPath -LibraryIndex $LibraryIndex -BuildVersion $gShellNewVersion -Log $Log
 
         if ($CompiledPath -ne $null) {
             Log ("Copying the compiled $gShellMain.dll file to the Library Index path") $Log
             #copy the file to the library path
             $LibraryRootPath = [System.IO.Path]::GetDirectoryName($LibraryIndex.RootPath)
             $NewGShellFolderPath = [System.IO.Path]::Combine($LibraryRootPath, $gShellMain, $gShellNewVersion)
-            $NewGShellPath = [System.IO.Path]::Combine($NewGShellFolderPath, "gShell.dll")
+            $NewGShellPath = [System.IO.Path]::Combine($NewGShellFolderPath, "$gShellMain.dll")
             if (-not (Test-Path $NewGShellFolderPath)) {
                 New-Item -Path $NewGShellFolderPath -ItemType "Directory" | Out-Null
             }

@@ -79,6 +79,40 @@ function Get-CsProjReferences ($LibraryIndex, $DependenciesChain, $RootProjPath)
     return $DependenciesText
 }
 
+function New-AssemblyInfoFile ($AssemblyTitle, $AssemblyDescription, $AssemblyVersion, $RootProjPath) {
+    $Year = Get-Date -Format "yyyy"
+
+    $AssemblyText = @"
+using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+
+// General Information about an assembly is controlled through the following 
+// set of attributes. Change these attribute values to modify the information
+// associated with an assembly.
+[assembly: AssemblyTitle("$AssemblyTitle")]
+[assembly: AssemblyDescription("$AssemblyDescription")]
+[assembly: AssemblyConfiguration("")]
+[assembly: AssemblyCompany("Spencer Varney")]
+[assembly: AssemblyProduct("gShell")]
+[assembly: AssemblyCopyright("Copyright ©  $Year")]
+[assembly: AssemblyTrademark("")]
+[assembly: AssemblyCulture("")]
+
+[assembly: AssemblyVersion("$AssemblyVersion")]
+[assembly: AssemblyFileVersion("$AssemblyVersion")]
+"@
+
+    $AssemblyFolderPath = [System.IO.Path]::Combine($RootProjPath, "Properties")
+    $AssemblyFilePath = [System.IO.Path]::Combine($AssemblyFolderPath, "AssemblyInfo.cs")
+
+    if (-not (Test-Path $AssemblyFolderPath)) {
+        New-Item -Path $AssemblyFolderPath -ItemType "Directory" | Out-Null
+    }
+
+    $AssemblyText | Out-File -FilePath $AssemblyFilePath -Encoding utf8 -Force
+}
+
 function New-CsProjFile ($LibraryIndex, $DependencyChain, $RootProjPath, $Api) {
 
     $NewGuid = [System.Guid]::NewGuid().ToString("B").ToUpper()
@@ -132,7 +166,6 @@ function New-CsProjFile ($LibraryIndex, $DependencyChain, $RootProjPath, $Api) {
 {4}
   </ItemGroup>
   <ItemGroup>
-    <None Include="app.config" />
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup />
@@ -203,39 +236,31 @@ function Build-ApiLibrary ($LibraryIndex, $ApiName, $RootOutPath) {
         New-CsProjFile -LibraryIndex $LibraryIndex -DependencyChain $LatestDependencyChain -RootProjPath $ProjectOutPath -Api $Api
 
         #Start here - need the Properties / AssemblyInfo.cs file! Need to update this for gshell too, to update the versions
+        New-AssemblyInfoFile -AssemblyTitle ("gShell." + $Api.NameAndVersion) `
+            -AssemblyDescription ("PowerShell Client for Google {0} Apis" -f $Api.NameAndVersion) `
+            -AssemblyVersion $LatestDllVersion -RootProjPath $ProjectOutPath
 
         Log ("Building gShell." + $Api.NameAndVersion) $Log
+
+        $BuildResult = Invoke-MsBuild -Path ([System.IO.Path]::Combine($ProjectOutPath, ("gShell." + $Api.NameAndVersion + ".csproj")))
+
+        if ($BuildResult.BuildSucceeded -eq $true) {
+            Log ("Building succeeded") $Log
+            #return the path to the resulting dll file
+            $gShellPath = [System.IO.Path]::Combine($RootProjPath,"bin\Debug\gShell.dll")
+            return $gShellPath
+        } else {
+            Log ("Build failed") $Log
+            #todo: throw error and stop process here?
+        }
     }
 }
 
-function New-AssemblyInfoFile ($Api, $AssemblyVersion) {
-    $Year = Get-Date -Format "YYYY"
-    $ApiNameAndVersion = $Api.NameAndVersion
 
-    $AssemblyText = @"
-using System.Reflection;
-using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
-
-// General Information about an assembly is controlled through the following 
-// set of attributes. Change these attribute values to modify the information
-// associated with an assembly.
-[assembly: AssemblyTitle("gShell.$ApiNameAndVersion")]
-[assembly: AssemblyDescription("PowerShell Client for Google $ApiNameAndVersion Apis")]
-[assembly: AssemblyConfiguration("")]
-[assembly: AssemblyCompany("Spencer Varney")]
-[assembly: AssemblyProduct("gShell")]
-[assembly: AssemblyCopyright("Copyright ©  $Year")]
-[assembly: AssemblyTrademark("")]
-[assembly: AssemblyCulture("")]
-
-[assembly: AssemblyVersion("$AssemblyVersion")]
-[assembly: AssemblyFileVersion("$AssemblyVersion")]
-"@
-}
 
 ###############
 
+$Log = $true
 $LibraryIndex = Get-LibraryIndex $LibraryIndexRoot -Log $Log
 
-#Build-ApiLibrary -LibraryIndex $LibraryIndex -ApiName "Google.Apis.Gmail.v1" -RootOutPath $RootProjPath
+Build-ApiLibrary -LibraryIndex $LibraryIndex -ApiName "Google.Apis.Gmail.v1" -RootOutPath $RootProjPath

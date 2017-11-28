@@ -23,7 +23,7 @@ function Update-AllFiles ($Log = $false) {
     #    -LibrarySaveFolderPath $LibraryIndexRoot -Log $log
 
     #START HERE - why is this breaking now
-    #CheckAndBuildGshell ([System.IO.Path]::Combine($rootProjPath,"gShell")) $LibraryIndex -Log $true
+    #CheckAndBuildGshell ([System.IO.Path]::Combine($rootProjPath,"gShell.Main")) $LibraryIndex -Log $true
     
     #pull out all google apis for which we have an entry in the index
     #$ApisFromNuget = $LibraryIndex.Libraries.psobject.Properties.Name | where {$_ -like "Google.Apis*"}

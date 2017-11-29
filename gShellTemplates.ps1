@@ -323,24 +323,29 @@ function Write-CSPReferenceTexts($Api, $LibraryIndex) {
 #region SQP, SQPB - Standard Query Parameters Base
 
 function Write-SQP ($Api) {
-    if ($Api.HasStandardQueryParams -eq $true) {
-        
-        $ApiName = $Api.Name
-        $ApiNameAndVersion = $Api.NameAndVersion
-        $StdQParamsName = $Api.Name + "StandardQueryParameters"
-        $Params = New-Object System.Collections.ArrayList
+    $ApiName = $Api.Name
+    $ApiNameAndVersion = $Api.NameAndVersion
+    $ApiRootNamespace = $Api.RootNamespace
+    $StdQParamsName = $Api.Name + "StandardQueryParameters"
+    $Params = New-Object System.Collections.ArrayList
 
-        foreach ($Param in $Api.StandardQueryParams) {
+    foreach ($Param in $Api.StandardQueryParams) {
+        if ($Param.type -ne $null) {
             $Summary = Wrap-Text (("        /// <summary> {0} </summary>" -f (Format-CommentString $Param.description)))
             $Property = "        public {0} {1} {{ get; set; }}" -f $Param.type, $Param.NameLower
 
             Add-String $Params ($Summary + "`r`n" + $Property)
         }
+    }
 
-        $ParamsText = $Params -join "`r`n`r`n"
+    $ParamsText = $Params -join "`r`n`r`n"
 
-        $text = @"
+    $text = @"
 $GeneralFileHeader
+
+using $ApiRootNamespace;
+using $ApiRootNamespace.Data;
+
 namespace gShell.$ApiNameAndVersion
 {
     /// <summary> Standard Query Parameters for the $ApiName Api. </summary>
@@ -351,22 +356,20 @@ $ParamsText
 }
 "@
 
-        return $text
-    } 
+    return $text
 }
 
 function Write-SQPB ($Api) {
-    if ($Api.HasStandardQueryParams -eq $true) {
-        
-        $ApiName = $Api.Name
-        $ApiNameAndVersion = $Api.NameAndVersion
+    $ApiName = $Api.Name
+    $ApiNameAndVersion = $Api.NameAndVersion
+    $ApiRootNamespace = $Api.RootNamespace
 
-        $StdQParamsName = $Api.Name + "StandardQueryParameters"
-        $StdQParamsBase = $Api.StandardQueryParamsBaseType
+    $StdQParamsName = $Api.Name + "StandardQueryParameters"
+    $StdQParamsBase = $Api.StandardQueryParamsBaseType
 
-        $Params = New-Object System.Collections.ArrayList
+    $Params = New-Object System.Collections.ArrayList
 
-        foreach ($Param in $Api.StandardQueryParams) {
+    foreach ($Param in $Api.StandardQueryParams) {
             $Help = Format-HelpMessage $Param.description
             $ParamAttributes = Wrap-Text "    [Parameter(Mandatory = false, HelpMessage = `"$Help`")]"
             $Signature = "        public {0} {1} {{ get; set; }}" -f $Param.type, $Param.NameLower
@@ -374,16 +377,19 @@ function Write-SQPB ($Api) {
             Add-String $Params ($Summary + "`r`n" + $Property)
         }
 
-        $ParamsText = $Params -join "`r`n`r`n"
-        $ParamAttribute = Wrap-Text (("        [Parameter(Mandatory = false, HelpMessage = `"The standard query parameters " +
+    $ParamsText = $Params -join "`r`n`r`n"
+    $ParamAttribute = Wrap-Text (("        [Parameter(Mandatory = false, HelpMessage = `"The standard query parameters " +
             "for this Api, created with New-G{0}StandardQueryParameters or by creating a new object of " +
             "type gShell.{1}.{2}`")]") -f $Api.Name, $Api.NameAndVersion, $StdQParamsName)
 
-        $text = @"
+    $text = @"
 $GeneralFileHeader
 
 using System.Management.Automation;
 using gShell.Main.PowerShell.Base.v1;
+
+using $ApiRootNamespace;
+using $ApiRootNamespace.Data;
 
 namespace gShell.$ApiNameAndVersion
 {
@@ -396,9 +402,8 @@ $ParamAttribute
 }
 "@
 
-        return $text
-    } 
-}
+    return $text
+} 
 
 #endregion
 
@@ -1456,7 +1461,9 @@ function Write-DNSW_MethodPropertyObjAssignment ($Method, $Level=0) {
         $Params = New-Object System.Collections.ArrayList
 
         foreach ($P in ($Method.Parameters | where Required -eq $False)){
-            Add-String $Params ("{{%T}}        request.{0} = {1}.{0};" -f $P.Name, $PropertiesObjVarName)
+            if ($P.Type -ne $null) {
+                Add-String $Params ("{{%T}}        request.{0} = {1}.{0};" -f $P.Name, $PropertiesObjVarName)
+            }
         }
 
         $pText = $Params -join "`r`n"
@@ -1523,8 +1530,10 @@ function Write-DNSW_Method ($Method, $Level=0) {
     if ($Method.Api.HasStandardQueryParams) {
         $SQParams = New-Object System.Collections.ArrayList
         foreach ($Param in $Api.StandardQueryParams) {
-            $ParamText = "{{%T}}        request.{0} = StandardQueryParams.{1};" -f $Param.Name, $Param.NameLower
-            Add-String $SQParams $ParamText
+            if ($Param.Type -ne $null) {
+                $ParamText = "{{%T}}        request.{0} = StandardQueryParams.{1};" -f $Param.Name, $Param.NameLower
+                Add-String $SQParams $ParamText
+            }
         }
 
         $SQParamsText = $SQParams -join "`r`n"
@@ -1779,16 +1788,12 @@ function Create-TemplatesFromDll ($LibraryIndex, $RestJson, $ApiName, $ApiFileVe
     Log "Building and writing Object Cmdlets" $Log
     Write-OC $Api | Out-File ([System.IO.Path]::Combine($OutPath, "ObjectCmdlets.cs")) -Force
 
-    $SQP = Write-SQP $Api
-    if ($SQP -ne $null) {
+    if ($Api.HasStandardQueryParams -eq $true) {
         Log "Building and writing Standard Query Parameters" $Log
-        $SQP | Out-File ([System.IO.Path]::Combine($OutPath, "StandardQueryParameters.cs")) -Force
-    }
+        Write-SQP $Api | Out-File ([System.IO.Path]::Combine($OutPath, "StandardQueryParameters.cs")) -Force
     
-    $SQPB = Write-SQPB $Api
-    if ($SQPB -ne $null) {
         Log "Building and writing Standard Query Parameters Base" $Log
-        $SQPB | Out-File ([System.IO.Path]::Combine($OutPath, "StandardQueryParametersBase.cs")) -Force
+        Write-SQPB $Api | Out-File ([System.IO.Path]::Combine($OutPath, "StandardQueryParametersBase.cs")) -Force
     }
 
     return $Api

@@ -346,6 +346,7 @@ class ApiMethodProperty {
 
 function Get-ApiPropertyTypeShortName($Name, $Api) {
     
+
     switch ($Name) {
         "System.String" {return "string"}
         "System.Int32" {return "int"}
@@ -356,49 +357,102 @@ function Get-ApiPropertyTypeShortName($Name, $Api) {
 
     $Replaced = $Name -replace ($Api.RootNamespace + ".")
 
+    $Replaced = $Replaced -replace "[+]","."
+
     return $Replaced
 }
 
-function Get-ApiPropertyType ([ApiMethodProperty]$Property) {
-    if ($Property.ReflectedObj.GetType().Name -eq "RuntimeParameterInfo") {
-        $RefType = $Property.ReflectedObj.ParameterType
+function Get-ApiPropertyType {
+    param (
+        [Parameter(ParameterSetName="property")]
+        [ApiMethodProperty]$Property,
+
+        [Parameter(ParameterSetName="runtimetype")]
+        [System.Type]$RuntimeType,
+
+        [Parameter(ParameterSetName="runtimetype")]
+        $Api,
+
+        $GenericInners = $null
+    )
+    if ($PSCmdlet.ParameterSetName -eq "property") {
+        if ($Property.ReflectedObj.GetType().Name -eq "RuntimeParameterInfo") {
+            $RefType = $Property.ReflectedObj.ParameterType
+        } else {
+            $RefType = $Property.ReflectedObj.PropertyType
+        }
+
+        $Api = $Property.Api
     } else {
-        $RefType = $Property.ReflectedObj.PropertyType
+        $RefType = $RuntimeType
     }
 
-    if (@("Nullable``1","Repeatable``1","IList``1") -contains $RefType.Name){
+    
+    #if ($RefType.Name -eq "XgafvEnum") {
+    #    write-host ""
+    #}
 
-        #-replace "``1\[","<" -replace "\]",">"
+    
+
+    #if null, return it right here and now
+    if ([string]::IsNullOrWhiteSpace($RefType.Name) -and [string]::IsNullOrWhiteSpace($RefType.FullName)) { return $null }
+    
+    if (-not [string]::IsNullOrWhiteSpace($RefType.Name) -and $RefType.Name.Contains("``")) {
 
         $inners = New-Object System.Collections.ArrayList
 
         foreach ($I in $RefType.GenericTypeArguments) {
-            $innerType = Get-ApiPropertyTypeShortName $I.FullName $Property.Api
-            $innerType = $innerType -replace "[+]","."
-            $inners.Add($innerType) | Out-Null
+            if ($I.GetType().Name -eq "RuntimeType") {
+                $InnerType = Get-ApiPropertyType -RuntimeType $I -Api $Api
+            } else {
+                $innerType = Get-ApiPropertyTypeShortName $I.FullName $Api
+            }
+
+            if (-not [string]::IsNullOrWhiteSpace($InnerType)) {
+                $inners.Add($innerType) | Out-Null
+            }
         }
 
+        if ($GenericInners -ne $Null) {
+            $GenericInners | % {$inners.Add($_) | Out-Null}
+        }
+
+        #don't return any generics that don't have anything inside
+        if ($inners.Count -eq 0) { return $null }
+        
         $InnerString = $inners -join ", "
-
-        if ($RefType.Name -eq "Nullable``1") {
-            #$Type = "System.Nullable<{0}>" -f $InnerString
-            $Type = $InnerString + "?"
-        }
 
         if ($RefType.Name -eq "Repeatable``1") {
             $Type = "Google.Apis.Util.Repeatable<{0}>" -f $InnerString
+
+        } elseif ($RefType.Name -eq "Nullable``1") {
+            $Type = $InnerString + "?"
+
+        } else {
+            $Type = "{0}<{1}>" -f $RefType.Name.Split("``")[0], $InnerString
         }
 
-        if ($RefType.Name -eq "IList``1") {
-            $Type = "IList<{0}>" -f $InnerString
-        }
-
-        return $type
+        $type = $type -replace "[+]","."
 
     } else  {
-        $shortName = (Get-ApiPropertyTypeShortName $RefType.FullName $Property.Api) -replace "[+]","."
-        return $shortName
+        if (-not [string]::IsNullOrWhiteSpace($RefType.FullName)) {
+            $type = (Get-ApiPropertyTypeShortName $RefType.FullName $Api)
+        } else {
+            $type = (Get-ApiPropertyTypeShortName $RefType.Name $Api)
+        }
     }
+
+    #Make sure we're not making a property that is declared as a subclass or object (struct, enum) within a generic class without providing the
+    #generic type for said parent class.
+    if ($RefType.UnderlyingSystemType -ne $Null -and $RefType.DeclaringType -ne $Null) {
+        if ($RefType.UnderlyingSystemType.ToString().Contains("+") -and $RefType.DeclaringType.IsGenericType){
+            #$parentType = Get-ApiPropertyType -RuntimeType $RefType.DeclaringType -Api $Api -GenericInners "object"
+            #$Type = $parentType + "." + $Type
+            return $null
+        }
+    }
+
+    return $Type
 }
 
 function New-ApiMethodProperty {
@@ -419,7 +473,7 @@ function New-ApiMethodProperty {
     $P.NameLower = ConvertTo-FirstLower $Property.Name
     $P.ReflectedObj = $Property
     $P.DiscoveryObj = $Method.DiscoveryObj.parameters.($Property.Name)
-    $P.Type = Get-ApiPropertyType $P
+    $P.Type = Get-ApiPropertyType -Property $P
     $P.Description = Clean-CommentString $P.DiscoveryObj.Description
     $P.Required = if ($ForceRequired -eq $true) {$true} else {[bool]($P.DiscoveryObj.required)}
     #TODO - is force required really needed?
@@ -489,7 +543,7 @@ function New-ApiClass {
             $P.DiscoveryObj = $C.DiscoveryObj.properties.($P.Name)
             $P.ReflectedObj = $Property
             #$P.Method = $Parameter.Method
-            $P.Type = Get-ApiPropertyType $P
+            $P.Type = Get-ApiPropertyType -Property $P
             $P.Description = Clean-CommentString $P.DiscoveryObj.Description
 
             if ($P.ReflectedObj.PropertyType.ImplementedInterfaces.Name -contains "IDirectResponseSchema") {

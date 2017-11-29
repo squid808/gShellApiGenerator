@@ -52,6 +52,7 @@ function Invoke-GshellGeneratorMain {
             Log "No Apis found with the filter `"$ApiFilter`"" $Log
         } else {
             foreach ($ApiName in $ApisFromNuget) {
+                Log "" $Log
                 $GShellApiName,$GShellApiVersion = CheckAndBuildGShellApi -ApiName $ApiName -RootProjPath $RootProjPath -LibraryIndex $LibraryIndex `
                     -Log $Log -Force $ForceBuildApis.IsPresent
             }
@@ -59,5 +60,5 @@ function Invoke-GshellGeneratorMain {
     }
 }
 
-Invoke-GshellGeneratorMain -ApiFilter "Gmail*" -ShouldBuildApis -ForceBuildApis -Log $Log
+Invoke-GshellGeneratorMain -ApiFilter "genomics.v1alpha2" -ShouldBuildApis -ForceBuildApis -Log $Log
 

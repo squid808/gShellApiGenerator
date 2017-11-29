@@ -2,7 +2,7 @@
 $BuildExe = "$BuildDir\MSBuild.exe"
 
 
-function New-ApiPackagesXml ($LibraryIndex, $DependenciesChain, $OutPath) {
+function New-PackagesConfig ($LibraryIndex, $DependenciesChain, $BuildProjectPath) {
 
     $Packages = New-Object system.collections.arraylist
 
@@ -27,17 +27,17 @@ function New-ApiPackagesXml ($LibraryIndex, $DependenciesChain, $OutPath) {
 </packages>
 '@ -f $PackagesXml
 
-    $packagesText | Out-File -FilePath ([System.IO.Path]::Combine($OutPath, "packages.config")) -Encoding utf8 -Force
+    $packagesText | Out-File -FilePath ([System.IO.Path]::Combine($BuildProjectPath, "packages.config")) -Encoding utf8 -Force
 }
 
-function Get-CsProjBuildFiles ($RootProjPath) {
-    $FilesList = Get-ChildItem $RootProjPath -Recurse -Filter "*.cs"| select -ExpandProperty fullname `
+function Get-CsProjBuildFiles ($BuildProjectPath) {
+    $FilesList = Get-ChildItem $BuildProjectPath -Recurse -Filter "*.cs"| select -ExpandProperty fullname `
         | where {$_ -notlike "*\obj\*"}
 
     $Files = New-Object system.collections.arraylist
 
     foreach ($File in $FilesList) {
-        Add-String $Files ("    <Compile Include = `"" + $File.Replace(($RootProjPath+"\"),"") + "`" />")
+        Add-String $Files ("    <Compile Include = `"" + $File.Replace(($BuildProjectPath+"\"),"") + "`" />")
     }
 
     $FilesText = $Files -join "`r`n"
@@ -45,13 +45,11 @@ function Get-CsProjBuildFiles ($RootProjPath) {
     return $FilesText
 }
 
-function Get-CsProjReferences ($LibraryIndex, $DependenciesChain, $RootProjPath) {
+function Get-CsProjReferences ($LibraryIndex, $DependenciesChain) {
     
     $Dependencies = New-Object system.collections.arraylist
 
     $latestGoogleAuthVersion = $LibraryIndex.GetLibVersionLatestName("Google.Apis.Auth")
-
-    $DebugPath = ([System.IO.Path]::Combine($RootOutPath,"bin\Debug"))
 
     $Exclusions = @("System.Net.Http", "System.Management.Automation.dll")
 
@@ -79,7 +77,7 @@ function Get-CsProjReferences ($LibraryIndex, $DependenciesChain, $RootProjPath)
     return $DependenciesText
 }
 
-function New-AssemblyInfoFile ($AssemblyTitle, $AssemblyDescription, $AssemblyVersion, $RootProjPath) {
+function New-AssemblyInfoFile ($AssemblyTitle, $AssemblyDescription, $AssemblyVersion, $BuildProjectPath) {
     $Year = Get-Date -Format "yyyy"
 
     $AssemblyText = @"
@@ -103,7 +101,7 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyFileVersion("$AssemblyVersion")]
 "@
 
-    $AssemblyFolderPath = [System.IO.Path]::Combine($RootProjPath, "Properties")
+    $AssemblyFolderPath = [System.IO.Path]::Combine($BuildProjectPath, "Properties")
     $AssemblyFilePath = [System.IO.Path]::Combine($AssemblyFolderPath, "AssemblyInfo.cs")
 
     if (-not (Test-Path $AssemblyFolderPath)) {
@@ -113,13 +111,13 @@ using System.Runtime.InteropServices;
     $AssemblyText | Out-File -FilePath $AssemblyFilePath -Encoding utf8 -Force
 }
 
-function New-CsProjFile ($LibraryIndex, $DependencyChain, $RootProjPath, $Api) {
+function New-CsProjFile ($LibraryIndex, $DependencyChain, $BuildProjectPath, $Api) {
 
     $NewGuid = [System.Guid]::NewGuid().ToString("B").ToUpper()
     $RootNamespace = "gShell." + $Api.NameAndVersion
     $AssemblyName = "gShell." + $Api.NameAndVersion
-    $BuildFiles = Get-CsProjBuildFiles $RootProjPath
-    $ProjReferences = Get-CsProjReferences -LibraryIndex $LibraryIndex -DependenciesChain $DependencyChain -RootProjPath $RootProjPath
+    $BuildFiles = Get-CsProjBuildFiles $BuildProjectPath
+    $ProjReferences = Get-CsProjReferences -LibraryIndex $LibraryIndex -DependenciesChain $DependencyChain
 
     $projText = @'
 <?xml version="1.0" encoding="utf-8"?>
@@ -180,87 +178,146 @@ function New-CsProjFile ($LibraryIndex, $DependencyChain, $RootProjPath, $Api) {
 </Project>
 '@ -f $NewGuid, $RootNamespace, $AssemblyName, $BuildFiles,  $ProjReferences
 
-    $projFilePath = [System.IO.Path]::Combine($RootProjPath, "$AssemblyName.csproj")
+    $projFilePath = [System.IO.Path]::Combine($BuildProjectPath, "$AssemblyName.csproj")
 
     $projText | Out-File -FilePath $projFilePath -Encoding utf8 -Force
 }
 
-function Build-ApiLibrary ($LibraryIndex, $ApiName, $RootOutPath) {
+function Build-ApiLibrary ($LibraryIndex, $ApiName, $ApiObj, $LatestDependencyChain, $BuildProjectPath, $LatestDllVersion) {
+
+    $LatestAuthVersion = $LatestDependencyChain.'Google.Apis.Auth'
+
+    $gShellVersionToUse = $LibraryIndex.GetLibVersionAll("gShell.Main") | % {`
+        if (($_.Value.Dependencies | where {$_.Name -eq "Google.Apis.Auth" -and $_.Versions -like "*1.*"}) -ne $null) { `
+            $_.Name `
+        }} `
+        | sort -Descending | select -First 1
+
+    if ([string]::IsNullOrWhiteSpace($gShellVersionToUse)) {
+        throw "gShell version $LatestAuthVersion not found for $ApiName"
+    }
+
+    $gShellDependencyChain = $LibraryIndex.GetLibVersionDependencyChain("gShell.Main", $gShellVersionToUse)
+
+    #sync the dependencies for this gshell version with this api
+    foreach ($pair in $gShellDependencyChain.GetEnumerator()) {
+        $LatestDependencyChain[$pair.name] = $pair.Value
+    }
+
+    #Now we need to generate the files and get the csproj location
+    $dllPath = $LibraryIndex.GetLibVersion($ApiName, $LatestDllVersion).dllPath
+
+    #Now create the meta files
+    New-PackagesConfig -LibraryIndex $LibraryIndex -DependenciesChain $LatestDependencyChain -BuildProjectPath $BuildProjectPath
+        
+    New-CsProjFile -LibraryIndex $LibraryIndex -DependencyChain $LatestDependencyChain -BuildProjectPath $BuildProjectPath -Api $Api
+
+    #Start here - need the Properties / AssemblyInfo.cs file! Need to update this for gshell too, to update the versions
+    New-AssemblyInfoFile -AssemblyTitle ("gShell." + $Api.NameAndVersion) `
+        -AssemblyDescription ("PowerShell Client for Google {0} Apis" -f $Api.NameAndVersion) `
+        -AssemblyVersion $LatestDllVersion -BuildProjectPath $BuildProjectPath
+
+    Log ("Building gShell." + $Api.NameAndVersion) $Log
+
+    $BuildResult = Invoke-MsBuild -Path ([System.IO.Path]::Combine($BuildProjectPath, ("gShell." + $Api.NameAndVersion + ".csproj")))
+
+    if ($BuildResult.BuildSucceeded -eq $true) {
+        Log ("Building succeeded") $Log
+        #return the path to the resulting dll file
+        $compiledDllPath = [System.IO.Path]::Combine($BuildProjectPath,"bin\Debug\gShell." + $Api.NameAndVersion + ".dll")
+        return $compiledDllPath
+    } else {
+        Log ("Build failed") $Log
+        #todo: throw error and stop process here?
+    }
+}
+
+function SaveCompiledToLibraryIndex ($ApiName, $Version, $DllLocation, $LibraryIndex, $Dependencies, [bool]$Log = $false) {
+    
+    if (-not $LibraryIndex.HasLib($ApiName)) {
+        Log ("$ApiName doesn't exist in the Library Index - adding entry") $Log
+        $LibraryIndex.AddLib($ApiName)
+    }
+
+    if (-not $LibraryIndex.HasLibVersion($ApiName, $Version)) {
+        Log ("$ApiName doesn't have an entry for version $Version - adding with dependencies") $Log
+        $LibraryIndex.AddLibVersion($ApiName, $Version)
+
+        foreach ($Dependency in $Dependencies.GetEnumerator()) {
+            $LibraryIndex.AddLibVersionDependency($ApiName, $Version, $Dependency.Name, $Dependency.Value)
+        }
+    }
+
+    $LibraryIndex.SetLibSource($ApiName, "Local")
+
+    $LibraryIndex.GetLibVersion($ApiName, $Version)."dllPath" = $DllLocation
+    $LibraryIndex.SetLibLastVersionBuilt($ApiName, $Version)
+
+    $LibraryIndex.Save()
+}
+
+function CheckAndBuildGShellApi ($ApiName, $RootProjPath, $LibraryIndex, [bool]$Log = $false, [bool]$Force = $false) {
     $LatestDllVersion = $LibraryIndex.GetLibVersionLatestName($ApiName)
 
     $LastVersionBuilt = $LibraryIndex.GetLibLastVersionBuilt($ApiName)
 
-    if ($LastVersionBuilt -eq $null -or $LastVersionBuilt -ne $LatestDllVersion) {
+    $RestNameAndVersion = $LibraryIndex.GetLibRestNameAndVersion($ApiName)
 
-        $gShellVersions = $LibraryIndex.GetLibVersionAll("gShell.Main")
+    $gShellApiName = "gShell." + (ConvertTo-FirstUpper $RestNameAndVersion)
 
-        $LatestDependencyChain = $LibraryIndex.GetLibVersionDependencyChain($ApiName, $LatestDllVersion)
+    if (-not $LibraryIndex.HasLib($ApiName) -or $LastVersionBuilt -eq $null `
+        -or $LastVersionBuilt -ne $LatestDllVersion -or $Force) {
 
-        $LatestAuthVersion = $LatestDependencyChain.'Google.Apis.Auth'
+        Log ("$gShellApiName $LastVersionBuilt either doesn't exist or needs to be updated to $LatestDllVersion.") $Log
 
-        $gShellVersionToUse = $LibraryIndex.GetLibVersionAll("gShell.Main") | % {`
-            if (($_.Value.Dependencies | where {$_.Name -eq "Google.Apis.Auth" -and $_.Versions -like "*1.*"}) -ne $null) { `
-                $_.Name `
-            }} `
-            | sort -Descending | select -First 1
-
-        if ([string]::IsNullOrWhiteSpace($gShellVersionToUse)) {
-            throw "gShell version $LatestAuthVersion not found for $ApiName"
-        }
-
-        $gShellDependencyChain = $LibraryIndex.GetLibVersionDependencyChain("gShell.Main", $gShellVersionToUse)
-
-        #sync the dependencies for this gshell version with this api
-        foreach ($pair in $gShellDependencyChain.GetEnumerator()) {
-            $LatestDependencyChain[$pair.name] = $pair.Value
-        }
-
-        #Now we need to generate the files and get the csproj location
-        $dllPath = $LibraryIndex.GetLibVersion($ApiName, $LatestDllVersion).dllPath
-
-        $RestNameAndVersion = $LibraryIndex.GetLibRestNameAndVersion($ApiName)
-
-        $ProjectOutPath = [System.IO.Path]::Combine($RootOutPath, ("gShell.$RestNameAndVersion"))
-
+        #TODO: make $JsonRootPath global?
         $JsonFileInfo = Get-MostRecentJsonFile -Path ([System.IO.Path]::Combine($JsonRootPath, $RestNameAndVersion))
 
         $RestJson = Get-Content $JsonFileInfo.FullName | ConvertFrom-Json
-        
+
+        $BuildProjectPath = [System.IO.Path]::Combine($RootProjPath, ("gShell.$RestNameAndVersion"))
+
         $Api = Create-TemplatesFromDll -LibraryIndex $LibraryIndex -ApiName $ApiName -ApiFileVersion $LatestDllVersion `
-            -OutPath $RootOutPath `
-            -RestJson $RestJson
+            -OutPath $BuildProjectPath -RestJson $RestJson -Log $Log
 
-        #Now create the meta files
-        New-ApiPackagesXml -LibraryIndex $LibraryIndex -DependenciesChain $LatestDependencyChain -OutPath $RootOutPath
-        
-        New-CsProjFile -LibraryIndex $LibraryIndex -DependencyChain $LatestDependencyChain -RootProjPath $ProjectOutPath -Api $Api
+        $gShellApiName = "gShell." + $Api.NameAndVersion
 
-        #Start here - need the Properties / AssemblyInfo.cs file! Need to update this for gshell too, to update the versions
-        New-AssemblyInfoFile -AssemblyTitle ("gShell." + $Api.NameAndVersion) `
-            -AssemblyDescription ("PowerShell Client for Google {0} Apis" -f $Api.NameAndVersion) `
-            -AssemblyVersion $LatestDllVersion -RootProjPath $ProjectOutPath
+        $LatestDependencyChain = $LibraryIndex.GetLibVersionDependencyChain($ApiName, $LatestDllVersion)
 
-        Log ("Building gShell." + $Api.NameAndVersion) $Log
+        #First, try to build
+        $CompiledPath = Build-ApiLibrary -LibraryIndex $LibraryIndex -ApiName $ApiName -ApiObj $Api `
+              -LatestDependencyChain $LatestDependencyChain -BuildProjectPath $BuildProjectPath -LatestDllVersion $LatestDllVersion
 
-        $BuildResult = Invoke-MsBuild -Path ([System.IO.Path]::Combine($ProjectOutPath, ("gShell." + $Api.NameAndVersion + ".csproj")))
+        if ($CompiledPath -ne $null) {
+            Log ("Copying the compiled $gShellApiName.dll file to the Library Index path") $Log
 
-        if ($BuildResult.BuildSucceeded -eq $true) {
-            Log ("Building succeeded") $Log
-            #return the path to the resulting dll file
-            $gShellPath = [System.IO.Path]::Combine($RootProjPath,"bin\Debug\gShell.dll")
-            return $gShellPath
+            #copy the file to the library path
+            $LibraryRootPath = [System.IO.Path]::GetDirectoryName($LibraryIndex.RootPath)
+            $NewDllFolderPath = [System.IO.Path]::Combine($LibraryRootPath, $gShellApiName, $LatestDllVersion)
+            $NewDllPath = [System.IO.Path]::Combine($NewDllFolderPath, "$gShellApiName.dll")
+
+            if (-not (Test-Path $NewDllFolderPath)) {
+                New-Item -Path $NewDllFolderPath -ItemType "Directory" | Out-Null
+            }
+
+            Copy-Item -Path $CompiledPath -Destination $NewDllPath | Out-Null
+
+            #update the library
+            $LibraryIndex.SetLibLastVersionBuilt($ApiName, $LatestDllVersion)
+            SaveCompiledToLibraryIndex -ApiName $gShellApiName -Version $LatestDllVersion -DllLocation $NewDllPath `
+                -LibraryIndex $LibraryIndex -Dependencies $LatestDependencyChain -Log $Log
+            
         } else {
-            Log ("Build failed") $Log
-            #todo: throw error and stop process here?
+            #throw some error right?
         }
+    } else {
+        Log ("$gShellApiName $LastVersionBuilt appears to be up to date") $Log
     }
+
+    return $gShellApiName, $LatestDllVersion
+        
+
+        #$gShellVersion = $LibraryIndex.GetLibVersionLatestName($gShellMain)
+
+    #return $gShellMain, $gShellNewVersion
 }
-
-
-
-###############
-
-$Log = $true
-$LibraryIndex = Get-LibraryIndex $LibraryIndexRoot -Log $Log
-
-Build-ApiLibrary -LibraryIndex $LibraryIndex -ApiName "Google.Apis.Gmail.v1" -RootOutPath $RootProjPath

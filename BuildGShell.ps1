@@ -166,32 +166,6 @@ function BuildGshell ($RootProjPath, $LibraryIndex, $BuildVersion, [bool]$Log = 
     }
 }
 
-function SaveGshellToLibraryIndex ($Version, $Location, $LibraryIndex, $Dependencies, [bool]$Log = $false) {
-    $gShellMain = "gShell.Main"
-    if (-not $LibraryIndex.HasLib($gShellMain)) {
-        Log ("gShell.Main doesn't exist in the Library Index - adding entry") $Log
-        $LibraryIndex.AddLib($gShellMain)
-    }
-
-    if (-not $LibraryIndex.HasLibVersion($gShellMain, $Version)) {
-        Log ("gShell.Main doesn't have an entry for version $Version - adding with dependencies") $Log
-        $LibraryIndex.AddLibVersion($gShellMain, $Version)
-
-        #this is more for the other APIs to be able to know what versions of the files THEY need are referenced,
-        # so it can lack the oauth and the discovery references
-        foreach ($Dependency in $Dependencies.GetEnumerator()) {
-            $LibraryIndex.AddLibVersionDependency($gShellMain, $Version, $Dependency.Name, $Dependency.Value)
-        }
-
-        
-    }
-
-    $LibraryIndex.GetLibVersion($gShellMain, $Version)."dllPath" = $Location
-    $LibraryIndex.SetLibLastVersionBuilt($gShellMain, $Version)
-
-    $LibraryIndex.Save()
-}
-
 function CheckAndBuildGshell ($RootProjPath, $LibraryIndex, [bool]$Log = $false, [bool]$Force = $false) {
 
     $Dependencies = @{}
@@ -235,7 +209,8 @@ function CheckAndBuildGshell ($RootProjPath, $LibraryIndex, [bool]$Log = $false,
 
             #update the library
             $LibraryIndex.SetLibLastVersionBuilt("Google.Apis.Auth", $AuthVersion)
-            SaveGshellToLibraryIndex -Version $gShellNewVersion -Location $NewGShellPath -LibraryIndex $LibraryIndex -Dependencies $Dependencies
+            SaveCompiledToLibraryIndex -ApiName "gShell.Main" -Version $gShellNewVersion -DllLocation $NewGShellPath `
+                -LibraryIndex $LibraryIndex -Dependencies $Dependencies -Log $Log
             
         } else {
             #throw some error right?
@@ -246,5 +221,5 @@ function CheckAndBuildGshell ($RootProjPath, $LibraryIndex, [bool]$Log = $false,
         Log ("$gShellMain $gShellVersion appears to be up to date") $Log
     }
 
-    return $gShellMain, $gShellNewVersion
+    return $gShellMain, $gShellVersion
 }

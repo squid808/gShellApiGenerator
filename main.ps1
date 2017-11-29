@@ -7,38 +7,57 @@ $JsonRootPath = "$env:USERPROFILE\Desktop\DiscoveryRestJson"
 $Log = $true
 
 #To Run All Files
-function Update-AllFiles ($Log = $false) {
+function Invoke-GshellGeneratorMain {
 
-    #First run the discovery API and see what has changed, if anything
-    #$DiscoveryChanges = Get-GoogleApiJsonFiles -Log $Log
-
-    #For testing, let's manually create it
-    $DiscoveryChanges = @("gmail.v1")
+    param (
+        [string]$ApiFilter,
+        [switch]$ShouldCheckDiscovery,
+        [switch]$ShouldCheckNuget,
+        [switch]$ShouldBuildGShell,
+        [switch]$ForceBuildGShell,
+        [switch]$ShouldBuildApis,
+        [switch]$ForceBuildApis,
+        [bool]$Log = $False
+    )
 
     #Load the Library Index
     $LibraryIndex = Get-LibraryIndex $LibraryIndexRoot -Log $Log
-    
-    #Now that all the json files are up to date (right?) let's see if the nuget files are too
-    #Check-AllApiPackages -LibraryIndex $LibraryIndex -JsonRootPath $JsonRootPath `
-    #    -LibrarySaveFolderPath $LibraryIndexRoot -Log $log
 
-    #START HERE - why is this breaking now
-    #CheckAndBuildGshell ([System.IO.Path]::Combine($rootProjPath,"gShell.Main")) $LibraryIndex -Log $true
+    if ($ShouldCheckDiscovery) {
+        #First run the discovery API and see what has changed, if anything
+        $DiscoveryChanges = Get-GoogleApiJsonFiles -Log $Log -Filter $ApiFilter
+    }
     
-    #pull out all google apis for which we have an entry in the index
-    #$ApisFromNuget = $LibraryIndex.Libraries.psobject.Properties.Name | where {$_ -like "Google.Apis*"}
-    
-    #TESTING:
-    $ApiName = "Google.Apis.Gmail.v1"
+    if ($ShouldCheckNuget) {
+        #Now that all the json files are up to date (right?) let's see if the nuget files are too
+        Check-AllApiPackages -LibraryIndex $LibraryIndex -JsonRootPath $JsonRootPath `
+            -LibrarySaveFolderPath $LibraryIndexRoot -Filter $ApiFilter -Log $log
+    }
 
-    
+    if ($ShouldBuildGShell -or $ForceBuildGShell) {
 
-    #foreach ($ApiName in $ApisFromNuget) {
-        
-    #}
+        $GShellName,$GShellVersion = CheckAndBuildGshell ([System.IO.Path]::Combine($rootProjPath,"gShell.Main")) -LibraryIndex $LibraryIndex `
+            -Log $Log -Force $ForceBuildGShell.IsPresent
+    }
+    
+    if ($ShouldBuildApis -or $ForceBuildApis) {
+        #pull out all google apis for which we have an entry in the index
+        $ApisFromNuget = $LibraryIndex.Libraries.psobject.Properties.Name | where {$_ -like "Google.Apis*"}
+    
+        if (-not [string]::IsNullOrWhiteSpace($ApiFilter)) {
+            $ApisFromNuget = $ApisFromNuget | where {$_ -like ("Google.Apis." + $ApiFilter)}
+        }
+
+        if ($ApisFromNuget.Count -eq 0) {
+            Log "No Apis found with the filter `"$ApiFilter`"" $Log
+        } else {
+            foreach ($ApiName in $ApisFromNuget) {
+                $GShellApiName,$GShellApiVersion = CheckAndBuildGShellApi -ApiName $ApiName -RootProjPath $RootProjPath -LibraryIndex $LibraryIndex `
+                    -Log $Log -Force $ForceBuildApis.IsPresent
+            }
+        }
+    }
 }
 
-
-
-#Update-AllFiles
+Invoke-GshellGeneratorMain -ApiFilter "Gmail*" -ShouldBuildApis -ForceBuildApis -Log $Log
 

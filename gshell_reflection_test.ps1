@@ -396,8 +396,8 @@ function Get-ApiPropertyType ([ApiMethodProperty]$Property) {
         return $type
 
     } else  {
-
-        return Get-ApiPropertyTypeShortName $RefType.FullName $Property.Api
+        $shortName = (Get-ApiPropertyTypeShortName $RefType.FullName $Property.Api) -replace "[+]","."
+        return $shortName
     }
 }
 

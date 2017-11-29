@@ -509,7 +509,7 @@ function Invoke-BroadGoogleSearchOnNuget ($PackageId, $Json, [bool]$Log = $false
     return $SearchResult
 }
 
-function Check-AllApiPackages($LibraryIndex, $JsonRootPath, $LibrarySaveFolderPath, [string]$filter=$null, [bool]$Log = $false) {
+function Check-AllApiPackages($LibraryIndex, $JsonRootPath, $LibrarySaveFolderPath, [string]$Filter=$null, [bool]$Log = $false) {
     foreach ($Directory in (gci $JsonRootPath -Directory -Filter $filter)){
         Log "" $Log
         $File = Get-MostRecentJsonFile $Directory.fullname

@@ -29,11 +29,15 @@ function Get-GoogleRestApi ($Uri, [bool]$RevisionOnly=$false, [bool]$RawContent=
 }
 
 #Check for any changes to the json files themselves from Google, return a list of any that have been updated and downloaded
-function Get-GoogleApiJsonFiles ($Name = $null, $Version = $null, $Preferred = $null, [bool]$Log = $false) {
+function Get-GoogleApiJsonFiles ($Name = $null, $Version = $null, $Preferred = $null, $Filter = $null, [bool]$Log = $false) {
     
     Log ("Checking against Google to determine if any JSON files have a version not found locally.") $Log
     $GoogleApiList = Get-GoogleApiList $Log
     $ChangeResults = New-Object System.Collections.Arraylist
+
+    if ($Filter -ne $null) {
+        $GoogleApiList = $GoogleApiList | where Id -like $Filter
+    }
 
     if ($Name -ne $null) {
         $GoogleApiList = $GoogleApiList | where Name -like $Name
@@ -81,7 +85,7 @@ function Get-GoogleApiJsonFiles ($Name = $null, $Version = $null, $Preferred = $
 
             $ChangeResults.Add($JsonFileFolderName) | Out-Null
         } else {
-            Log ("$JsonFileFolderName / $JsonFileName already exists.") $false #$Log
+            Log ("$JsonFileFolderName / $JsonFileName already exists.") $Log
         }
 
         $JsonFileFolderName, $JsonFileFolderName, $JsonFileName, $JsonFilePath, $ApiInfo = $null

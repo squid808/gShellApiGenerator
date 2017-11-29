@@ -46,79 +46,119 @@ function Get-CharCountInString([string]$String, $Char) {
 }
 
 #take in a block of text and wrap any lines longer than 120 lines
-function Wrap-Text ($Text, $Level=0, $Padding=0, $PrependText=$null) {
+function Wrap-Text ($Text, $Level=0, $Padding=0, $PrependText=$null, [bool]$Debug=$false) {
 
     $OriginalPadding = $padding 
 
     $lines = $Text -split "`r`n"
+    if ($Debug) {write-host ("Calling Wrap-Text at level $Level, splitting in to {0} lines." -f $Lines.count) -ForegroundColor White -BackgroundColor Black}
 
     for ($l = 0; $l -lt $lines.Count; $l++){
+        if ($Debug) {write-host ("Working on line:`r`n{0}" -f $lines[$l]) -ForegroundColor Cyan}
 
         #if the prepend text is present, make sure it's applied after whitespace - mostly for multiline comments
         if (-not [string]::IsNullOrWhiteSpace($PrependText) -and $lines[$l] -notmatch "^\s*$PrependText") {
+            if ($Debug) {write-host "Adding prepend text"}
             $lines[$l] = $lines[$l].Insert(0,$PrependText)
         }
 
         #if padding is not in the line after whitespace, make sure it's applied - mostly for multiline comments
         if ($level -eq 0 -and $OriginalPadding -ne 0) {
+            if ($Debug) {write-host "Adding in original padding"}
             $lines[$l] = $lines[$l].Insert(0,(" "*$OriginalPadding))
         }
 
         if ($lines[$l].Length -gt 120) {
+            if ($Debug) {write-host ("Line has length of {0}" -f $Lines[$l].Length)}
+            
             $StartInd = 119
 
             $BreakInString = $false
             
             $LineBreakPattern = "[\s\)\],]"
-
-            #if the break is in the middle of a string
-            if ((Get-CharCountInString $lines[$l].Substring(0,$StartInd) '"')%2 -eq 1){
-                $IndexOfOddQuote = $lines[$l].Substring(0,$StartInd).LastIndexOf('"')
-                $StringSection = $lines[$l].Substring($IndexOfOddQuote+1, $StartInd-$IndexOfOddQuote-1)
-
-                if ($StringSection -match $LineBreakPattern) {
-                    $StartInd-=2
-                    $BreakInString = $true
-                } else {
-                    $StartInd = $IndexOfOddQuote
-                }
-            }
             
             #determine padding if not already calculated and provided
             if ($level -eq 0 -and $padding -eq 0) {
+
                 if ($lines[$l] -match "[^\s]") {
                     $padding = $lines[$l].IndexOf($matches[0])
+
+                    if ($Debug) {write-host "Determining initial padding is $padding whitespaces"}
                 }
             }
 
             #go backwards until padding to see if we can make a break match
             for ($i = $StartInd; $i -ge $Padding+1; $i--) {
                 if ($lines[$l][$i] -match $LineBreakPattern) {
+
+                    if ($Debug) {write-host "Found a line break match at line index $i, new line is:"}
+                    if ($Debug) {write-host ("{0}" -f $lines[$l].Substring(0,($i+1))) -ForegroundColor Blue -BackgroundColor White} 
+
+                    #if the break is in the middle of a string
+                    if ((Get-CharCountInString $lines[$l].Substring(0,$i) '"')%2 -eq 1){
+                        #if ($Debug) {write-host ("{0}" -f $lines[$l].Substring(0,$i)) -ForegroundColor Blue -BackgroundColor White} 
+                        if ($Debug) {write-host "This breaks a string. adjusting start index"}
+
+                        #since a break in a string would add a close quote and a plus, let's find out if that would make it too big
+                        if ($i + 2 -ge 120) {
+                            if ($Debug) {write-host "Adding the break here would make the string too long, trying again"}
+                            continue
+                        } else {
+                            $BreakInString = $true
+                        }
+
+                        #$IndexOfOddQuote = $lines[$l].Substring(0,$StartInd).LastIndexOf('"')
+                        #$StringSection = $lines[$l].Substring($IndexOfOddQuote+1, $StartInd-$IndexOfOddQuote-1)
+
+                        #if ($StringSection -match $LineBreakPattern) {
+                        #    #$StartInd-=2
+                        #    $BreakInString = $true
+                        #} else {
+                        #    $StartInd = $IndexOfOddQuote
+                        #}
+                    }
                     
                     #set the recursive padding for any sub-lines (which may not be applied if a comment string)
                     if ($Level -eq 0) {
+
+                        if ($Debug) {write-host "Adding 4 padding"}
                         $paddingplus = 4
                     }
 
-                    #if this is a comment line make sure sub-lines have /// as well
+                    #if this is a comment line that can be broken up make sure sub-lines have /// as well
                     if ($lines[$l] -match "^\s*///") {
-                        $ToInsert = "`r`n{0}/// " -f (" "*$padding)
-                    } else {
-
-                        #handle breaking strings with a "" + ""
-                        if ($BreakInString -eq $true) {
-                            $ToInsert = "`"+`r`n{0}`"" -f (" "*($padding+$paddingplus))
+                        if ($lines[$l].Substring(0,($i+1)) -notmatch "^\s*///\s*$") {
+                            if ($Debug) {write-host "This line appears to be a /// comment, adding to next line"}
+                            #the second match is to make sure we're not just left with /// at the beginning, which would cause
+                            #an infinite call stack
+                            $ToInsert = "`r`n{0}/// " -f (" "*$padding)
                         } else {
-                            $ToInsert = "`r`n{0}" -f (" "*($padding+$paddingplus))
+                            if ($Debug) {write-host "This line is a /// comment, but cannot be broken up"}
+                            break
+                        }
+                    } else {
+                        if ($lines[$l].Substring(0,($i+1)) -notmatch "^\s*$") { 
+                            #handle breaking strings with a "" + ""
+                            if ($BreakInString -eq $true) {
+                                $ToInsert = "`"+`r`n{0}`"" -f (" "*($padding+$paddingplus))
+                                if ($Debug) {write-host "Creating a + and line break for the string"}
+                            } else {
+                                $ToInsert = "`r`n{0}" -f (" "*($padding+$paddingplus))
+                                if ($Debug) {write-host "Creating a line break for the string"}
+                            }
+                        } else {
+                            if ($Debug) {write-host "This split would create an empty string and therefore cannot be broken up"}
+                            break
                         }
                     }
 
                     #insert the break string at the breakpoint
+                    if ($Debug) {write-host "Adding the linebreak in the string  at index $i"}
                     $lines[$l] = $lines[$l].Insert(($i+1), $ToInsert)
 
-                    $lines[$l] = Wrap-Text $lines[$l] -Level ($Level+1) -Padding $padding -PrependText $PrependText
+                    $lines[$l] = Wrap-Text $lines[$l] -Level ($Level+1) -Padding $padding -PrependText $PrependText -Debug $Debug
                     
-                    break;
+                    break
                 }
             }
         }
@@ -276,93 +316,6 @@ function Write-CSPReferenceTexts($Api, $LibraryIndex) {
     $ReferencesTexts = ($ReferencesTexts | Sort) -join "`r`n"
 
     return $ReferencesTexts
-}
-
-function Write-CSP ($Api) {
-    $CSPTopText = @'
-<?xml version="1.0" encoding="utf-8"?>
-<Project ToolsVersion="12.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
-  <PropertyGroup>
-    <MinimumVisualStudioVersion>10.0</MinimumVisualStudioVersion>
-    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
-    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
-    <OutputType>Library</OutputType>
-    <AppDesignerFolder>Properties</AppDesignerFolder>
-    <RootNamespace>gShellGmail</RootNamespace>
-    <AssemblyName>gShellGmail</AssemblyName>
-    <TargetFrameworkVersion>v4.5.1</TargetFrameworkVersion>
-    <FileAlignment>512</FileAlignment>
-    <ProjectTypeGuids>{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}</ProjectTypeGuids>
-    <TargetFrameworkProfile />
-    <ProjectGuid>{C614766D-365E-4B93-9E9B-DA62A20E655D}</ProjectGuid>
-  </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
-    <DebugSymbols>true</DebugSymbols>
-    <DebugType>full</DebugType>
-    <Optimize>false</Optimize>
-    <OutputPath>bin\Debug\</OutputPath>
-    <DefineConstants>DEBUG;TRACE</DefineConstants>
-    <ErrorReport>prompt</ErrorReport>
-    <WarningLevel>4</WarningLevel>
-  </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
-    <DebugType>pdbonly</DebugType>
-    <Optimize>true</Optimize>
-    <OutputPath>bin\Release\</OutputPath>
-    <DefineConstants>TRACE</DefineConstants>
-    <ErrorReport>prompt</ErrorReport>
-    <WarningLevel>4</WarningLevel>
-  </PropertyGroup>
-  <ItemGroup>
-'@
-
-    $GShellReferenceText = @"
-    <Reference Include="gShell, Version=0.10.4.0">
-      <HintPath>..\gShell\bin\Debug\gShell.dll</HintPath>
-    </Reference>
-"@
-
-    $CSPBottomText = @'
-    <Reference Include="System" />
-    <Reference Include="System.Core" />
-    <Reference Include="System.Management.Automation, Version=3.0.0.0">
-      <HintPath>packages\System.Management.Automation.dll.10.0.10586.0\lib\net40\System.Management.Automation.dll</HintPath>
-      <Private>True</Private>
-    </Reference>
-    <Reference Include="System.Net.Http" />
-    <Reference Include="System.Xml.Linq" />
-    <Reference Include="System.Data.DataSetExtensions" />
-    <Reference Include="Microsoft.CSharp" />
-    <Reference Include="System.Data" />
-    <Reference Include="System.Xml" />
-  </ItemGroup>
-  <ItemGroup>
-    <Compile Include="DotNetCmdlets.cs" />
-    <Compile Include="DotNetServiceWrapper.cs" />
-    <Compile Include="GmailStandardQueryParameters.cs" />
-    <Compile Include="GmailStandardQueryParametersBase.cs" />
-    <Compile Include="MethodCmdlets.cs" />
-    <Compile Include="ObjectCmdlets.cs" />
-    <Compile Include="Properties\AssemblyInfo.cs" />
-  </ItemGroup>
-  <ItemGroup>
-    <None Include="packages.config" />
-  </ItemGroup>
-  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
-  <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
-       Other similar extension points exist, see Microsoft.Common.targets.
-  <Target Name="BeforeBuild">
-  </Target>
-  <Target Name="AfterBuild">
-  </Target>
-  -->
-</Project>
-'@
-    
-    $ReferencesTexts = New-Object System.Collections.ArrayList
-
-    
 }
 
 #endregion
@@ -974,8 +927,8 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Management.Automation;
 
-using Google.Apis.Gmail.v1;
-using Data = Google.Apis.Gmail.v1.Data;
+using Google.Apis.$ApiNameAndVersion;
+using Data = Google.Apis.$ApiNameAndVersion.Data;
 
 using gShell.$ApiNameAndVersion.DotNet;
 
@@ -1260,6 +1213,7 @@ function Write-DNC ($Api, $Level=0) {
     $text = @"
 $GeneralFileHeader
 using System;
+using $ApiRootNamespace;
 using Data = $ApiRootNamespace.Data;
 
 namespace gShell.$ApiNameAndVersion.DotNet
@@ -1805,22 +1759,37 @@ $ResourceClasses
 #endregion
 
 
-function Create-TemplatesFromDll ($LibraryIndex, $RestJson, $ApiName, $ApiFileVersion, $OutPath) {
+function Create-TemplatesFromDll ($LibraryIndex, $RestJson, $ApiName, $ApiFileVersion, $OutPath, [bool]$Log=$false) {
+    Log "Loading .dll library in to Api template object" $Log
     $Api = Invoke-GShellReflection -RestJson $RestJson -ApiName $ApiName -ApiFileVersion $ApiFileVersion -LibraryIndex $LibraryIndex
 
     if (-not (Test-Path $OutPath)) {
         New-Item -Path $OutPath -ItemType "Directory" | Out-Null
     }
 
+    Log "Building and writing Dot Net Cmdlets" $Log
     Write-DNC $Api | Out-File ([System.IO.Path]::Combine($OutPath, "DotNetCmdlets.cs")) -Force
+    
+    Log "Building and writing Dot Net Service Wrapper" $Log
     Write-DNSW $Api | Out-File ([System.IO.Path]::Combine($OutPath, "DotNetServiceWrapper.cs")) -Force
+    
+    Log "Building and writing Method Cmdlets" $Log
     Write-MC $Api | Out-File ([System.IO.Path]::Combine($OutPath, "MethodCmdlets.cs")) -Force
+    
+    Log "Building and writing Object Cmdlets" $Log
     Write-OC $Api | Out-File ([System.IO.Path]::Combine($OutPath, "ObjectCmdlets.cs")) -Force
 
     $SQP = Write-SQP $Api
-    if ($SQP -ne $null) {$SQP | Out-File ([System.IO.Path]::Combine($OutPath, "StandardQueryParameters.cs")) -Force}
+    if ($SQP -ne $null) {
+        Log "Building and writing Standard Query Parameters" $Log
+        $SQP | Out-File ([System.IO.Path]::Combine($OutPath, "StandardQueryParameters.cs")) -Force
+    }
+    
     $SQPB = Write-SQPB $Api
-    if ($SQPB -ne $null) {$SQPB | Out-File ([System.IO.Path]::Combine($OutPath, "StandardQueryParametersBase.cs")) -Force}
+    if ($SQPB -ne $null) {
+        Log "Building and writing Standard Query Parameters Base" $Log
+        $SQPB | Out-File ([System.IO.Path]::Combine($OutPath, "StandardQueryParametersBase.cs")) -Force
+    }
 
     return $Api
 }

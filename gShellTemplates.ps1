@@ -1006,9 +1006,10 @@ function Write-DNC_Method ($Method, $Level=0) {
         $Method.ReturnType.Type
     }
 
-    $PropertiesObj = if ($Method.Parameters.Count -ne 0) {
-        Write-DNC_MethodSignatureParams $Method
-    }
+    #$PropertiesObj = if ($Method.Parameters.Count -ne 0) {
+    #    Write-DNC_MethodSignatureParams $Method
+    #}
+    $PropertiesObj = Write-DNC_MethodSignatureParams $Method
        
     $sections = New-Object System.Collections.ArrayList
 
@@ -1511,9 +1512,11 @@ function Write-DNSW_Method ($Method, $Level=0) {
         $Method.ReturnType.Type
     }
 
-    $PropertiesObj = if ($Method.Parameters.Count -ne 0) {
-        Write-DNSW_MethodSignatureParams $Method -RequiredOnly $true -IncludeGshellParams $true -IncludePropertiesObject $true
-    }
+    #$PropertiesObj = if ($Method.Parameters.Count -ne 0) {
+    #    Write-DNSW_MethodSignatureParams $Method -RequiredOnly $true -IncludeGshellParams $true -IncludePropertiesObject $true
+    #}
+
+    $PropertiesObj = Write-DNSW_MethodSignatureParams $Method -RequiredOnly $true -IncludeGshellParams $true -IncludePropertiesObject $true
        
     $sections = New-Object System.Collections.ArrayList
 

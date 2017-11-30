@@ -60,5 +60,5 @@ function Invoke-GshellGeneratorMain {
     }
 }
 
-Invoke-GshellGeneratorMain -ApiFilter "genomics.v1alpha2" -ShouldBuildApis -ForceBuildApis -Log $Log
+Invoke-GshellGeneratorMain -ApiFilter "G*" -ShouldBuildApis -ForceBuildApis -Log $Log
 

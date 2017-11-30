@@ -643,6 +643,7 @@ $VerbsDict = @{
     "Use"= "VerbsOther.Use"
 }
 
+#TODO: Consolidate these two functions
 function Get-McVerb ($VerbInput) {
     if ($VerbsDict.ContainsKey($VerbInput)) {
         $FullVerb = $VerbsDict[($VerbInput)]
@@ -661,9 +662,8 @@ function Get-MCAttributeVerb ($VerbInput) {
 }
 
 #TODO - fix in to using list?
-function Write-MCAttribute ($Method) {
+function Write-MCAttribute ($Method,  $Noun) {
     $Verb = Get-MCAttributeVerb $Method.Name
-    $Noun = $Method.Resource.Api.Name
     $DocLink = $Method.Resource.Api.DiscoveryObj.documentationLink
     $DefaultParameterSetName = if ($Method.HasBodyParameter -eq $true) {
         " DefaultParameterSetName = `"WithBodyObject`","
@@ -829,19 +829,20 @@ function Write-MCMethodPropertiesObject ($Method, $Level=0) {
 }
 
 function Write-MCMethod ($Method, $Level=0) {
-    $ResourceParent = Get-ParentResourceChain -MethodOrResource $Method -UpperCase $false
-    $ResourceParentLower = Get-ParentResourceChain -MethodOrResource $Method -UpperCase $false
+    $ParentResourceChainNoJoin = Get-ParentResourceChain -MethodOrResource $Method -JoinChar ""
+    $ParentResourceChainLower = Get-ParentResourceChain -MethodOrResource $Method -UpperCase $false
     $ResourceName = $Method.Resource.Name
     
     $Verb = Get-McVerb $Method.Name
-    $Noun = "G" + $Method.Resource.Api.Name + $ResourceName
+    #$NounResourceParent = if (-not [string]::IsNullOrWhiteSpace($ResourceParent)) {$ResourceParent}
+    $Noun = "G" + $Method.Resource.Api.Name + $ParentResourceChainNoJoin
     $CmdletCommand = "{0}{1}Command" -f $Verb,$Noun
     $CmdletBase = $Method.Resource.Api.Name + "Base"
     
     $MethodName = $Method.Name
-    $MethodChainLower = $ResourceParentLower, $MethodName -join "."
+    $MethodChainLower = $ParentResourceChainLower, $MethodName -join "."
     
-    $CmdletAttribute = Write-MCAttribute $Method
+    $CmdletAttribute = Write-MCAttribute -Method $Method -Noun $Noun
     $Properties = Write-MCProperties $Method ($Level+1)
     $MethodCallParams = Write-MCMethodCallParams $Method
     
@@ -879,17 +880,21 @@ $Properties
 function Write-MCResource ($Resource) {
 
     $MethodTexts = New-Object System.Collections.ArrayList
-    $ApiName = $Resource.Api.Name
+    $ParentResourceChain = Get-ParentResourceChain -MethodOrResource $Resource
+    if (-not [string]::IsNullOrWhiteSpace($ParentResourceChain)) {
+        $ParentResourceChain += "."
+    }
+    $NameSpace = "gShell.Cmdlets." + $Resource.Api.Name + "." + $ParentResourceChain + $Resource.Name
 
     foreach ($Method in $Resource.Methods) {
-        $MText = Write-MCMethod $Method -Level 0
+        $MText = Write-MCMethod $Method -Level 1
         Add-String $MethodTexts $MText
     }
 
     $MethodBlock = $MethodTexts -join "`r`n`r`n"
 
     $text = @"
-namespace gShell.Cmdlets.$ApiName {
+namespace $NameSpace {
 $MethodBlock
 }
 "@

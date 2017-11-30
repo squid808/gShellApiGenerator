@@ -51,7 +51,7 @@ function Wrap-Text ($Text, $Level=0, $Padding=0, $PrependText=$null, [bool]$Debu
     $OriginalPadding = $padding 
 
     $lines = $Text -split "`r`n"
-    if ($Debug) {write-host ("Calling Wrap-Text at level $Level, splitting in to {0} lines." -f $Lines.count) -ForegroundColor White -BackgroundColor Black}
+    if ($Debug) {write-host ("Calling Wrap-Text at level = $Level, Padding = $Padding, splitting in to {0} lines." -f $Lines.count) -ForegroundColor White -BackgroundColor Black}
 
     for ($l = 0; $l -lt $lines.Count; $l++){
         if ($Debug) {write-host ("Working on line:`r`n{0}" -f $lines[$l]) -ForegroundColor Cyan}
@@ -63,9 +63,13 @@ function Wrap-Text ($Text, $Level=0, $Padding=0, $PrependText=$null, [bool]$Debu
         }
 
         #if padding is not in the line after whitespace, make sure it's applied - mostly for multiline comments
-        if ($level -eq 0 -and $OriginalPadding -ne 0) {
-            if ($Debug) {write-host "Adding in original padding"}
-            $lines[$l] = $lines[$l].Insert(0,(" "*$OriginalPadding))
+        if ($level -eq 0) {
+            if ($OriginalPadding -ne 0) {
+                if ($Debug) {write-host "Adding in original padding"}
+                $lines[$l] = $lines[$l].Insert(0,(" "*$OriginalPadding))
+            } else {
+                $Padding = 0
+            }
         }
 
         if ($lines[$l].Length -gt 120) {
@@ -96,6 +100,7 @@ function Wrap-Text ($Text, $Level=0, $Padding=0, $PrependText=$null, [bool]$Debu
 
                     #if the break is in the middle of a string
                     if ((Get-CharCountInString $lines[$l].Substring(0,$i) '"')%2 -eq 1){
+
                         #if ($Debug) {write-host ("{0}" -f $lines[$l].Substring(0,$i)) -ForegroundColor Blue -BackgroundColor White} 
                         if ($Debug) {write-host "This breaks a string. adjusting start index"}
 
@@ -106,16 +111,6 @@ function Wrap-Text ($Text, $Level=0, $Padding=0, $PrependText=$null, [bool]$Debu
                         } else {
                             $BreakInString = $true
                         }
-
-                        #$IndexOfOddQuote = $lines[$l].Substring(0,$StartInd).LastIndexOf('"')
-                        #$StringSection = $lines[$l].Substring($IndexOfOddQuote+1, $StartInd-$IndexOfOddQuote-1)
-
-                        #if ($StringSection -match $LineBreakPattern) {
-                        #    #$StartInd-=2
-                        #    $BreakInString = $true
-                        #} else {
-                        #    $StartInd = $IndexOfOddQuote
-                        #}
                     }
                     
                     #set the recursive padding for any sub-lines (which may not be applied if a comment string)
@@ -164,6 +159,7 @@ function Wrap-Text ($Text, $Level=0, $Padding=0, $PrependText=$null, [bool]$Debu
         }
     }
 
+    if ($Debug -and $Level -gt 0) {write-host ("Returning to level " + ($Level -1)) -ForegroundColor White -BackgroundColor Black}
     return $lines -join "`r`n"
 }
 
@@ -320,7 +316,7 @@ function Write-CSPReferenceTexts($Api, $LibraryIndex) {
 
 #endregion
 
-#region SQP, SQPB - Standard Query Parameters Base
+#region SQP, SQPB (Standard Query Parameters & Base)
 
 function Write-SQP ($Api) {
     $ApiName = $Api.Name
@@ -407,7 +403,7 @@ $ParamAttribute
 
 #endregion
 
-#region OC - (Object Cmdlets)
+#region OC (Object Cmdlets)
 
 function Write-OCMethodProperties ($SchemaObj, $Level=0) {
     
@@ -415,7 +411,7 @@ function Write-OCMethodProperties ($SchemaObj, $Level=0) {
 
     $PropertiesTexts = New-Object System.Collections.ArrayList
     
-    foreach ($Property in ($SchemaObj.Properties | where Name -ne "ETag")) {
+    foreach ($Property in ($SchemaObj.Properties | where {$_.Name -ne "ETag" -and $_.ShouldIncludeInTemplates -eq $true})) {
         $CommentDescription = Format-CommentString $Property.Description
         $HelpDescription = Format-HelpMessage $Property.Description
         $Type = $Property.Type
@@ -704,7 +700,7 @@ function Write-MCProperties ($Method, $Level=0) {
 
     #build, indent and wrap the pieces separately to allow for proper wrapping of comments and long strings
     foreach ($Property in ($Method.Parameters | where { ` #$_.Required -eq $true -and `
-            $_.Name -ne "Body"})) {
+            $_.Name -ne "Body" -and $_.ShouldIncludeInTemplates -eq $true})) {
 
         $summary = Wrap-Text (Set-Indent ("{{%T}}/// <summary> {0} </summary>" -f (Format-CommentString $Property.Description)) $Level)
 
@@ -809,8 +805,8 @@ function Write-MCMethodPropertiesObject ($Method, $Level=0) {
         $PropertiesObjectParameters = New-Object System.Collections.ArrayList
 
         foreach ($P in $Method.Parameters) {
-            if ($P.Required -eq $False) {
-                Add-String $PropertiesObjectParameters ("{{%T}}        {0} = this.{0}" -f $P.Name)
+            if ($P.Required -eq $False -and $P.ShouldIncludeInTemplates -eq $true) {
+                Add-String $PropertiesObjectParameters ("    {0} = this.{0}" -f $P.Name)
             }
         }
 
@@ -952,15 +948,14 @@ $Resources
 
 #endregion
 
-
-#region gShell.Cmdlets.[API] - wrapped method calls (DNC - Dot Net Cmdlets)
+#region DNC (Dot Net Cmdlets -gShell.Cmdlets.[API] - wrapped method calls)
 
 #The method signature parameters 
 function Write-DNC_MethodSignatureParams ($Method, $Level=0, [bool]$NameOnly=$false) {
     $Params = New-Object System.Collections.ArrayList
 
     foreach ($P in $Method.Parameters){
-        if ($P.Required -eq $true){
+        if ($P.Required -eq $true -and $P.ShouldIncludeInTemplates -eq $true){
             if ($NameOnly -ne $true) {
                 Add-String $Params ("{0} {1}" -f $P.Type, $P.Name)
             } else {
@@ -969,7 +964,7 @@ function Write-DNC_MethodSignatureParams ($Method, $Level=0, [bool]$NameOnly=$fa
         }
     }
 
-    if  ($Method.Parameters.Required -contains $False) {
+    if ($Method.Parameters.Required -contains $False) {
         $PropertiesObjVarName = "{0}{1}Properties" -f $Method.Resource.NameLower, $Method.Name
         
         if ($NameOnly) {
@@ -1273,8 +1268,7 @@ $ResourceWrappedMethods
 
 #endregion
 
-
-#region gShell.dotNet - defining classes (DNSW - Dot Net Service Wrapper)
+#region DNSW (Dot Net Service Wrapper - gShell.dotNet defining classes )
 
 #write the resources as properties for the container class
 function Write-DNSW_ResourcesAsProperties ($Resources, $Level=0) {
@@ -1362,6 +1356,7 @@ function Write-DNSW_PagedResultBlock ($Method, $Level=0) {
     return $text
 }
 
+#TODO - Rename this to be more accurate to just params?
 #The method signature parameters 
 function Write-DNSW_MethodSignatureParams ($Method, $Level=0, [bool]$RequiredOnly=$false,
     [bool]$IncludeGshellParams=$false, [bool]$NameOnly=$false) {
@@ -1414,7 +1409,7 @@ function Write-DNSW_MethodPropertyObj ($Method, $Level=0) {
     
         $Params = New-Object System.Collections.Arraylist
 
-        foreach ($P in ($Method.Parameters | where Required -eq $False)){
+        foreach ($P in ($Method.Parameters | where {$_.Required -eq $False -and $_.ShouldIncludeInTemplates -eq $true})){
 
             if ($P.DiscoveryObj -ne $null -and $P.DiscoveryObj.type -eq "integer" `
                 -and $P.DiscoveryObj.maximum -ne $null) {
@@ -1467,7 +1462,7 @@ function Write-DNSW_MethodPropertyObjAssignment ($Method, $Level=0) {
         $Params = New-Object System.Collections.ArrayList
 
         foreach ($P in ($Method.Parameters | where Required -eq $False)){
-            if ($P.Type -ne $null) {
+            if ($P.ShouldIncludeInTemplates -eq $true) {
                 Add-String $Params ("{{%T}}        request.{0} = {1}.{0};" -f $P.Name, $PropertiesObjVarName)
             }
         }

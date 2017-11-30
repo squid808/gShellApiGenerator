@@ -252,6 +252,9 @@ Remarks - The api method call is broken up in to two parts in the underlying cod
 
     #This method's discovery API representation
     $DiscoveryObj
+
+    #This method supports media download, evidenced by presence of MediaDownloader property on method reflected object return type properties and json
+    [bool]$SupportsMediaDownload
 }
 
 function New-ApiMethod ([ApiResource]$Resource, $Method) {
@@ -342,6 +345,8 @@ class ApiMethodProperty {
 
     #If applicable, the schema ApiClass representing this object
     $SchemaObject
+
+    [bool]$ShouldIncludeInTemplates = $true
 }
 
 function Get-ApiPropertyTypeShortName($Name, $Api) {
@@ -474,6 +479,14 @@ function New-ApiMethodProperty {
     $P.ReflectedObj = $Property
     $P.DiscoveryObj = $Method.DiscoveryObj.parameters.($Property.Name)
     $P.Type = Get-ApiPropertyType -Property $P
+    
+    if ($P.Type -like "*Download.IMediaDownloader"){
+        $P.Method.SupportsMediaDownload = $true
+        $P.ShouldIncludeInTemplates = $false
+    } elseif ($P.Type -eq $Null) {
+        $P.ShouldIncludeInTemplates = $false
+    }
+
     $P.Description = Clean-CommentString $P.DiscoveryObj.Description
     $P.Required = if ($ForceRequired -eq $true) {$true} else {[bool]($P.DiscoveryObj.required)}
     #TODO - is force required really needed?

@@ -180,6 +180,8 @@ function CheckAndBuildGshell ($RootProjPath, $LibraryIndex, [bool]$Log = $false,
 
     $Dependencies["System.Management.Automation.dll"] = "10.0.10586"
 
+    #StartHere - We need to add in the dependencies for gshell - oauth mainly, since we can get rid of discovery (as scope manager no longer needs to reference it)
+
     #We're tying gShell to the version of the Auth package since it and its dependencies all appear to match. If they change this we may need to reevaluate
     $AuthVersion = $Dependencies["Google.Apis.Auth"]
     $AuthVersionObj = [System.Version]$AuthVersion

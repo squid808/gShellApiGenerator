@@ -46,6 +46,12 @@ function Has-ObjProperty {
 #endregion
 
 #region Classes
+class ApiScope {
+    [string]$Name
+    [string]$Description
+    [string]$Uri
+}
+
 class Api {
     $Name
     $NameLower
@@ -66,6 +72,7 @@ class Api {
     $SchemaObjects = (New-Object System.Collections.ArrayList)
     $SchemaObjectsDict = @{}
     $CmdletBaseType
+    $Scopes = (New-Object System.Collections.ArrayList)
 }
 
 function New-Api ([System.Reflection.Assembly]$Assembly, $RestJson) {
@@ -87,6 +94,21 @@ function New-Api ([System.Reflection.Assembly]$Assembly, $RestJson) {
     $api.Resources | % {$api.ResourcesDict[$_.name] = $_}
 
     $api.HasStandardQueryParams = Has-ObjProperty $api.DiscoveryObj "parameters"
+
+    $Scopes = $api.ReflectedObj.ExportedTypes | where Name -eq Scope
+
+    #set the scopes
+    if  ($Scopes -ne $null) {
+        foreach ($D in ($Scopes | select -ExpandProperty DeclaredFields)){
+            $S = new-object ApiScope
+            $S.Name = $D.Name
+            $S.Uri = $D.GetValue($D)
+            $S.Description = $Api.DiscoveryObj.auth.oauth2.scopes.($S.Uri).description
+            $Api.Scopes.Add($S) | Out-Null
+        }
+    } else {
+        throw "No scopes found in the assembly, cannot proceed."
+    }
     
     #TODO - throw error if more than one result?
     foreach ($Param in ($Api.ReflectedObj.ExportedTypes | where {$_.Name -like "*BaseServiceRequest?1" `

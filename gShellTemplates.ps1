@@ -316,6 +316,8 @@ function Write-CSPReferenceTexts($Api, $LibraryIndex) {
 
 #endregion
 
+
+
 #region SQP, SQPB (Standard Query Parameters & Base)
 
 function Write-SQP ($Api) {
@@ -831,7 +833,7 @@ function Write-MCMethod ($Method, $Level=0) {
     
     $Verb = Get-McVerb $Method.Name
     #$NounResourceParent = if (-not [string]::IsNullOrWhiteSpace($ResourceParent)) {$ResourceParent}
-    $Noun = "G" + $Method.Resource.Api.Name + $ParentResourceChainNoJoin
+    $Noun = "G" + $Method.Api.Name + (ConvertTo-FirstUpper $Method.Api.Version) + $ParentResourceChainNoJoin
     $CmdletCommand = "{0}{1}Command" -f $Verb,$Noun
     $CmdletBase = $Method.Resource.Api.Name + "Base"
     
@@ -1715,6 +1717,25 @@ function Write-DNSW ($Resource, $Level=0) {
     } else {
         $WorksWithGmail = "false"
     }
+
+    $Scopes = New-Object System.Collections.Arraylist
+
+    foreach ($Scope in $Api.Scopes) {
+        $ScopeString = '            new ScopeInfo("{0}", "{1}", "{2}")' -f $Scope.Name, $Scope.Description, $Scope.Uri
+        Add-String -Collection $Scopes -String $ScopeString
+    }
+
+    $ScopesString = $Scopes -join ",`r`n"
+
+    if ($Scopes.Count -gt 0){ 
+        $ScopesBlock = @"
+        private ScopeInfo[] _scopeInfos = new ScopeInfo[]{
+$ScopesString
+        };
+"@
+    } else {
+        $ScopesBlock = "        private ScopeInfo[] _scopeInfos = new ScopeInfo[0];"
+    }
     
     $dotNetBlock = @"
 $GeneralFileHeader
@@ -1744,6 +1765,11 @@ namespace gShell.$ApiNameAndVersion.DotNet
 
         /// <summary>Returns the api name and version in {name}:{version} format.</summary>
         public override string apiNameAndVersion { get { return "$ApiNameAndVersionWithColon"; } }
+
+        /// <summary>A hard-coded list of scopes for this API to present to the user when authenticating.</summary>
+        public override ScopeInfo[] scopeInfos { get {return _scopeInfos; } }
+
+$ScopesBlock
 
         #region Properties and Constructor
 
@@ -1779,6 +1805,9 @@ function Create-TemplatesFromDll ($LibraryIndex, $RestJson, $ApiName, $ApiFileVe
         New-Item -Path $OutPath -ItemType "Directory" | Out-Null
     }
 
+    Log "Building and writing Settings Cmdlets" $Log
+    Write-ApiSettingsCmdlets $Api | Out-File ([System.IO.Path]::Combine($OutPath, "SettingsCmdlets.cs")) -Force
+
     Log "Building and writing Dot Net Cmdlets" $Log
     Write-DNC $Api | Out-File ([System.IO.Path]::Combine($OutPath, "DotNetCmdlets.cs")) -Force
     
@@ -1800,4 +1829,46 @@ function Create-TemplatesFromDll ($LibraryIndex, $RestJson, $ApiName, $ApiFileVe
     }
 
     return $Api
+}
+
+#START HERE - write templates for scope manager and settings cmdlets for each API
+
+function Write-ApiSettingsCmdlets ($Api) {
+
+    $ApiNameAndVersion = $Api.NameAndVersion
+    $Noun = "G" + $Api.Name + (ConvertTo-FirstUpper $Api.Version) + "Scopes"
+    $NounCommand = $Noun + "Command"
+    $ApiName = $Api.Name
+    $ApiVersion = $Api.Version
+
+$SettingsText = @"
+using System;
+using System.Management.Automation;
+using gShell.Main.Auth.OAuth2.v1;
+
+namespace gShell.$ApiNameAndVersion
+{
+    [Cmdlet(VerbsCommon.Set, "$Noun",
+        SupportsShouldProcess = true)]
+    public class Set$NounCommand : ScopeHandlerBase
+    {
+        protected override void ProcessRecord()
+        {
+            var secrets = CheckForClientSecrets();
+            if (secrets != null)
+            {
+                ChooseScopesAndAuthenticate("$ApiName", "$ApiVersion", secrets);
+            }
+            else
+            {
+                throw new Exception(
+                    "Client Secrets for $ApiNameAndVersion must be set before running cmdlets. Run 'Get-Help "
+                    + "Set-$Noun' for more information.");
+            }
+        }
+    }
+}
+"@
+
+    return $SettingsText
 }

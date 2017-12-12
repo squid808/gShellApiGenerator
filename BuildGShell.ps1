@@ -170,9 +170,14 @@ function CheckAndBuildGshell ($RootProjPath, $LibraryIndex, [bool]$Log = $false,
 
     $Dependencies = @{}
 
-    $LatestGoogleAuthVersion = $LibraryIndex.GetLibVersionLatestName("Google.Apis.Auth")
+    $GAuth = "Google.Apis.Auth"
+    $GOAuth = "Google.Apis.Oauth2.v2"
 
-    foreach ($D in $LibraryIndex.GetLibVersionDependencyChain("Google.Apis.Auth",$LatestGoogleAuthVersion).GetEnumerator()) {
+    $LatestGoogleOAuthVersion = $LibraryIndex.GetLibVersionLatestName($GOAuth)
+    $OauthDependencyChain = $LibraryIndex.GetLibVersionDependencyChain($GOAuth,$LatestGoogleOAuthVersion)
+    $LatestGoogleAuthVersion = $OauthDependencyChain[$GAuth]
+
+    foreach ($D in $OauthDependencyChain.GetEnumerator()) {
         if ($D.Name -ne "System.Net.Http") {
             $Dependencies[$D.Name] = $D.Value
         }
@@ -183,7 +188,7 @@ function CheckAndBuildGshell ($RootProjPath, $LibraryIndex, [bool]$Log = $false,
     #StartHere - We need to add in the dependencies for gshell - oauth mainly, since we can get rid of discovery (as scope manager no longer needs to reference it)
 
     #We're tying gShell to the version of the Auth package since it and its dependencies all appear to match. If they change this we may need to reevaluate
-    $AuthVersion = $Dependencies["Google.Apis.Auth"]
+    $AuthVersion = $Dependencies[$GAuth]
     $AuthVersionObj = [System.Version]$AuthVersion
 
     $gShellMain = "gShell.Main"
@@ -210,7 +215,7 @@ function CheckAndBuildGshell ($RootProjPath, $LibraryIndex, [bool]$Log = $false,
             Copy-Item -Path $CompiledPath -Destination $NewGShellPath | Out-Null
 
             #update the library
-            $LibraryIndex.SetLibLastVersionBuilt("Google.Apis.Auth", $AuthVersion)
+            $LibraryIndex.SetLibLastVersionBuilt($GAuth, $AuthVersion)
             SaveCompiledToLibraryIndex -ApiName "gShell.Main" -Version $gShellNewVersion -DllLocation $NewGShellPath `
                 -LibraryIndex $LibraryIndex -Dependencies $Dependencies -Log $Log
             

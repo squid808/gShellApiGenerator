@@ -365,11 +365,12 @@ function Test-LibraryIndexLibVersionDependency {
         [string]$DependencyName, [string]$DependencyVersions)
 
     if ((Test-LibraryIndexLibVersion $LibraryIndex $LibName $Version)){
-        return ((Get-LibraryIndexLibVersion $LibraryIndex $LibName $Version).Dependencies `
-            | where {$_.Name -eq $DependencyName -and $_.Version -eq $DependencyVersions} `
+        return (((Get-LibraryIndexLibVersion $LibraryIndex $LibName $Version).Dependencies `
+            | where {$_.Name -eq $DependencyName -and $_.Versions -eq $DependencyVersions}) `
             -ne $null)
     }
 
+    return $false
 }
 
 #GetLibVersionDependencies(LibName, Version)

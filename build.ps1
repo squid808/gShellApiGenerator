@@ -243,7 +243,10 @@ function SaveCompiledToLibraryIndex ($ApiName, $Version, $DllLocation, $LibraryI
         Log ("$ApiName doesn't have an entry for version $Version - adding with dependencies") $Log
         $LibraryIndex.AddLibVersion($ApiName, $Version)
 
-        foreach ($Dependency in $Dependencies.GetEnumerator()) {
+    }
+
+    foreach ($Dependency in $Dependencies.GetEnumerator()) {
+        if (-not $LibraryIndex.HasLibVersionDependency($ApiName, $Version, $Dependency.Name, $Dependency.Value)) {
             $LibraryIndex.AddLibVersionDependency($ApiName, $Version, $Dependency.Name, $Dependency.Value)
         }
     }

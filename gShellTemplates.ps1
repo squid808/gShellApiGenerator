@@ -668,7 +668,7 @@ function Write-MCAttribute ($Method,  $Noun) {
     }
 
     $text = @"
-[Cmdlet($Verb, "G$Noun",$DefaultParameterSetName SupportsShouldProcess = true, HelpUri = @"$DocLink")]
+[Cmdlet($Verb, "$Noun",$DefaultParameterSetName SupportsShouldProcess = true, HelpUri = @"$DocLink")]
 "@
 
     return $text
@@ -1695,7 +1695,7 @@ function Write-DNSW_Resources ($Resources, $Level=0) {
 }
 
 #write the entire DNSW resource file content
-function Write-DNSW ($Resource, $Level=0) {
+function Write-DNSW ($Api, $Level=0) {
     $ApiRootNamespace = $Api.RootNamespace
     $ApiName = $Api.Name #ConvertTo-FirstUpper ($Api.DiscoveryObj.canonicalName -replace " ","")
     $ApiNameService = $ApiName + "Service"
@@ -1711,7 +1711,7 @@ function Write-DNSW ($Resource, $Level=0) {
     $ResourceInstantiatons = Write-DNSW_ResourceInstantiations $Api.Resources -Level 3
     $ResourceClasses = Write-DNSW_Resources $Api.Resources -Level 2
     
-    if ($Resource.Api.CanUseServiceAccount -eq $true)  {
+    if ($Api.CanUseServiceAccount -eq $true)  {
         $CreateServiceServiceAccount = ", serviceAccountUser"
         $WorksWithGmail = "true"
     } else {
@@ -1765,11 +1765,6 @@ namespace gShell.$ApiNameAndVersion.DotNet
 
         /// <summary>Returns the api name and version in {name}:{version} format.</summary>
         public override string apiNameAndVersion { get { return "$ApiNameAndVersionWithColon"; } }
-
-        /// <summary>A hard-coded list of scopes for this API to present to the user when authenticating.</summary>
-        public override ScopeInfo[] scopeInfos { get {return _scopeInfos; } }
-
-$ScopesBlock
 
         #region Properties and Constructor
 
@@ -1841,6 +1836,21 @@ function Write-ApiSettingsCmdlets ($Api) {
     $ApiName = $Api.Name
     $ApiVersion = $Api.Version
 
+    $Scopes = New-Object System.Collections.Arraylist
+
+    foreach ($Scope in $Api.Scopes) {
+        $ScopeString = '            new ScopeInfo("{0}", "{1}", "{2}")' -f $Scope.Name, $Scope.Description, $Scope.Uri
+        Add-String -Collection $Scopes -String $ScopeString
+    }
+
+    $ScopesString = $Scopes -join ",`r`n"
+
+    if ($Scopes.Count -gt 0){ 
+        $ScopesBlock = "            ScopeInfo[] scopeInfos = new ScopeInfo[]{`r`n$ScopesString`r`n            };"
+    } else {
+        $ScopesBlock = "            ScopeInfo[] scopeInfos = new ScopeInfo[0];"
+    }
+
 $SettingsText = @"
 using System;
 using System.Management.Automation;
@@ -1854,10 +1864,12 @@ namespace gShell.$ApiNameAndVersion
     {
         protected override void ProcessRecord()
         {
+$ScopesBlock            
+
             var secrets = CheckForClientSecrets();
             if (secrets != null)
             {
-                ChooseScopesAndAuthenticate("$ApiName", "$ApiVersion", secrets);
+                ChooseScopesAndAuthenticate("$ApiName", "$ApiVersion", secrets, scopeInfos: scopeInfos);
             }
             else
             {

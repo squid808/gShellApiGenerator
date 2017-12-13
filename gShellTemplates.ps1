@@ -1198,7 +1198,7 @@ function Write-DNC ($Api, $Level=0) {
     $ApiNameBase = $ApiName + "Base"
     $ApiNameService = $ApiName + "Service"
     $ApiVersion = $Api.DiscoveryObj.version
-    $ApiVersionNoDots = $Api.NameAndVersion -replace "[.]","_"
+    $ApiNameAndVersionNoDots = $Api.NameAndVersion -replace "[.]","_"
     $ApiModuleName = $Api.RootNamespace + "." + $ApiVersionNoDots
     $ApiNameAndVersion = $Api.NameAndVersion
     $ServiceWrapperName = $Api.Name + "ServiceWrapper"
@@ -1208,19 +1208,13 @@ function Write-DNC ($Api, $Level=0) {
     $ResourceWrappedMethods = Write-DNC_Resources $Api.Resources -Level 2
 
     $baseClassType = $Api.CmdletBaseType
-    #if (-not (Has-ObjProperty $Api.DiscoveryObj "auth")){ #discovery API
-    #    "OAuth2CmdletBase"
-    #} elseif (-not ($Api.RootNamespace.StartsWith("Google.Apis.admin"))) {
-    #    "ServiceAccountCmdletBase"
-    #} elseif ((Has-ObjProperty $Api.DiscoveryObj "parameters")) {
-    #    "StandardParamsCmdletBase"
-    #} else {
-    #    "AuthenticatedCmdletBase"
-    #}
 
+    $ApiInfoName = $ApiNameAndVersionNoDots + "ApiInfo"
+    
     $text = @"
 $GeneralFileHeader
 using System;
+using gShell.Main.Auth.OAuth2.v1;
 using $ApiRootNamespace;
 using Data = $ApiRootNamespace.Data;
 
@@ -1242,6 +1236,10 @@ namespace gShell.$ApiNameAndVersion.DotNet
         /// Required to be able to store and retrieve the serviceWrapper from the ServiceWrapperDictionary
         /// </summary>
         protected override Type serviceWrapperType { get { return typeof($ServiceWrapperName); } }
+
+        protected override IApiInfo ApiInfo { get { return _ApiInfo; } }
+
+        private static readonly $ApiInfoName _ApiInfo = new $ApiInfoName();
 
 $ResourcesAsProperties
 
@@ -1711,30 +1709,15 @@ function Write-DNSW ($Api, $Level=0) {
     $ResourceInstantiatons = Write-DNSW_ResourceInstantiations $Api.Resources -Level 3
     $ResourceClasses = Write-DNSW_Resources $Api.Resources -Level 2
     
+    $ApiNameAndVersionNoDots = $Api.NameAndVersion -replace "[.]","_"
+    $ApiNameAndVersionColon = $ApiName + ":" + $ApiVersion
+    $ApiInfoClassName = $ApiNameAndVersionNoDots + "ApiInfo"
+
     if ($Api.CanUseServiceAccount -eq $true)  {
         $CreateServiceServiceAccount = ", serviceAccountUser"
         $WorksWithGmail = "true"
     } else {
         $WorksWithGmail = "false"
-    }
-
-    $Scopes = New-Object System.Collections.Arraylist
-
-    foreach ($Scope in $Api.Scopes) {
-        $ScopeString = '            new ScopeInfo("{0}", "{1}", "{2}")' -f $Scope.Name, $Scope.Description, $Scope.Uri
-        Add-String -Collection $Scopes -String $ScopeString
-    }
-
-    $ScopesString = $Scopes -join ",`r`n"
-
-    if ($Scopes.Count -gt 0){ 
-        $ScopesBlock = @"
-        private ScopeInfo[] _scopeInfos = new ScopeInfo[]{
-$ScopesString
-        };
-"@
-    } else {
-        $ScopesBlock = "        private ScopeInfo[] _scopeInfos = new ScopeInfo[0];"
     }
     
     $dotNetBlock = @"
@@ -1763,8 +1746,9 @@ namespace gShell.$ApiNameAndVersion.DotNet
             return new $ApiNameService(OAuth2Base.GetInitializer(domain, authInfo$CreateServiceServiceAccount));
         }
 
-        /// <summary>Returns the api name and version in {name}:{version} format.</summary>
-        public override string apiNameAndVersion { get { return "$ApiNameAndVersionWithColon"; } }
+        public override IApiInfo ApiInfo { get { return _ApiInfo; } }
+
+        private static readonly $ApiInfoClassName _ApiInfo = new $ApiInfoClassName();
 
         #region Properties and Constructor
 
@@ -1803,6 +1787,9 @@ function Create-TemplatesFromDll ($LibraryIndex, $RestJson, $ApiName, $ApiFileVe
     Log "Building and writing Settings Cmdlets" $Log
     Write-ApiSettingsCmdlets $Api | Out-File ([System.IO.Path]::Combine($OutPath, "SettingsCmdlets.cs")) -Force
 
+    Log "Building and writing ApiInfo file" $Log
+    Write-ApiInfoClass $Api | Out-File ([System.IO.Path]::Combine($OutPath, "ApiInfo.cs")) -Force
+
     Log "Building and writing Dot Net Cmdlets" $Log
     Write-DNC $Api | Out-File ([System.IO.Path]::Combine($OutPath, "DotNetCmdlets.cs")) -Force
     
@@ -1835,21 +1822,8 @@ function Write-ApiSettingsCmdlets ($Api) {
     $NounCommand = $Noun + "Command"
     $ApiName = $Api.Name
     $ApiVersion = $Api.Version
-
-    $Scopes = New-Object System.Collections.Arraylist
-
-    foreach ($Scope in $Api.Scopes) {
-        $ScopeString = '            new ScopeInfo("{0}", "{1}", "{2}")' -f $Scope.Name, $Scope.Description, $Scope.Uri
-        Add-String -Collection $Scopes -String $ScopeString
-    }
-
-    $ScopesString = $Scopes -join ",`r`n"
-
-    if ($Scopes.Count -gt 0){ 
-        $ScopesBlock = "            ScopeInfo[] scopeInfos = new ScopeInfo[]{`r`n$ScopesString`r`n            };"
-    } else {
-        $ScopesBlock = "            ScopeInfo[] scopeInfos = new ScopeInfo[0];"
-    }
+    $ApiNameAndVersionNoDots = $Api.NameAndVersion -replace "[.]","_"
+    $ApiInfoClassName = $ApiNameAndVersionNoDots + "ApiInfo"
 
 $SettingsText = @"
 using System;
@@ -1862,6 +1836,10 @@ namespace gShell.$ApiNameAndVersion
         SupportsShouldProcess = true)]
     public class Set$NounCommand : ScopeHandlerBase
     {
+        protected override IApiInfo ApiInfo { get { return _ApiInfo; } }
+
+        private static readonly $ApiInfoClassName _ApiInfo = new $ApiInfoClassName();
+        
         protected override void ProcessRecord()
         {
 $ScopesBlock            
@@ -1869,7 +1847,7 @@ $ScopesBlock
             var secrets = CheckForClientSecrets();
             if (secrets != null)
             {
-                ChooseScopesAndAuthenticate("$ApiName", "$ApiVersion", secrets, scopeInfos: scopeInfos);
+                ChooseScopesAndAuthenticate(this, ApiInfo.ApiName, ApiInfo.ApiVersion, secrets, scopeInfos: ApiInfo.ScopeInfos);
             }
             else
             {
@@ -1883,4 +1861,64 @@ $ScopesBlock
 "@
 
     return $SettingsText
+}
+
+function Write-ApiInfoClass ($Api) {
+
+    $ApiName = $Api.Name
+    $ApiVersion = $Api.Version
+    $ApiNameAndVersion = $Api.NameAndVersion
+    $ApiNameAndVersionNoDots = $Api.NameAndVersion -replace "[.]","_"
+    $ApiNameAndVersionColon = $ApiName + ":" + $ApiVersion
+    $ClassName = $ApiNameAndVersionNoDots + "ApiInfo"
+
+    $Scopes = New-Object System.Collections.Arraylist
+
+    foreach ($Scope in $Api.Scopes) {
+        $ScopeString = '            new ScopeInfo("{0}", "{1}", "{2}")' -f $Scope.Name, $Scope.Description, $Scope.Uri
+        Add-String -Collection $Scopes -String $ScopeString
+    }
+
+    $ScopesString = $Scopes -join ",`r`n"
+
+    $ScopesBlockStart = "        private static readonly ScopeInfo[] _ScopeInfos = new ScopeInfo"
+
+    if ($Scopes.Count -gt 0){ 
+        $ScopesBlock = "$ScopesBlockStart[]{`r`n$ScopesString`r`n        };"
+    } else {
+        $ScopesBlock = "$ScopesBlockStart[0];"
+    }
+
+    if ($Api.CanUseServiceAccount -eq $true)  {
+        $WorksWithGmail = "true"
+    } else {
+        $WorksWithGmail = "false"
+    }
+
+$ApiInfoText = @"
+using gShell.Main.Auth.OAuth2.v1;
+
+namespace gShell.$ApiNameAndVersion
+{
+    public sealed class $ClassName : IApiInfo
+    {
+        public ScopeInfo[] ScopeInfos { get { return _ScopeInfos; } }
+
+$ScopesBlock 
+
+        public string ApiName { get { return _ApiName; } }
+        private const string _ApiName = "$ApiName";
+
+        public string ApiVersion { get { return _ApiVersion; } }
+        private const string _ApiVersion = "$ApiVersion";
+
+        public string ApiNameAndVersion { get { return _ApiNameAndVersion; } }
+        private const string _ApiNameAndVersion = "$ApiNameAndVersionColon";
+
+        public bool WorksWithGmail { get { return $WorksWithGmail; } }
+    }
+}
+"@
+
+    return $ApiInfoText
 }

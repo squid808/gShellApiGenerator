@@ -291,7 +291,11 @@ function CheckAndBuildGShellApi ($ApiName, $RootProjPath, $LibraryIndex, [bool]$
         $CompiledPath = Build-ApiLibrary -LibraryIndex $LibraryIndex -ApiName $ApiName -ApiObj $Api `
               -LatestDependencyChain $LatestDependencyChain -BuildProjectPath $BuildProjectPath -LatestDllVersion $LatestDllVersion
 
-        if ($CompiledPath -ne $null) {
+        if ($CompiledPath -ne $null) {            
+
+            Log "Building Psd1 file" $Log
+            Write-ModuleManifest -Api $Api -ProjectRoot $BuildProjectPath
+
             Log ("Copying the compiled $gShellApiName.dll file to the Library Index path") $Log
 
             #copy the file to the library path

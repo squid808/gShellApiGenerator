@@ -3,7 +3,7 @@
     #$ProjectRoot = "$env:USERPROFILE\Desktop\GenOutput\gShell.gmail.v1"
     $ProjectDebugFolder = [System.IO.Path]::Combine($ProjectRoot, "bin\Debug")
 
-    $Guid = ([xml](get-content "$ProjectRoot\gShell.Gmail.v1.csproj")).Project.ChildNodes[1].ProjectGuid
+    $Guid = ([xml](get-content (gci $ProjectRoot -Filter *.csproj).FullName)).Project.ChildNodes[1].ProjectGuid
     if (((get-content "$ProjectRoot\Properties\AssemblyInfo.cs") `
             -split "`r`n" | where {$_.Contains("AssemblyDescription")}) -match '".*"')
     {

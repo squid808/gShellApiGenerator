@@ -326,10 +326,18 @@ function New-ApiMethod ([ApiResource]$Resource, $Method) {
     $M.HasPagedResults = $Method.ReturnType.DeclaredProperties.name -contains "PageToken" -and `
                             $M.ReturnType.ReflectedObject.DeclaredProperties.name -contains "NextPageToken"
 
-    #$M.HasBodyParameter = $M.Parameters.name -contains "body"
-    #if ($M.HasBodyParameter -eq $true) {
-    #    $M.BodyParameter = New-ApiClass $M.ParametersDict.Body
-    #}
+    if ($M.SupportsMediaDownload -eq $true) {
+        $P = New-Object ApiMethodProperty
+        $P.Method = $M
+        $P.Api = $M.Api
+        $P.Name = "DownloadPath"
+        $P.NameLower = "downloadPath"
+        $P.Required = $true
+        $P.Description = "The target download path of the file, including filename and extension."
+        $P.Type = "string"
+        $P.CustomProperty = $true
+        $M.Parameters.Add($P)
+    }
 
     return $M
 }
@@ -369,6 +377,8 @@ class ApiMethodProperty {
     $SchemaObject
 
     [bool]$ShouldIncludeInTemplates = $true
+
+    [bool]$CustomProperty = $false
 }
 
 function Get-ApiPropertyTypeShortName($Name, $Api) {
@@ -413,12 +423,6 @@ function Get-ApiPropertyType {
     } else {
         $RefType = $RuntimeType
     }
-
-    
-    #if ($RefType.Name -eq "XgafvEnum") {
-    #    write-host ""
-    #}
-
     
 
     #if null, return it right here and now
@@ -503,7 +507,9 @@ function New-ApiMethodProperty {
     $P.Type = Get-ApiPropertyType -Property $P
     
     if ($P.Type -like "*Download.IMediaDownloader"){
-        $P.Method.SupportsMediaDownload = $true
+        if ($Method.ReturnType.Type -eq "void") {
+            $P.Method.SupportsMediaDownload = $true
+        }
         $P.ShouldIncludeInTemplates = $false
     } elseif ($P.Type -eq $Null) {
         $P.ShouldIncludeInTemplates = $false

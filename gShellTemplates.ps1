@@ -1356,6 +1356,18 @@ function Write-DNSW_PagedResultBlock ($Method, $Level=0) {
     return $text
 }
 
+#the paged result block for a method
+function Write-DNSW_MediaDownloadResultBlock ($Level=0) {
+    $text = @"
+{%T}    using (var fileStream = new System.IO.FileStream(DownloadPath, System.IO.FileMode.Create, System.IO.FileAccess.Write))
+{%T}    {{
+{%T}        request.Download(fileStream);
+{%T}    }}
+"@
+
+    return $text
+}
+
 #TODO - Rename this to be more accurate to just params?
 #The method signature parameters 
 function Write-DNSW_MethodSignatureParams ($Method, $Level=0, [bool]$RequiredOnly=$false,
@@ -1364,6 +1376,10 @@ function Write-DNSW_MethodSignatureParams ($Method, $Level=0, [bool]$RequiredOnl
 
     foreach ($P in $Method.Parameters){
         if ($RequiredOnly -eq $False -or ($RequiredOnly -eq $true -and $P.Required -eq $true)){
+            if ($IncludeGshellParams -eq $false -and $P.CustomProperty -eq $true) {
+                continue
+            }
+
             if ($NameOnly -ne $true) {
                 Add-String $Params ("{0} {1}" -f $P.Type, $P.Name)
             } else {
@@ -1512,10 +1528,6 @@ function Write-DNSW_Method ($Method, $Level=0) {
         $Method.ReturnType.Type
     }
 
-    #$PropertiesObj = if ($Method.Parameters.Count -ne 0) {
-    #    Write-DNSW_MethodSignatureParams $Method -RequiredOnly $true -IncludeGshellParams $true -IncludePropertiesObject $true
-    #}
-
     $PropertiesObj = Write-DNSW_MethodSignatureParams $Method -RequiredOnly $true -IncludeGshellParams $true -IncludePropertiesObject $true
        
     $sections = New-Object System.Collections.ArrayList
@@ -1562,7 +1574,9 @@ $SQAssignment
     $PropertyAssignments = Write-DNSW_MethodPropertyObjAssignment $Method
     if ($PropertyAssignments -ne $null) {Add-String $sections $PropertyAssignments}
 
-    if ($Method.HasPagedResults) {
+    if ($Method.SupportsMediaDownload) {
+        Add-String (Write-DNSW_MediaDownloadResultBlock -Level $Level)
+    } elseif ($Method.HasPagedResults) {
         $PagedBlock = Write-DNSW_PagedResultBlock $Method -Level $Level
         Add-String $sections $PagedBlock
     } else {
@@ -1772,49 +1786,6 @@ $ResourceClasses
 
 #endregion
 
-
-#endregion
-
-
-function Create-TemplatesFromDll ($LibraryIndex, $RestJson, $ApiName, $ApiFileVersion, $OutPath, [bool]$Log=$false) {
-    Log "Loading .dll library in to Api template object" $Log
-    $Api = Invoke-GShellReflection -RestJson $RestJson -ApiName $ApiName -ApiFileVersion $ApiFileVersion -LibraryIndex $LibraryIndex
-
-    if (-not (Test-Path $OutPath)) {
-        New-Item -Path $OutPath -ItemType "Directory" | Out-Null
-    }
-
-    Log "Building and writing Settings Cmdlets" $Log
-    Write-ApiSettingsCmdlets $Api | Out-File ([System.IO.Path]::Combine($OutPath, "SettingsCmdlets.cs")) -Force
-
-    Log "Building and writing ApiInfo file" $Log
-    Write-ApiInfoClass $Api | Out-File ([System.IO.Path]::Combine($OutPath, "ApiInfo.cs")) -Force
-
-    Log "Building and writing Dot Net Cmdlets" $Log
-    Write-DNC $Api | Out-File ([System.IO.Path]::Combine($OutPath, "DotNetCmdlets.cs")) -Force
-    
-    Log "Building and writing Dot Net Service Wrapper" $Log
-    Write-DNSW $Api | Out-File ([System.IO.Path]::Combine($OutPath, "DotNetServiceWrapper.cs")) -Force
-    
-    Log "Building and writing Method Cmdlets" $Log
-    Write-MC $Api | Out-File ([System.IO.Path]::Combine($OutPath, "MethodCmdlets.cs")) -Force
-    
-    Log "Building and writing Object Cmdlets" $Log
-    Write-OC $Api | Out-File ([System.IO.Path]::Combine($OutPath, "ObjectCmdlets.cs")) -Force
-
-    if ($Api.HasStandardQueryParams -eq $true) {
-        Log "Building and writing Standard Query Parameters" $Log
-        Write-SQP $Api | Out-File ([System.IO.Path]::Combine($OutPath, "StandardQueryParameters.cs")) -Force
-    
-        Log "Building and writing Standard Query Parameters Base" $Log
-        Write-SQPB $Api | Out-File ([System.IO.Path]::Combine($OutPath, "StandardQueryParametersBase.cs")) -Force
-    }
-
-    return $Api
-}
-
-#START HERE - write templates for scope manager and settings cmdlets for each API
-
 function Write-ApiSettingsCmdlets ($Api) {
 
     $ApiNameAndVersion = $Api.NameAndVersion
@@ -1922,3 +1893,45 @@ $ScopesBlock
 
     return $ApiInfoText
 }
+
+
+#endregion
+
+
+function Create-TemplatesFromDll ($LibraryIndex, $RestJson, $ApiName, $ApiFileVersion, $OutPath, [bool]$Log=$false) {
+    Log "Loading .dll library in to Api template object" $Log
+    $Api = Invoke-GShellReflection -RestJson $RestJson -ApiName $ApiName -ApiFileVersion $ApiFileVersion -LibraryIndex $LibraryIndex
+
+    if (-not (Test-Path $OutPath)) {
+        New-Item -Path $OutPath -ItemType "Directory" | Out-Null
+    }
+
+    Log "Building and writing Settings Cmdlets" $Log
+    Write-ApiSettingsCmdlets $Api | Out-File ([System.IO.Path]::Combine($OutPath, "SettingsCmdlets.cs")) -Force
+
+    Log "Building and writing ApiInfo file" $Log
+    Write-ApiInfoClass $Api | Out-File ([System.IO.Path]::Combine($OutPath, "ApiInfo.cs")) -Force
+
+    Log "Building and writing Dot Net Cmdlets" $Log
+    Write-DNC $Api | Out-File ([System.IO.Path]::Combine($OutPath, "DotNetCmdlets.cs")) -Force
+    
+    Log "Building and writing Dot Net Service Wrapper" $Log
+    Write-DNSW $Api | Out-File ([System.IO.Path]::Combine($OutPath, "DotNetServiceWrapper.cs")) -Force
+    
+    Log "Building and writing Method Cmdlets" $Log
+    Write-MC $Api | Out-File ([System.IO.Path]::Combine($OutPath, "MethodCmdlets.cs")) -Force
+    
+    Log "Building and writing Object Cmdlets" $Log
+    Write-OC $Api | Out-File ([System.IO.Path]::Combine($OutPath, "ObjectCmdlets.cs")) -Force
+
+    if ($Api.HasStandardQueryParams -eq $true) {
+        Log "Building and writing Standard Query Parameters" $Log
+        Write-SQP $Api | Out-File ([System.IO.Path]::Combine($OutPath, "StandardQueryParameters.cs")) -Force
+    
+        Log "Building and writing Standard Query Parameters Base" $Log
+        Write-SQPB $Api | Out-File ([System.IO.Path]::Combine($OutPath, "StandardQueryParametersBase.cs")) -Force
+    }
+
+    return $Api
+}
+

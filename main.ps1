@@ -1,5 +1,8 @@
-﻿#TODO: This may not work - what if a json file is updated, but not the nuget file? Do we now make a note of it and check it again every day until it has an update?
-#      Maybe resolve this by checking each nuget anyways once a week?
+﻿#TODO: bundle licenses? maybe  add them to the core gshell license page?
+#TODO: generate help files
+#TODO: handle downloading media content cmdlets
+#TODO: Clean up code!
+#TODO: allow main invokable to be called with a target path
 
 $LibraryIndexRoot = "$env:USERPROFILE\Desktop\Libraries"
 $RootProjPath = "$env:USERPROFILE\Desktop\GenOutput"
@@ -60,5 +63,9 @@ function Invoke-GshellGeneratorMain {
     }
 }
 
-Invoke-GshellGeneratorMain -ApiFilter "G*" -ShouldBuildApis -ForceBuildApis -Log $Log
+#TODO - add in some kind of build summary report at the end - provide error logs for those that didn't work?
+#Invoke-GshellGeneratorMain -ApiFilter "gmail.v1" -ShouldBuildApis -ForceBuildApis -Log $Log
 
+#Invoke-GshellGeneratorMain -ForceBuildGShell -Log $Log
+
+Invoke-GshellGeneratorMain -ApiFilter "drive.v3" -ShouldBuildApis -ForceBuildApis -Log $Log

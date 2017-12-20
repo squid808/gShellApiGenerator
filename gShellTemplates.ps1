@@ -1463,7 +1463,8 @@ function Write-DNSW_PagedResultBlock ($Method, $Level=0) {
 }
 
 #the paged result block for a method
-function Write-DNSW_MediaDownloadResultBlock ($Level=0) {
+function Write-DNSW_MediaDownloadResultBlock {
+    
     $text = @"
 {%T}    using (var fileStream = new System.IO.FileStream(DownloadPath, System.IO.FileMode.Create, System.IO.FileAccess.Write))
 {%T}    {{
@@ -1477,7 +1478,8 @@ function Write-DNSW_MediaDownloadResultBlock ($Level=0) {
 #TODO - Rename this to be more accurate to just params?
 #The method signature parameters 
 function Write-DNSW_MethodSignatureParams ($Method, $Level=0, [bool]$RequiredOnly=$false,
-    [bool]$IncludeGshellParams=$false, [bool]$AsMediaDownloader=$false, [bool]$AsMediaUploader=$false, [bool]$NameOnly=$false) {
+    [bool]$IncludeGshellParams=$false, [bool]$AsMediaDownloader=$false, [bool]$AsMediaUploader=$false,
+    [bool]$AsUploadFileStream, [bool]$NameOnly=$false) {
     $Params = New-Object System.Collections.ArrayList
 
     foreach ($P in $Method.Parameters){
@@ -1510,8 +1512,20 @@ function Write-DNSW_MethodSignatureParams ($Method, $Level=0, [bool]$RequiredOnl
         
         if ($NameOnly -ne $true) {
             Add-String $Params ("{0} {1}" -f $P.Type, $P.Name)
+            Add-String $Params ("string ContentType")
         } else {
             Add-String $Params $P.Name
+            Add-String $Params "ContentType"
+        }
+    }
+
+    if ($AsUploadFileStream -eq $true) {        
+        if ($NameOnly -ne $true) {
+            Add-String $Params ("System.IO.FileStream fileStream")
+            Add-String $Params ("string ContentType")
+        } else {
+            Add-String $Params "fileStream"
+            Add-String $Params "ContentType"
         }
     }
 
@@ -1652,6 +1666,14 @@ function Write-DNSW_MethodComments ($Method, $Level=0) {
     return $text
 }
 
+function Write-DNSW_DownloadMethod ($Method, $Level=0) {
+    $MethodName = $Method.Name
+    $MethodReturnType = $Method.ReturnType.Type
+    $PropertiesObj = Write-DNSW_MethodSignatureParams $Method -RequiredOnly $true -IncludeGshellParams $true `
+        -AsMediaDownloader $true
+
+}
+
 #write a single wrapped method
 function Write-DNSW_Method ($Method, $Level=0, [bool]$AsMediaDownloader=$false, [bool]$AsMediaUploader=$false) {
     $MethodName = $Method.Name
@@ -1668,15 +1690,38 @@ function Write-DNSW_Method ($Method, $Level=0, [bool]$AsMediaDownloader=$false, 
 
     $comments = Write-DNSW_MethodComments $Method $Level
 
-    $requestParams = Write-DNSW_MethodSignatureParams $Method -RequiredOnly $true -NameOnly $true
+        Add-String $sections (@"
+{%T}public $MethodReturnType $MethodName ($PropertiesObj)
+{%T}{
+"@)
+
+    
 
     $getServiceWithServiceAccount = if ($Method.Api.CanUseServiceAccount) { "ServiceAccount" } else { $null }
 
-    $request = "var request = GetService({0}).{1}.{2}($requestParams);" -f `
+    #for media uploads we have to wrap everything in the filestream directive
+    if ($AsMediaUploader -eq $true) {
+        $Level++
+
+        Add-String $sections @"
+{%T}    using (var fileStream = new System.IO.FileStream(SourceFilePath, System.IO.FileMode.Open))
+{%T}    {
+"@
+
+        $requestParams = Write-DNSW_MethodSignatureParams $Method -RequiredOnly $true -NameOnly $true -AsUploadFileStream $true
+    } else {
+        $requestParams = Write-DNSW_MethodSignatureParams $Method -RequiredOnly $true -NameOnly $true
+    }
+
+    #open the request normally
+    $request = "{{%T}}    var request = GetService({0}).{1}.{2}($requestParams);" -f `
         $getServiceWithServiceAccount, `
         (Get-ParentResourceChain $Method), $Method.name
 
-    if ($Method.Api.HasStandardQueryParams) {
+    Add-String $sections $request
+
+    #handle standard query params, if any
+    if ($Method.Api.HasStandardQueryParams -eq $true) {
         $SQParams = New-Object System.Collections.ArrayList
         foreach ($Param in $Api.StandardQueryParams) {
             if ($Param.Type -ne $null) {
@@ -1695,21 +1740,18 @@ $SQParamsText
 "@
 
         $SQAssignment = wrap-text (set-indent $SQAssignment $Level)
+
+        Add-String $sections $SQAssignment
     }
 
-    Add-String $sections (@"
-{%T}public $MethodReturnType $MethodName ($PropertiesObj)
-{%T}{
-{%T}    $request
-
-$SQAssignment
-"@)
-
+    #write the method property obj
     $PropertyAssignments = Write-DNSW_MethodPropertyObjAssignment $Method
     if ($PropertyAssignments -ne $null) {Add-String $sections $PropertyAssignments}
 
     if ($AsMediaDownloader -eq $true) {
-        Add-String $sections (Write-DNSW_MediaDownloadResultBlock -Level $Level)
+        Add-String $sections (Write-DNSW_MediaDownloadResultBlock)
+    } elseif ($AsMediaUploader -eq $true) {
+        Add-String $sections "{%T}        request.Upload();`r`n{%T}        return request.ResponseBody;"
     } elseif ($Method.HasPagedResults -eq $true) {
         $PagedBlock = Write-DNSW_PagedResultBlock $Method -Level $Level
         Add-String $sections $PagedBlock
@@ -1718,6 +1760,12 @@ $SQAssignment
             $resultReturn = "return "
         }
         Add-String $sections ("{{%T}}    {0}request.Execute();" -f $resultReturn)
+    }
+
+    #for media uploads we have to close the filestream directive
+    if ($AsMediaUploader -eq $true) {
+        $Level--
+        Add-String $sections "{%T}    }"
     }
 
     Add-String $sections "{%T}}"
@@ -1777,8 +1825,12 @@ function Write-DNSW_Resource ($Resource, $Level=0) {
         $MethodText = $MethodParts -join "`r`n`r`n"
         Add-String $MethodTexts $MethodText
 
-        if ($Method.SupportsMediaDownload -eq $true) {
-            $MethodClass = Write-DNSW_Method $Method ($Level+1) -AsMediaDownloader $true
+        Write-host $Resource.Name $Method.Name
+
+        if ($Method.SupportsMediaDownload -eq $true -or $Method.SupportsMediaUpload -eq $true) {
+            $MethodClass = Write-DNSW_Method $Method ($Level+1) `
+                -AsMediaDownloader $Method.SupportsMediaDownload `
+                -AsMediaUploader $Method.SupportsMediaUpload
             Add-String $MethodTexts $MethodClass
         }
     }

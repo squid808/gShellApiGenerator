@@ -653,7 +653,7 @@ function Get-ApiResourceMethods($Resource, $ResourceType){
         $Parameters = $M.GetParameters()
         if ($Parameters.Count -gt 0 -and $Parameters.ParameterType.FullName -contains "System.IO.Stream") {
             #find the preexisting method we've aggregated that has the same name and indicate that it supports media upload
-            $BuiltMethod = $Results | where Name -eq $Method.Name
+            $BuiltMethod = $Results | where Name -eq $M.Name
 
             $BuiltMethod.SupportsMediaUpload = $true
         }

@@ -277,6 +277,8 @@ Remarks - The api method call is broken up in to two parts in the underlying cod
 
     #This method supports media download, evidenced by presence of MediaDownloader property on method reflected object return type properties and json
     [bool]$SupportsMediaDownload
+
+    [bool]$SupportsMediaUpload
 }
 
 function New-ApiMethod ([ApiResource]$Resource, $Method) {
@@ -325,19 +327,6 @@ function New-ApiMethod ([ApiResource]$Resource, $Method) {
 
     $M.HasPagedResults = $Method.ReturnType.DeclaredProperties.name -contains "PageToken" -and `
                             $M.ReturnType.ReflectedObject.DeclaredProperties.name -contains "NextPageToken"
-
-    if ($M.SupportsMediaDownload -eq $true) {
-        $P = New-Object ApiMethodProperty
-        $P.Method = $M
-        $P.Api = $M.Api
-        $P.Name = "DownloadPath"
-        $P.NameLower = "downloadPath"
-        $P.Required = $true
-        $P.Description = "The target download path of the file, including filename and extension."
-        $P.Type = "string"
-        $P.CustomProperty = $true
-        $M.Parameters.Add($P)
-    }
 
     return $M
 }
@@ -505,7 +494,7 @@ function New-ApiMethodProperty {
     $P.ReflectedObj = $Property
     $P.DiscoveryObj = $Method.DiscoveryObj.parameters.($Property.Name)
     $P.Type = Get-ApiPropertyType -Property $P
-    
+
     if ($P.Type -like "*Download.IMediaDownloader"){
         if ($Method.ReturnType.Type -eq "void") {
             $P.Method.SupportsMediaDownload = $true
@@ -645,9 +634,10 @@ function New-ObjectOfType($Type) {
 }
 
 function Get-ApiResourceMethods($Resource, $ResourceType){
-    $Methods = $ResourceType.DeclaredMethods | where { `
-                $_.IsVirtual -and -not $_.IsFinal -and `
-                $_.ReturnType.ImplementedInterfaces.Name -contains "IClientServiceRequest" }
+    $AllMethods = $ResourceType.DeclaredMethods | where {$_.IsVirtual -and -not $_.IsFinal}
+
+    #Sort out standard methods first
+    $Methods = $AllMethods | where {$_.ReturnType.ImplementedInterfaces.Name -contains "IClientServiceRequest"}
 
     #Methods where virtual and return type implements IClientServiceRequest
     $Results = New-Object System.Collections.ArrayList
@@ -656,6 +646,17 @@ function Get-ApiResourceMethods($Resource, $ResourceType){
         $M = New-ApiMethod $resource $method
 
         $Results.Add($M) | Out-Null
+    }
+    
+    #now process methods that have a file upload option
+    foreach ($M in $AllMethods) {
+        $Parameters = $M.GetParameters()
+        if ($Parameters.Count -gt 0 -and $Parameters.ParameterType.FullName -contains "System.IO.Stream") {
+            #find the preexisting method we've aggregated that has the same name and indicate that it supports media upload
+            $BuiltMethod = $Results | where Name -eq $Method.Name
+
+            $BuiltMethod.SupportsMediaUpload = $true
+        }
     }
 
     return $Results

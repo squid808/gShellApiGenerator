@@ -278,10 +278,15 @@ Remarks - The api method call is broken up in to two parts in the underlying cod
     #This method supports media download, evidenced by presence of MediaDownloader property on method reflected object return type properties and json
     [bool]$SupportsMediaDownload
 
+    #This method supports media upload, evidenced by the return type's base type of ResumableUpload, and by having a 
+    #parameter deriving from System.IO.Stream
     [bool]$SupportsMediaUpload
+
+    #A link to a version of this method that supports Media Upload
+    $UploadMethod
 }
 
-function New-ApiMethod ([ApiResource]$Resource, $Method) {
+function New-ApiMethod ([ApiResource]$Resource, $Method, $UseReturnTypeGenericInt=0) {
     $M = New-Object ApiMethod
     $M.Resource = $Resource
     $M.Api = $Resource.Api
@@ -292,7 +297,7 @@ function New-ApiMethod ([ApiResource]$Resource, $Method) {
     $M.Name = ConvertTo-FirstUpper $Method.Name
     $M.NameLower = ConvertTo-FirstLower $Method.Name
     $M.Description = Clean-CommentString $M.DiscoveryObj.description
-    $M.ReturnType =  New-ApiMethodProperty $M (Get-ApiMethodReturnType $Method)
+    $M.ReturnType =  New-ApiMethodProperty $M (Get-ApiMethodReturnType $Method -UseReturnTypeGenericInt $UseReturnTypeGenericInt)
     
     if (Has-ObjProperty $M.DiscoveryObj "response") {
         $M.ReturnType.Type = Get-ApiPropertyTypeShortName $M.ReturnType.ReflectedObj.FullName $M.Api
@@ -307,6 +312,7 @@ function New-ApiMethod ([ApiResource]$Resource, $Method) {
 
     #get the properties of the virtual method. This may include a body?
     foreach ($P in $Method.GetParameters()) {
+
         $ParameterNames.Add($P.Name.ToLower()) | Out-Null
         $Param = New-ApiMethodProperty $M $P -ForceRequired $true
 
@@ -318,6 +324,7 @@ function New-ApiMethod ([ApiResource]$Resource, $Method) {
     # the api -MethodName, HttpMethod and RestPath. Properties with setters are likely to be those we want to update
     # and send along with the API request
     foreach ($P in ($M.ReflectedObj.ReturnType.DeclaredProperties | where {$_.SetMethod -ne $null -and $_.Name.ToLower() -ne "pagetoken"})){
+    
         if (-not $ParameterNames.Contains($P.Name.ToLower())) {
             $Param = New-ApiMethodProperty $M $P
         
@@ -639,9 +646,9 @@ function New-ObjectOfType($Type) {
 function Get-ApiResourceMethods($Resource, $ResourceType){
     $AllMethods = $ResourceType.DeclaredMethods | where {$_.IsVirtual -and -not $_.IsFinal}
 
-    #Sort out standard methods first
+    #Sort out standard methods first - this will not gather upload methods yet
     $Methods = $AllMethods | where {$_.ReturnType.ImplementedInterfaces.Name -contains "IClientServiceRequest"}
-
+    
     #Methods where virtual and return type implements IClientServiceRequest
     $Results = New-Object System.Collections.ArrayList
 
@@ -652,21 +659,33 @@ function Get-ApiResourceMethods($Resource, $ResourceType){
     }
     
     #now process methods that have a file upload option
-    foreach ($M in $AllMethods) {
-        $Parameters = $M.GetParameters()
+    foreach ($Method in ($AllMethods | where {$_.ReturnType.BaseType -like "Google.Apis.Upload.ResumableUpload*"})) {
+        $Parameters = $Method.GetParameters()
         if ($Parameters.Count -gt 0 -and $Parameters.ParameterType.FullName -contains "System.IO.Stream") {
+        
+            $M = New-ApiMethod $resource $method -UseReturnTypeGenericInt 1
+            $M.SupportsMediaUpload = $true
+            foreach ($P in $M.Parameters) {
+                if ($P.type -eq "System.IO.Stream" -or `
+                    ($P.Name -eq "ContentType" -and $P.Type -eq "string")){
+                    $P.ShouldIncludeInTemplates = $false
+                    $P.Required = $false
+                }
+            }
+            
+            #we don't add these to the list of methods directly b/c we want them
+            #to only be processed after their 'master' method.
             #find the preexisting method we've aggregated that has the same name and indicate that it supports media upload
-            $BuiltMethod = $Results | where Name -eq $M.Name
-
-            $BuiltMethod.SupportsMediaUpload = $true
+            $BuiltMethod = $Results | where Name -eq $Method.Name
+            $BuiltMethod.UploadMethod = $M
         }
     }
 
     return $Results
 }
 
-function Get-ApiMethodReturnType($Method){
-    return $Method.ReturnType.BaseType.GenericTypeArguments[0]
+function Get-ApiMethodReturnType($Method, $UseReturnTypeGenericInt=0){
+    return $Method.ReturnType.BaseType.GenericTypeArguments[$UseReturnTypeGenericInt]
 }
 
 #endregion

@@ -1062,7 +1062,8 @@ $Resources
 
 #The method signature parameters 
 function Write-DNC_MethodSignatureParams ($Method, $Level=0, 
-    [bool]$AsMediaDownloader=$false, [bool]$AsMediaUploader=$false, [bool]$NameOnly=$false)
+    [bool]$AsMediaDownloader=$false, [bool]$AsMediaUploader=$false, 
+    [bool]$NameOnly=$false, [string]$PropertyObjNameAddition = "")
 {
     $Params = New-Object System.Collections.ArrayList
 
@@ -1101,14 +1102,14 @@ function Write-DNC_MethodSignatureParams ($Method, $Level=0,
     $ParamsForPropertyObj = $Method.Parameters | where {$_.Required -eq $false -and $_.ShouldIncludeInTemplates -eq $true}
 
     if ($ParamsForPropertyObj -ne $null -and $ParamsForPropertyObj.Count -gt 0) {
-        $PropertiesObjVarName = "{0}{1}Properties" -f $Method.Resource.NameLower, $Method.Name
+        $PropertiesObjVarName = "{0}{1}{2}Properties" -f $Method.Resource.NameLower, $Method.Name, $PropertyObjNameAddition
         
         if ($NameOnly) {
             Add-String $Params $PropertiesObjVarName
         } else {
-            Add-String $Params ("{0}.{1}.{2}{3}Properties $PropertiesObjVarName = null" -f `
+            Add-String $Params ("{0}.{1}.{2}{3}{4}Properties $PropertiesObjVarName = null" -f `
                 ($Api.Name + "ServiceWrapper"), (Get-ParentResourceChain $Method), `
-                $Method.Resource.Name, $Method.Name)
+                $Method.Resource.Name, $Method.Name, $PropertyObjNameAddition)
         }
     }
 
@@ -1183,60 +1184,60 @@ function Write-DNC_MethodSignatureParams ($Method, $Level=0,
 #
 #}
 #
-##write a single wrapped method
-#function Write-DNC_UploadMethod ($Method, $Level=0) {
-#    $MethodName = $Method.Name
-#    $MethodReturnType = $Method.ReturnType.Type
-#    
-#    $PropertiesObj = Write-DNC_MethodSignatureParams $Method `
-#        -AsMediaUploader $true
-#       
-#    $sections = New-Object System.Collections.ArrayList
-#
-#    $comments = Write-DNSW_MethodComments $Method $Level
-#
-#    Add-String $sections (@"
-#{%T}public $MethodReturnType $MethodName ($PropertiesObj)
-#{%T}{
-#"@)
-#
-#    if ((($Method.Parameters | where {$_.Required -eq $false -and $_.ShouldIncludeInTemplates -eq $true}).Count -gt 0))
-#    {
-#        $PropertiesObjFullName = "{0}.{1}.{2}{3}Properties" -f `
-#            ($Api.Name + "ServiceWrapper"), (Get-ParentResourceChain $Method),
-#            $Method.Resource.Name, $Method.Name
-#        $PropertiesObjVarName = "{0}{1}Properties" -f $Method.Resource.NameLower, $Method.Name
-#        Add-String $sections "{%T}    $PropertiesObjVarName = $PropertiesObjVarName ?? new $PropertiesObjFullName();"
-#    }
-#
-#    if ($Method.ReturnType.Type -ne "void") {
-#        $resultReturn = "return "
-#    }
-#
-#    $ReturnProperties = Write-DNC_MethodSignatureParams $Method -NameOnly $true `
-#        -AsMediaUploader $true
-#
-#    $ParentResourceChain = Get-ParentResourceChain $Method -UpperCase $False
-#
-#    $Return = "`{{%T}}    {0}serviceWrapper.{1}.{2}({3});" -f $resultReturn, $ParentResourceChain, $Method.Name, $ReturnProperties
-#
-#    if ($Method.Parameters.Required -contains $False) {
-#        $Return = "`r`n" + $Return
-#    }
-#
-#    Add-String $sections $Return 
-#
-#    Add-String $sections "{%T}}"
-#
-#    $text = $sections -join "`r`n"
-#
-#    $text = $comments,$text -join "`r`n"
-#
-#    $text = Wrap-Text (Set-Indent $text -TabCount $Level)
-#
-#    return $text
-#
-#}
+#write a single wrapped method
+function Write-DNC_UploadMethod ($Method, $Level=0) {
+    $MethodName = $Method.Name
+    $MethodReturnType = $Method.ReturnType.Type
+    
+    $PropertiesObj = Write-DNC_MethodSignatureParams $Method `
+        -AsMediaUploader $true -PropertyObjNameAddition "MediaUpload"
+       
+    $sections = New-Object System.Collections.ArrayList
+
+    $comments = Write-DNSW_MethodComments $Method $Level
+
+    Add-String $sections (@"
+{%T}public $MethodReturnType $MethodName ($PropertiesObj)
+{%T}{
+"@)
+
+    if ((($Method.Parameters | where {$_.Required -eq $false -and $_.ShouldIncludeInTemplates -eq $true}).Count -gt 0))
+    {
+        $PropertiesObjFullName = "{0}.{1}.{2}{3}MediaUploadProperties" -f `
+            ($Api.Name + "ServiceWrapper"), (Get-ParentResourceChain $Method),
+            $Method.Resource.Name, $Method.Name
+        $PropertiesObjVarName = "{0}{1}MediaUploadProperties" -f $Method.Resource.NameLower, $Method.Name
+        Add-String $sections "{%T}    $PropertiesObjVarName = $PropertiesObjVarName ?? new $PropertiesObjFullName();"
+    }
+
+    if ($Method.ReturnType.Type -ne "void") {
+        $resultReturn = "return "
+    }
+
+    $ReturnProperties = Write-DNC_MethodSignatureParams $Method -NameOnly $true `
+        -AsMediaUploader $true -PropertyObjNameAddition "MediaUpload"
+
+    $ParentResourceChain = Get-ParentResourceChain $Method -UpperCase $False
+
+    $Return = "`{{%T}}    {0}serviceWrapper.{1}.{2}({3});" -f $resultReturn, $ParentResourceChain, $Method.Name, $ReturnProperties
+
+    if ($Method.Parameters.Required -contains $False) {
+        $Return = "`r`n" + $Return
+    }
+
+    Add-String $sections $Return 
+
+    Add-String $sections "{%T}}"
+
+    $text = $sections -join "`r`n"
+
+    $text = $comments,$text -join "`r`n"
+
+    $text = Wrap-Text (Set-Indent $text -TabCount $Level)
+
+    return $text
+
+}
 
 #write a single wrapped method
 function Write-DNC_Method ($Method, $Level=0, [bool]$AsMediaDownloader=$false, [bool]$AsMediaUploader=$false) {
@@ -1250,7 +1251,7 @@ function Write-DNC_Method ($Method, $Level=0, [bool]$AsMediaDownloader=$false, [
     }
     
     $PropertiesObj = Write-DNC_MethodSignatureParams $Method `
-        -AsMediaDownloader $AsMediaDownloader -AsMediaUploader $AsMediaUploader 
+        -AsMediaDownloader $AsMediaDownloader -AsMediaUploader $AsMediaUploader `
        
     $sections = New-Object System.Collections.ArrayList
 
@@ -1392,10 +1393,14 @@ $ChildResources
         $MethodText = $MethodParts -join "`r`n`r`n"
         Add-String $MethodTexts $MethodText
 
-        if ($Method.SupportsMediaDownload -eq $true -or $Method.SupportsMediaUpload -eq $true) {
+        if ($Method.SupportsMediaDownload -eq $true) {
             $MethodObj = Write-DNC_Method $method ($Level+1) `
-                -AsMediaDownloader $Method.SupportsMediaDownload `
-                -AsMediaUploader $Method.SupportsMediaUpload
+                -AsMediaDownloader $true
+            Add-String $MethodTexts $MethodObj
+        }
+
+        if ($Method.UploadMethod -ne $null -and $Method.UploadMethod.SupportsMediaUpload -eq $true) {
+            $MethodObj = Write-DNC_UploadMethod $Method.UploadMethod ($Level+1)
             Add-String $MethodTexts $MethodObj
         }
     }
@@ -1606,13 +1611,13 @@ function Write-DNSW_PagedResultBlock ($Method, $Level=0) {
 #The method signature parameters 
 function Write-DNSW_MethodSignatureParams ($Method, $Level=0, [bool]$RequiredOnly=$false,
     [bool]$IncludeGshellParams=$false, [bool]$AsMediaDownloader=$false, [bool]$AsMediaUploader=$false,
-    [bool]$AsUploadFileStream, [bool]$NameOnly=$false) {
+    [bool]$AsUploadFileStream, [bool]$NameOnly=$false, [string]$PropertyObjNameAddition = "") {
     $Params = New-Object System.Collections.ArrayList
 
     foreach ($P in $Method.Parameters){
         if ($RequiredOnly -eq $False -or ($RequiredOnly -eq $true -and $P.Required -eq $true)){
             #skip the media downloader and media uploader properties and include later
-            if ($P.CustomProperty -eq $true) {
+            if ($P.CustomProperty -eq $true -or $P.ShouldIncludeInTemplates -eq $false) {
                 continue
             }
 
@@ -1634,6 +1639,16 @@ function Write-DNSW_MethodSignatureParams ($Method, $Level=0, [bool]$RequiredOnl
         }
     }
 
+    if ($AsUploadFileStream -eq $true) {        
+        if ($NameOnly -ne $true) {
+            Add-String $Params ("System.IO.FileStream fileStream")
+            Add-String $Params ("string ContentType")
+        } else {
+            Add-String $Params "fileStream"
+            Add-String $Params "ContentType"
+        }
+    }
+
     if ($AsMediaUploader -eq $true) {
         $P = Get-MediaUploadProperty ($Method)
         
@@ -1646,25 +1661,15 @@ function Write-DNSW_MethodSignatureParams ($Method, $Level=0, [bool]$RequiredOnl
         }
     }
 
-    if ($AsUploadFileStream -eq $true) {        
-        if ($NameOnly -ne $true) {
-            Add-String $Params ("System.IO.FileStream fileStream")
-            Add-String $Params ("string ContentType")
-        } else {
-            Add-String $Params "fileStream"
-            Add-String $Params "ContentType"
-        }
-    }
-
     $ParamsForPropertyObj = $Method.Parameters | where {$_.Required -eq $false -and $_.ShouldIncludeInTemplates -eq $true}
 
     if ($IncludeGshellParams -eq $true -and $ParamsForPropertyObj -ne $null -and $ParamsForPropertyObj.Count -gt 0) {
-        $PropertiesObjVarName = "{0}{1}Properties" -f $Method.Resource.NameLower, $Method.Name
+        $PropertiesObjVarName = "{0}{1}{2}Properties" -f $Method.Resource.NameLower, $Method.Name, $PropertyObjNameAddition
         
         if ($NameOnly) {
             Add-String $Params $PropertiesObjVarName
         } else {
-            Add-String $Params ("{0}{1}Properties $PropertiesObjVarName = null" -f $Method.Resource.Name, $Method.Name)
+            Add-String $Params ("{0}{1}{2}Properties $PropertiesObjVarName = null" -f $Method.Resource.Name, $Method.Name, $PropertyObjNameAddition)
         }
     }
 
@@ -1690,7 +1695,7 @@ function Write-DNSW_MethodSignatureParams ($Method, $Level=0, [bool]$RequiredOnl
 }
 
 #The *Properties inner classes (within a resource) used to hold the non-required properties for a method
-function Write-DNSW_MethodPropertyObj ($Method, $Level=0) {
+function Write-DNSW_MethodPropertyObj ($Method, $Level=0, [string]$NameAddition = "") {
     $ParamsForPropertyObj = $Method.Parameters | where {$_.Required -eq $false -and $_.ShouldIncludeInTemplates -eq $true}
 
     if ($ParamsForPropertyObj -ne $null -and $ParamsForPropertyObj.Count -gt 0) {
@@ -1722,7 +1727,7 @@ function Write-DNSW_MethodPropertyObj ($Method, $Level=0) {
 
         $pText = $Params -join "`r`n`r`n"
 
-        $ObjName = $Method.Resource.Name + $Method.Name + "Properties"
+        $ObjName = $Method.Resource.Name + $Method.Name + $NameAddition + "Properties"
 
         $ObjSummary = "Optional parameters for the {0} {1} method." -f `
             $Method.Resource.Name, $Method.Name
@@ -1742,12 +1747,12 @@ $pText
 }
 
 #Within a dotnet wrapped method, extracting and assigning parameters of the Method Properties object
-function Write-DNSW_MethodPropertyObjAssignment ($Method, $Level=0) {
+function Write-DNSW_MethodPropertyObjAssignment ($Method, $Level=0, [string]$PropertyObjNameAddition = "") {
     $ParamsForPropertyObj = $Method.Parameters | where {$_.Required -eq $false -and $_.ShouldIncludeInTemplates -eq $true}
 
     if ($ParamsForPropertyObj -ne $null -and $ParamsForPropertyObj.Count -gt 0) {
     
-        $PropertiesObjVarName = "{0}{1}Properties" -f $Method.Resource.NameLower, $Method.Name
+        $PropertiesObjVarName = "{0}{1}{2}Properties" -f $Method.Resource.NameLower, $Method.Name, $PropertyObjNameAddition
 
         $Params = New-Object System.Collections.ArrayList
 
@@ -1764,7 +1769,9 @@ function Write-DNSW_MethodPropertyObjAssignment ($Method, $Level=0) {
 $pText
 {%T}    }
 "@
-        return $Text.ToString()
+
+        $text = wrap-text (Set-Indent -String $text.ToString() -TabCount $Level)
+        return $Text
 
     }
 }
@@ -1853,8 +1860,8 @@ $PropertyAssignments
 function Write-DNSW_UploadMethod ($Method, $Level=0) {
     $MethodName = $Method.Name
     $MethodReturnType = $Method.ReturnType.Type
-    $PropertiesObj = Write-DNSW_MethodSignatureParams $Method -RequiredOnly $true `
-        -IncludeGshellParams $true -AsMediaUploader $true
+    $MethodSignatureParameters = Write-DNSW_MethodSignatureParams $Method -RequiredOnly $true `
+        -IncludeGshellParams $true -AsMediaUploader $true -PropertyObjNameAddition "MediaUpload"
     $comments = Write-DNSW_MethodComments $Method $Level
     $getServiceWithServiceAccount = if ($Method.Api.CanUseServiceAccount) { "ServiceAccount" } else { $null }
     $requestParams = Write-DNSW_MethodSignatureParams $Method -RequiredOnly $true -NameOnly $true -AsUploadFileStream $true
@@ -1884,14 +1891,14 @@ $SQParamsText
     }
 
     #write the method property obj
-    $PropertyAssignments = Write-DNSW_MethodPropertyObjAssignment $Method -Level $Level
+    $PropertyAssignments = Write-DNSW_MethodPropertyObjAssignment $Method -Level ($Level+1) -PropertyObjNameAddition "MediaUpload"
     if (-not [string]::IsNullOrWhiteSpace($PropertyAssignments)){
         $PropertyAssignments = "`r`n" + $PropertyAssignments + "`r`n"
     }
     
     $text = @"
 $comments
-{%T}public $MethodReturnType $MethodName ($PropertiesObj)
+{%T}public $MethodReturnType $MethodName ($MethodSignatureParameters)
 {%T}{
 {%T}    using (var fileStream = new System.IO.FileStream(SourceFilePath, System.IO.FileMode.Open))
 {%T}    {
@@ -1950,7 +1957,7 @@ $SQParamsText
     }
 
     #write the method property obj
-    $PropertyAssignments = Write-DNSW_MethodPropertyObjAssignment $Method
+    $PropertyAssignments = Write-DNSW_MethodPropertyObjAssignment $Method -Level $Level
     if (-not [string]::IsNullOrWhiteSpace($PropertyAssignments)){
         $PropertyAssignments = "`r`n" + $PropertyAssignments + "`r`n"
     }
@@ -2031,8 +2038,10 @@ function Write-DNSW_Resource ($Resource, $Level=0) {
             Add-String $MethodTexts (Write-DNSW_DownloadMethod -Method $Method -Level ($Level+1))
         }
 
-        if ($Method.SupportsMediaUpload -eq $true) {
-            Add-String $MethodTexts (Write-DNSW_UploadMethod -Method $Method -Level ($Level+1))
+        if ($Method.UploadMethod -ne $null -and $Method.UploadMethod.SupportsMediaUpload -eq $true) {
+            $PObj = Write-DNSW_MethodPropertyObj $method.UploadMethod ($Level+1) -NameAddition "MediaUpload"
+            $UploadMethodText = (Write-DNSW_UploadMethod -Method $Method.UploadMethod -Level ($Level+1))
+            Add-String $MethodTexts (@($PObj,$UploadMethodText) -join "`r`n`r`n")
         }
     }
 

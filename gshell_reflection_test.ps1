@@ -499,9 +499,9 @@ function New-ApiMethodProperty {
     $P.Type = Get-ApiPropertyType -Property $P
 
     if ($P.Type -like "*Download.IMediaDownloader"){
-        if ($Method.ReturnType.Type -eq "void") {
+        #if ($Method.ReturnType.Type -eq "void") {
             $P.Method.SupportsMediaDownload = $true
-        }
+        #}
         $P.ShouldIncludeInTemplates = $false
     } elseif ($P.Type -eq $Null) {
         $P.ShouldIncludeInTemplates = $false

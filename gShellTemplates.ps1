@@ -1718,6 +1718,8 @@ function Write-DNSW_Method ($Method, $Level=0, [bool]$AsMediaDownloader=$false, 
         $getServiceWithServiceAccount, `
         (Get-ParentResourceChain $Method), $Method.name
 
+    $request = wrap-text (set-indent $request $Level)
+
     Add-String $sections $request
 
     #handle standard query params, if any
@@ -1746,7 +1748,8 @@ $SQParamsText
 
     #write the method property obj
     $PropertyAssignments = Write-DNSW_MethodPropertyObjAssignment $Method
-    if ($PropertyAssignments -ne $null) {Add-String $sections $PropertyAssignments}
+    $PropertyAssignments = wrap-text (set-indent $PropertyAssignments $Level)
+    Add-String $sections $PropertyAssignments
 
     if ($AsMediaDownloader -eq $true) {
         Add-String $sections (Write-DNSW_MediaDownloadResultBlock)
@@ -1824,8 +1827,6 @@ function Write-DNSW_Resource ($Resource, $Level=0) {
         Add-String $MethodParts $MethodClass
         $MethodText = $MethodParts -join "`r`n`r`n"
         Add-String $MethodTexts $MethodText
-
-        Write-host $Resource.Name $Method.Name
 
         if ($Method.SupportsMediaDownload -eq $true -or $Method.SupportsMediaUpload -eq $true) {
             $MethodClass = Write-DNSW_Method $Method ($Level+1) `

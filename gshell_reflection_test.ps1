@@ -296,6 +296,9 @@ function New-ApiMethod ([ApiResource]$Resource, $Method) {
     
     if (Has-ObjProperty $M.DiscoveryObj "response") {
         $M.ReturnType.Type = Get-ApiPropertyTypeShortName $M.ReturnType.ReflectedObj.FullName $M.Api
+    } elseif ($M.ReturnType.Name -eq "String") {
+        #Found in media downloads
+        $M.ReturnType.Type = "string"
     } else {
         $M.ReturnType.Type = "void"
     }

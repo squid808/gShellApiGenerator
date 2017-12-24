@@ -919,6 +919,128 @@ function Write-MCMediaUploadProperties($Method, $Level=0) {
     return $Properties
 }
 
+function Write-MCMediaDownloadProperties($Method, $Level=0) {
+    
+    #expect that there are two methods and maybe a body
+    $Counts = @{}
+    $Counts["Media"] = @{}
+    $Counts["NoMedia"] = @{}
+
+    if ($Method.HasBodyParameter -eq $true) {
+        $Counts["NoMedia"]["WithBody"] = @(0)
+        $Counts["NoMedia"]["NoBody"] = @(0)
+        $Counts["Media"]["MediaWithBody"] = @(0)
+        $Counts["Media"]["MediaNoBody"] = @(0)
+    } else {
+        $Counts["NoMedia"]["Default"] = @(0)
+        $Counts["Media"]["Media"] = @(0)
+    }
+
+    $MethodParams = $Method.Parameters | where { `
+        $_.Name -ne "Body" -and $_.ShouldIncludeInTemplates -eq $true}
+
+    $ParameterTexts = New-Object System.Collections.ArrayList
+
+    #First iterate all methods in the main method
+    foreach ($Parameter in $MethodParams) {
+
+        $required = $Parameter.Required.ToString().ToLower()
+
+        $KeysToProcess = @("NoMedia","Media")
+        
+        #the params exist for all param sets, don't declare any
+        $SubKey = $Counts["NoMedia"].Keys | select -First 1
+        $attribute = Write-MCPropertyAttribute -Mandatory $required -HelpMessage `
+            $Parameter.Description -Position $Counts["NoMedia"][$SubKey][0] -Level $Level
+        
+        #increment the counts 
+        foreach ($Key in $KeysToProcess) {
+            foreach ($SubKey in $Counts[$Key].Keys) {
+                $Counts[$Key][$SubKey][0]++
+            }
+        }
+
+        $summary = Wrap-Text (Set-Indent ("{{%T}}/// <summary> {0} </summary>" -f (Format-CommentString $Parameter.Description)) $Level)
+        $declaration  = Wrap-Text (Set-Indent ("{{%T}}public {0} {1} {{ get; set; }}" -f $Parameter.Type, $Parameter.Name) $Level)
+
+        $ParameterText = $summary,$attribute,$declaration -join "`r`n"
+
+        Add-String $ParameterTexts $ParameterText
+    }
+
+    #Handle the additional download methods
+    $PMedia = Get-MediaDownloadProperty -Method $Method
+
+    $Attributes = New-Object System.Collections.ArrayList
+    foreach ($SubKey in $Counts["Media"].Keys) {
+        $attribute = Write-MCPropertyAttribute -Mandatory "true" -HelpMessage $PMedia.Description `
+            -Position $Counts["Media"][$SubKey][0] -Level $Level -ParameterSetName $SubKey
+        Add-String $Attributes $Attribute
+        $Counts["Media"][$SubKey][0]++
+    }
+    $Attributes = $Attributes -join "`r`n"
+    $summary = Wrap-Text (Set-Indent ("{{%T}}/// <summary> {0} </summary>" -f (Format-CommentString $PMedia.Description)) $Level)
+    $declaration  = wrap-text (set-indent ("{{%T}}public {0} {1} {{ get; set; }}" -f $PMedia.Type, $PMedia.Name) $Level)
+    $ParameterText = $summary,$Attributes,$declaration -join "`r`n"
+    Add-String $ParameterTexts $ParameterText
+
+    #Now handle the body, if any
+    if ($Method.HasBodyParameter -eq $true) {
+        
+        $Attributes = New-Object System.Collections.ArrayList
+        foreach ($Key in $KeysToProcess) {
+            foreach ($SubKey in ($Counts[$Key].Keys | where {$_ -like "*WithBody"})) {
+                $attribute = Write-MCPropertyAttribute -Mandatory "true" -HelpMessage $Method.BodyParameter.Description `
+                    -Position $Counts[$Key][$SubKey][0] -ParameterSetName $SubKey -Level $Level
+                Add-String $Attributes $Attribute
+                $Counts[$Key][$SubKey][0]++
+            }
+        }
+        $Attributes = $Attributes -join "`r`n"
+        $summary = wrap-text (set-indent ("{{%T}}/// <summary> {0} </summary>" -f (Format-CommentString $Method.BodyParameter.Description)) $Level)
+        $declaration  = wrap-text (set-indent ("{{%T}}public {0} {1} {{ get; set; }}" -f $Method.BodyParameter.TypeData, `
+            ($Method.BodyParameter.Type + " Body")) $Level)
+            
+        $BodyText = $summary,$attributes,$declaration -join "`r`n"
+        Add-String $ParameterTexts $BodyText
+
+        #Now write the non-body options
+        $BodyAttributes = New-Object System.Collections.ArrayList
+        foreach ($BodyProperty in ($Method.BodyParameter.SchemaObject.Properties | where Name -ne "ETag")) {
+            
+            $BPName = $BodyProperty.Name
+
+            if ($Method.Parameters.Name -contains $BodyProperty.Name `
+                -or $Method.UploadMethod.Parameters.Name -contains $BodyProperty.Name) {
+                $BPName = $Method.BodyParameter.SchemaObject.Type + $BodyProperty.Name
+            }
+
+            $Attributes = New-Object System.Collections.ArrayList
+            foreach ($Key in $KeysToProcess) {
+                foreach ($SubKey in ($Counts[$Key].Keys | where {$_ -like "*NoBody"})) {
+                    $Attribute = Write-MCPropertyAttribute -Mandatory "false" -HelpMessage `
+                        $BodyProperty.Description -Position $Counts[$Key][$SubKey][0] `
+                        -ParameterSetName $SubKey -Level $Level
+
+                    Add-String $Attributes $Attribute
+                    $Counts[$Key][$SubKey][0]++
+                }
+            }
+            $Attributes = $Attributes -join "`r`n"
+
+            $summary = wrap-text (Set-Indent ("{{%T}}/// <summary> {0} </summary>" -f (Format-CommentString $BodyProperty.Description)) $Level)
+            $declaration  = wrap-text (Set-Indent ("{{%T}}public {0} {1} {{ get; set; }}" -f $BodyProperty.Type, $BPName) $Level)
+            
+            $Text = $summary,$Attributes,$declaration -join "`r`n"
+            Add-String $ParameterTexts $Text
+        }
+    }
+
+    $Properties = $ParameterTexts -join "`r`n`r`n"
+
+    return $Properties
+}
+
 #write the parameters for the cmdlet
 function Write-MCProperties ($Method, $Level=0) {
     $PropertyTexts = New-Object System.Collections.ArrayList
@@ -943,14 +1065,6 @@ function Write-MCProperties ($Method, $Level=0) {
         $PropertyTexts.Add($PropertyText) | Out-Null
         $StandardPositionInt++
     }
-
-    if ($Method.SupportsMediaDownload -eq $true -or $Method.SupportsMediaUpload -eq $true) {
-        if ($Method.SupportsMediaDownload -eq $true) {
-            $PMedia = Get-MediaDownloadProperty -Method $Method
-        } else {
-            $PMedia = Get-MediaUploadProperty -Method $Method
-        }
-    }
     
     if ($Method.HasBodyParameter -eq $true) {
         
@@ -959,12 +1073,6 @@ function Write-MCProperties ($Method, $Level=0) {
             ($Method.BodyParameter.Type + " Body")) $Level)
         $attribute = Write-MCPropertyAttribute -Mandatory "true" -HelpMessage $Property.Description `
             -Position $StandardPositionInt -ParameterSetName "WithBody" -Level $Level
-
-        if ($Method.SupportsMediaDownload -eq $true -or $Method.SupportsMediaUpload -eq $true) {
-            $attribute2 = Write-MCPropertyAttribute -Mandatory "true" -HelpMessage $Property.Description `
-                -Position $StandardPositionInt -ParameterSetName $PMedia.Name -Level $Level
-            $attribute = $attribute,$attribute2 -join "`r`n"
-        }
             
         $BodyText = $summary,$attribute,$signature -join "`r`n"
         $PropertyTexts.Add($BodyText) | Out-Null
@@ -986,34 +1094,12 @@ function Write-MCProperties ($Method, $Level=0) {
             
             $BPsignature  = wrap-text (Set-Indent ("{{%T}}public {0} {1} {{ get; set; }}" -f $BodyProperty.Type, $BPName) $Level)
             $BPAttribute = Write-MCPropertyAttribute -Mandatory "false" -HelpMessage $BodyProperty.Description `
-                -Position $BodyPositionInt -ParameterSetName "NoBodyObject" -Level $Level
+                -Position $BodyPositionInt -ParameterSetName "NoBody" -Level $Level
 
             $BodyPositionInt++
 
             $BPText = $BPSummary,$BPAttribute,$BPsignature -join "`r`n"
             $PropertyTexts.Add($BPText) | Out-Null
-        }
-    }
-
-    if ($Method.SupportsMediaDownload -eq $true -or $Method.SupportsMediaUpload -eq $true) {
-        $summary = Wrap-Text (Set-Indent ("{{%T}}/// <summary> {0} </summary>" -f (Format-CommentString $PMedia.Description)) $Level)
-
-        $attributes = Write-MCPropertyAttribute -Mandatory "true" -HelpMessage $PMedia.Description `
-            -Position $StandardPositionInt -Level $Level -ParameterSetName $PMedia.Name
-        $signature  = wrap-text (set-indent ("{{%T}}public {0} {1} {{ get; set; }}" -f $PMedia.Type, $PMedia.Name) $Level)
-        $PropertyText = $summary,$attributes,$signature -join "`r`n"
-        $PropertyTexts.Add($PropertyText) | Out-Null
-        $StandardPositionInt++
-
-        if ($Method.SupportsMediaUpload -eq $true) {
-            $summary = Wrap-Text (Set-Indent ("{{%T}}/// <summary> {0} </summary>" -f (Format-CommentString $PMedia.Description)) $Level)
-
-            $attributes = Write-MCPropertyAttribute -Mandatory "true" -HelpMessage 'The content type for this file' `
-                -Position $StandardPositionInt -Level $Level -ParameterSetName $PMedia.Name
-            $signature  = wrap-text (set-indent ("{%T}public string ContentType { get; set; }") $Level)
-            $PropertyText = $summary,$attributes,$signature -join "`r`n"
-            $PropertyTexts.Add($PropertyText) | Out-Null
-            $StandardPositionInt++
         }
     }
 
@@ -1216,7 +1302,6 @@ function Write-MCMethod ($Method, $Level=0) {
     $ResourceName = $Method.Resource.Name
     
     $Verb = Get-McVerb $Method.Name
-    #$NounResourceParent = if (-not [string]::IsNullOrWhiteSpace($ResourceParent)) {$ResourceParent}
     $Noun = "G" + $Method.Api.Name + (ConvertTo-FirstUpper $Method.Api.Version) + $ParentResourceChainNoJoin
     $CmdletCommand = "{0}{1}Command" -f $Verb,$Noun
     $CmdletBase = $Method.Resource.Api.Name + "Base"
@@ -1224,8 +1309,18 @@ function Write-MCMethod ($Method, $Level=0) {
     $MethodName = $Method.Name
     $MethodChainLower = $ParentResourceChainLower, $MethodName -join "."
     
-    $CmdletAttribute = Write-MCAttribute -Method $Method -Noun $Noun
-    $Properties = Write-MCProperties $Method ($Level+1)
+    if ($Method.HasBodyParameter -eq $true) {
+        $DefaultParamSet = "WithBody"
+    } elseif ($Method.SupportsMediaDownload) {
+        $DefaultParamSet = "Default"
+    }
+
+    $CmdletAttribute = Write-MCAttribute -Method $Method -Noun $Noun -DefaultParameterSet $DefaultParamSet
+    if ($Method.HasBodyObject -eq $true) {
+        $Properties = Write-MCMediaDownloadProperties $Method ($Level+1)
+    } else {
+        $Properties = Write-MCProperties $Method ($Level+1)
+    }
     $MethodCallParams = Write-MCMethodCallParams $Method
     
     if ($Method.ReturnType.Type -ne "void") {
@@ -1237,32 +1332,37 @@ function Write-MCMethod ($Method, $Level=0) {
 
     $MethodCallLine = "{%T}            $WriteObjectOpen $MethodChainLower($MethodCallParams)$WriteObjectClose;"
 
-    if ($Method.SupportsMediaDownload -or $Method.SupportsMediaUpload) {
-        if ($Method.ReturnType.Type -ne "void" -and -not $Method.SupportsMediaDownload -eq $true) {
-            $WriteObjectOpen2 = "WriteObject("
-            $WriteObjectClose2 = ")"
+    if ($Method.HasBodyParameter -eq $true) {
+        
+        $BodyProperties = New-Object System.Collections.ArrayList
+        foreach ($BodyProperty in ($Method.BodyParameter.SchemaObject.Properties `
+            | where Name -ne "ETag"))
+        {
+            Add-String $BodyProperties ("{{%T}}                    {0} = this.{0}" -f $BodyProperty.Name)
         }
-        $MediaMethodCallParams = Write-MCMethodCallParams $Method -AsMediaDownloader `
-            $Method.SupportsMediaDownload -AsMediaUploader $Method.SupportsMediaUpload
+        $BodyProperties = $BodyProperties -join ",`r`n"
 
-        if ($Method.SupportsMediaDownload -eq $true) {
-            $P = Get-MediaDownloadProperty $Method
-        } else {
-            $P = Get-MediaUploadProperty $Method
-        }
+        $BodyPropertyType = $Method.BodyParameter.Type
 
-        $ParamSetName = $P.Name
-
-        $MethodCall = @"
-{%T}            if (ParameterSetName == "$ParamSetName") {
-{%T}                $WriteObjectOpen2 $MethodChainLower($MediaMethodCallParams)$WriteObjectClose2;
-{%T}            }
-{%T}            else
+        $BodyParameterSets = @"
+{%T}            if (ParameterSetName.EndsWith("NoBody"))
 {%T}            {
-{%T}                $WriteObjectOpen $MethodChainLower($MethodCallParams)$WriteObjectClose;
+{%T}                Body = new $BodyPropertyType()
+{%T}                {
+$BodyProperties
+{%T}                };
 {%T}            }
 "@
-    } else {
+    }
+
+    if ($Method.SupportsMediaDownload) {
+        $MediaMethodCallParams = Write-MCMethodCallParams $Method -AsMediaDownloader `
+            $Method.SupportsMediaDownload
+
+        $P = Get-MediaDownloadProperty $Method
+        
+        $ParamSetName = $P.Name
+
         $MethodCall = "{%T}            $WriteObjectOpen $MethodChainLower($MethodCallParams)$WriteObjectClose;"
     }
     
@@ -1278,6 +1378,7 @@ $Properties
 
 {%T}    protected override void ProcessRecord()
 {%T}    {$PropertyObject
+$BodyParameterSets
 {%T}        if (ShouldProcess("$Noun $ResourceName", "$Verb-$Noun"))
 {%T}        {
 $MethodCall

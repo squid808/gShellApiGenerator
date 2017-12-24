@@ -90,26 +90,8 @@ function New-Api ([System.Reflection.Assembly]$Assembly, $RestJson) {
     $api.NameAndVersion = $Api.RootNamespace -replace "^Google.Apis.",""
     $api.NameAndVersionLower = ConvertTo-FirstLower $Api.NameAndVersion
 
-    Get-Resources $api | % {$api.Resources.Add($_) | Out-Null}
-    $api.Resources | % {$api.ResourcesDict[$_.name] = $_}
-
     $api.HasStandardQueryParams = Has-ObjProperty $api.DiscoveryObj "parameters"
 
-    $Scopes = $api.ReflectedObj.ExportedTypes | where Name -eq Scope
-
-    #set the scopes
-    if  ($Scopes -ne $null) {
-        foreach ($D in ($Scopes | select -ExpandProperty DeclaredFields)){
-            $S = new-object ApiScope
-            $S.Name = $D.Name
-            $S.Uri = $D.GetValue($D)
-            $S.Description = $Api.DiscoveryObj.auth.oauth2.scopes.($S.Uri).description
-            $Api.Scopes.Add($S) | Out-Null
-        }
-    } else {
-        throw "No scopes found in the assembly, cannot proceed."
-    }
-    
     #TODO - throw error if more than one result?
     foreach ($Param in ($Api.ReflectedObj.ExportedTypes | where {$_.Name -like "*BaseServiceRequest?1" `
                 -and $_.BaseType.Name -eq "ClientServiceRequest``1"} | select -ExpandProperty DeclaredProperties) `
@@ -125,6 +107,24 @@ function New-Api ([System.Reflection.Assembly]$Assembly, $RestJson) {
             select -ExpandProperty ConstructorArguments | select -First 1 -ExpandProperty Value
         $P.Description = $P.Api.DiscoveryObj.parameters.($DiscoveryName).Description
         $Api.StandardQueryParams.Add($P) | Out-Null
+    }
+
+    Get-Resources $api | % {$api.Resources.Add($_) | Out-Null}
+    $api.Resources | % {$api.ResourcesDict[$_.name] = $_}
+
+    $Scopes = $api.ReflectedObj.ExportedTypes | where Name -eq Scope
+
+    #set the scopes
+    if  ($Scopes -ne $null) {
+        foreach ($D in ($Scopes | select -ExpandProperty DeclaredFields)){
+            $S = new-object ApiScope
+            $S.Name = $D.Name
+            $S.Uri = $D.GetValue($D)
+            $S.Description = $Api.DiscoveryObj.auth.oauth2.scopes.($S.Uri).description
+            $Api.Scopes.Add($S) | Out-Null
+        }
+    } else {
+        throw "No scopes found in the assembly, cannot proceed."
     }
 
     $api.CanUseServiceAccount = (-not $api.RootNamespace.StartsWith("Google.Apis.Discovery") -and `
@@ -311,8 +311,7 @@ function New-ApiMethod ([ApiResource]$Resource, $Method, $UseReturnTypeGenericIn
     $ParameterNames = New-Object "System.Collections.Generic.HashSet[string]"
 
     #get the properties of the virtual method. This may include a body?
-    foreach ($P in $Method.GetParameters()) {
-
+    foreach ($P in ($Method.GetParameters() | where {$Api.StandardQueryparams.Name -notcontains $_.Name})) {
         $ParameterNames.Add($P.Name.ToLower()) | Out-Null
         $Param = New-ApiMethodProperty $M $P -ForceRequired $true
 
@@ -323,7 +322,11 @@ function New-ApiMethod ([ApiResource]$Resource, $Method, $UseReturnTypeGenericIn
     #get the properties of the request class - those missing set methods are generally properties not associated with
     # the api -MethodName, HttpMethod and RestPath. Properties with setters are likely to be those we want to update
     # and send along with the API request
-    foreach ($P in ($M.ReflectedObj.ReturnType.DeclaredProperties | where {$_.SetMethod -ne $null -and $_.Name.ToLower() -ne "pagetoken"})){
+    foreach ($P in ($M.ReflectedObj.ReturnType.DeclaredProperties | where {`
+        $_.SetMethod -ne $null `
+        -and $_.Name.ToLower() -ne "pagetoken" `
+        -and $Api.StandardQueryparams.Name -notcontains $_.Name}))
+    {
     
         if (-not $ParameterNames.Contains($P.Name.ToLower())) {
             $Param = New-ApiMethodProperty $M $P
@@ -525,6 +528,7 @@ function New-ApiMethodProperty {
         $P.SchemaObject = New-ApiClass -ReflectedObj $P.ReflectedObj.ParameterType -Api $Method.Api
 
         if ($P.Name -eq "Body") {
+            $P.Description = "An object of type " + $P.ReflectedObj.ParameterType
             $Method.HasBodyParameter = $true
             $Method.BodyParameter = $P
         } 

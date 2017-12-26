@@ -1226,9 +1226,9 @@ function Write-MCUploadMethod ($Method, $Level=0) {
 
     $MethodCallLine = "{%T}            $WriteObjectOpen $MethodChainLower($MethodCallParams)$WriteObjectClose;"
 
-    if ($Method.ReturnType.Type -ne "void") {
-        $WriteObjectOpen2 = "WriteObject("
-        $WriteObjectClose2 = ")"
+    if ($Method.UploadMethod.ReturnType.Type -ne "void") {
+        $MediaWriteObjectOpen = "WriteObject("
+        $MediaWriteObjectClose = ")"
     }
 
     $MediaMethodCallParams = Write-MCMethodCallParams $Method -AsMediaUploader $true
@@ -1278,7 +1278,7 @@ $BodyParameterSets
 {%T}            if (ParameterSetName.StartsWith("Media"))
 {%T}            {
 $MediaPropertyObject
-{%T}                $WriteObjectOpen2 $MethodChainLower($MediaMethodCallParams)$WriteObjectClose2;
+{%T}                $MediaWriteObjectOpen $MethodChainLower($MediaMethodCallParams)$MediaWriteObjectClose;
 {%T}            }
 {%T}            else
 {%T}            {
@@ -1311,12 +1311,12 @@ function Write-MCMethod ($Method, $Level=0) {
     
     if ($Method.HasBodyParameter -eq $true) {
         $DefaultParamSet = "WithBody"
-    } elseif ($Method.SupportsMediaDownload) {
+    } elseif ($Method.SupportsMediaDownload -eq $true) {
         $DefaultParamSet = "Default"
     }
 
     $CmdletAttribute = Write-MCAttribute -Method $Method -Noun $Noun -DefaultParameterSet $DefaultParamSet
-    if ($Method.HasBodyObject -eq $true) {
+    if ($Method.SupportsMediaDownload -eq $true) {
         $Properties = Write-MCMediaDownloadProperties $Method ($Level+1)
     } else {
         $Properties = Write-MCProperties $Method ($Level+1)
@@ -1329,9 +1329,7 @@ function Write-MCMethod ($Method, $Level=0) {
     }
 
     $PropertyObject = Write-MCMethodPropertiesObject $Method $Level
-
-    $MethodCallLine = "{%T}            $WriteObjectOpen $MethodChainLower($MethodCallParams)$WriteObjectClose;"
-
+    
     if ($Method.HasBodyParameter -eq $true) {
         
         $BodyProperties = New-Object System.Collections.ArrayList
@@ -1345,25 +1343,37 @@ function Write-MCMethod ($Method, $Level=0) {
         $BodyPropertyType = $Method.BodyParameter.Type
 
         $BodyParameterSets = @"
-{%T}            if (ParameterSetName.EndsWith("NoBody"))
+{%T}        if (ParameterSetName.EndsWith("NoBody"))
+{%T}        {
+{%T}            Body = new $BodyPropertyType()
 {%T}            {
-{%T}                Body = new $BodyPropertyType()
-{%T}                {
 $BodyProperties
-{%T}                };
-{%T}            }
+{%T}            };
+{%T}        }
+{%T}
 "@
     }
+
+    $MethodCall = "{%T}            $WriteObjectOpen $MethodChainLower($MethodCallParams)$WriteObjectClose;"
 
     if ($Method.SupportsMediaDownload) {
         $MediaMethodCallParams = Write-MCMethodCallParams $Method -AsMediaDownloader `
             $Method.SupportsMediaDownload
 
-        $P = Get-MediaDownloadProperty $Method
-        
-        $ParamSetName = $P.Name
+        $MediaMethodCall = "{%T}                $MethodChainLower($MediaMethodCallParams);"
 
-        $MethodCall = "{%T}            $WriteObjectOpen $MethodChainLower($MethodCallParams)$WriteObjectClose;"
+        $MethodCallBlock = @"
+{%T}            if (ParameterSetName.StartsWith("Media"))
+{%T}            {
+$MediaMethodCall
+{%T}            }
+{%T}            else
+{%T}            {
+    $MethodCall
+{%T}            }
+"@
+    } else {
+        $MethodCallBlock = $MethodCall
     }
     
     $text = @"
@@ -1381,7 +1391,7 @@ $Properties
 $BodyParameterSets
 {%T}        if (ShouldProcess("$Noun $ResourceName", "$Verb-$Noun"))
 {%T}        {
-$MethodCall
+$MethodCallBlock
 {%T}        }
 {%T}    }
 {%T}}

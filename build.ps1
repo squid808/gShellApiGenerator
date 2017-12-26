@@ -8,7 +8,7 @@ function New-PackagesConfig ($LibraryIndex, $DependenciesChain, $BuildProjectPat
 
     $packageFormatString = '  <package id="{0}" version="{1}" targetFramework="net451" />'
 
-    $Exclusions = @("System.Net.Http", "System.Management.Automation.dll")
+    $Exclusions = @("System.Net.Http", "System.Management.Automation.dll","gShell.Main")
 
     foreach ($D in $DependenciesChain.GetEnumerator()) {
         if ($Exclusions -notcontains $D.Name) {

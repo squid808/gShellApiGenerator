@@ -16,6 +16,11 @@
         $Version = $Matches[0]
     }
 
+    #Make sure the version is only 3 places long
+    $Split = $Version.Split(".")
+    $Version = ($Split[0], $Split[1], ($Split[2] + $Split[3]) -join ".")
+    $PrereleaseVersion = "-alpha01"
+
     $Author = "Spencer Varney"
 
     $ApiName = $Api.Name
@@ -44,5 +49,13 @@
         ) `
         -RootModule ".\$ModuleName.dll" `
         -ProjectUri "https://github.com/squid808/gShell" `
-        -LicenseUri "https://github.com/squid808/gShell/blob/master/LICENSE" 
-}
+        -LicenseUri "https://github.com/squid808/gShell/blob/master/LICENSE"
+
+        $P = (get-content "$ProjectDebugFolder\$ModuleName.psd1") -join "`r`n"
+
+        $P.Replace("    } # End of PSData hashtable",@"
+        # Prerelease Version
+        Prerelease = 'alpha01'
+    } # End of PSData hashtable
+"@) | Out-File -FilePath "$ProjectDebugFolder\$ModuleName.psd1"
+}""

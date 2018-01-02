@@ -59,7 +59,9 @@ function Invoke-GshellGeneratorMain {
             $ApisFromNuget = $ApisFromNuget | where {$_ -like ("Google.Apis." + $ApiFilter)}
         }
 
-        if ($ApisFromNuget.Count -eq 0) {
+        if (($ApisFromNuget.GetType() -like "*Object[[]]*" -and $ApisFromNuget.Count -eq 0) `
+            -or ($ApisFromNuget.GetType() -like "*String*" -and [string]::IsNullOrWhiteSpace($ApisFromNuget)))
+        {
             Log "No Apis found with the filter `"$ApiFilter`"" $Log
         } else {
             foreach ($ApiName in $ApisFromNuget) {
@@ -86,8 +88,8 @@ function Invoke-GshellGeneratorMain {
 }
 
 #TODO - add in some kind of build summary report at the end - provide error logs for those that didn't work?
-#Invoke-GshellGeneratorMain -ApiFilter "gmail.v1" -ShouldBuildApis -ForceBuildApis -Log $Log
+Invoke-GshellGeneratorMain -ApiFilter "gmail.v1" -ShouldBuildApis -ForceBuildApis -Log $Log
 
 #Invoke-GshellGeneratorMain -ForceBuildGShell -Log $Log
 
-Invoke-GshellGeneratorMain -ApiFilter "drive.v3" -ShouldBuildApis -ForceBuildApis -Log $Log
+#Invoke-GshellGeneratorMain -ApiFilter "drive.v3" -ShouldBuildApis -ForceBuildApis -Log $Log

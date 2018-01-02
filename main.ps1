@@ -4,10 +4,18 @@
 #TODO: Clean up code!
 #TODO: allow main invokable to be called with a target path
 
-$LibraryIndexRoot = "$env:USERPROFILE\Desktop\Libraries"
-$RootProjPath = "$env:USERPROFILE\Desktop\GenOutput"
-$JsonRootPath = "$env:USERPROFILE\Desktop\DiscoveryRestJson"
+$LibraryIndexRoot = "$env:USERPROFILE\Desktop\gShellGen\Libraries"
+$RootProjPath = "$env:USERPROFILE\Desktop\gShellGen\GenOutput"
+$JsonRootPath = "$env:USERPROFILE\Desktop\gShellGen\DiscoveryRestJson"
 $Log = $true
+
+if (-not (test-path $LibraryIndexRoot)) {New-Item -Path $LibraryIndexRoot -ItemType "directory"}
+if (-not (test-path $RootProjPath)) {New-Item -Path $RootProjPath -ItemType "directory"}
+if (-not (test-path $JsonRootPath)) {New-Item -Path $JsonRootPath -ItemType "directory"}
+
+if ((Get-Command "Invoke-MsBuild") -eq $null) {
+    Install-Module -name "Invoke-MsBuild" -Scope CurrentUser -Force
+}
 
 #To Run All Files
 function Invoke-GshellGeneratorMain {

@@ -40,7 +40,7 @@ function Get-GShellProjReferences ($RootProjPath, $LibraryIndex) {
 
     $latestGoogleAuthVersion = $LibraryIndex.GetLibVersionLatestName("Google.Apis.Auth")
 
-    $DebugPath = ([System.IO.Path]::Combine($RootOutPath,"bin\Debug"))
+    $DebugPath = ([System.IO.Path]::Combine($RootProjPath,"bin\Debug"))
 
     foreach ($D in $LibraryIndex.GetLibVersionDependencyChain("Google.Apis.Auth",$latestGoogleAuthVersion).GetEnumerator()) {
         if ($D.Name -ne "System.Net.Http") {
@@ -64,8 +64,9 @@ function Get-GShellProjReferences ($RootProjPath, $LibraryIndex) {
 
     #TODO: Manually write this out - will it change? Only if MS decides to upload their own version I guess. Who am I talking to? Does this mean I've cracked?
     $SysAutoName = "System.Management.Automation"
-    #note - the version pulled from nuget doesn't have a 0 at the end but it does when restored.
-    $AutomationHintPath1 = Write-CSPReferenceHintPath -Name $SysAutoName -Version "10.0.10586.0" -IsConditional $true
+    $SysAutoVersion = "10.0.10586.0" #note - the version pulled from nuget doesn't have a 0 at the end but it does when restored.
+    
+    $AutomationHintPath1 = Write-CSPReferenceHintPath -Name $SysAutoName -Version $SysAutoVersion -IsConditional $true
     $AutomationHintPath2 = Write-CSPReferenceHintPath -HintPath ("..\..\Libraries\{0}\10.0.10586\{0}.dll" -f $SysAutoName, $SysAutoVersion) -IsConditional $true
     Add-String $Dependencies (Write-CSPReference $SysAutoName "3.0.0.0" -HintPath1 $AutomationHintPath1 -HintPath2 $AutomationHintPath2 -Private $true)
     
@@ -121,7 +122,6 @@ function New-GShellCSProjFile ($LibraryIndex, $RootProjPath) {
 {1}
   </ItemGroup>
   <ItemGroup>
-    <None Include="app.config" />
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup />

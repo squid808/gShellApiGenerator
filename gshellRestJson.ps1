@@ -35,19 +35,19 @@ function Get-GoogleApiJsonFiles ($Name = $null, $Version = $null, $Preferred = $
     $GoogleApiList = Get-GoogleApiList $Log
     $ChangeResults = New-Object System.Collections.Arraylist
 
-    if ($Filter -ne $null) {
+    if (-not [string]::IsNullOrWhiteSpace($Filter)) {
         $GoogleApiList = $GoogleApiList | where Id -like $Filter
     }
 
-    if ($Name -ne $null) {
+    if (-not [string]::IsNullOrWhiteSpace($Name)) {
         $GoogleApiList = $GoogleApiList | where Name -like $Name
     }
 
-    if ($Version -ne $null) {
+    if (-not [string]::IsNullOrWhiteSpace($Version)) {
         $GoogleApiList = $GoogleApiList | where Version -like $Version
     }
 
-    if ($Preferred -ne $null) {
+    if ($Preferred -eq $true) {
         $GoogleApiList = $GoogleApiList | where Name -eq $Preferred.ToString()
     }
 

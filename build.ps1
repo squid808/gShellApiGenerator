@@ -321,7 +321,7 @@ function CheckAndBuildGShellApi ($ApiName, $RootProjPath, $LibraryIndex, [bool]$
         Log ("$gShellApiName $LastVersionBuilt appears to be up to date") $Log
     }
 
-    return $gShellApiName, $LatestDllVersion
+    return $gShellApiName, $LatestDllVersion, $CompiledPath
         
 
         #$gShellVersion = $LibraryIndex.GetLibVersionLatestName($gShellMain)

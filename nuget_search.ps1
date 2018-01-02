@@ -543,6 +543,7 @@ function Check-AllApiPackages($LibraryIndex, $JsonRootPath, $LibrarySaveFolderPa
                 #since this is the first time we've encountered it, let's run a big search to make sure we can find it
                 $SearchResult = Invoke-BroadGoogleSearchOnNuget -PackageId $PackageId -Json $Json -Log $True
                 $VersionData = Get-SearchResultVersion -SearchResult $SearchResult -Version -1
+                
                 $LibraryIndex.SetLibRestNameAndVersion($PackageId, $Directory.Name)
 
                 if ($SearchResult.id -ne $PackageId) {

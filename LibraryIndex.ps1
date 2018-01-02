@@ -290,6 +290,10 @@ function Get-LibraryIndexLibRestNameAndVersion {
 function Set-LibraryIndexLibRestNameAndVersion {
     param($LibraryIndex, [string]$LibName, [string]$RestNameAndVersion)
 
+    if (-not ( Test-LibraryIndexLib $LibraryIndex $LibName)) {
+        Add-LibraryIndexLib $LibraryIndex $LibName
+    }
+
     if (-not (Has-ObjProperty $LibraryIndex.Libraries.$LibName "RestNameAndVersion")) {
         $LibraryIndex.Libraries.$LibName | Add-Member -NotePropertyName "RestNameAndVersion" -NotePropertyValue $null
     }

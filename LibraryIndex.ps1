@@ -467,3 +467,31 @@ function Initialize-LibraryIndex ($LibraryIndex) {
         Save-LibraryIndex $LibraryIndex
     }
 }
+
+function Update-Paths ($LibraryIndex, $NewDllRootPath) {
+    foreach ($Library in $LibraryIndex.Libraries.PSObject.Properties.Name) {
+        foreach ($Version in $LibraryIndex.Libraries.$Library.Versions.PSObject.Properties.Name) {
+            $VInfo = $LibraryIndex.Libraries.$Library.Versions.$Version
+
+            if ($VInfo.dllPath -eq "missing") {
+                $AssumedPath = [System.IO.Path]::Combine($NewDllRootPath, $Library, $Version)
+
+                if ((test-path $AssumedPath)) {
+                    $dllPath = [System.IO.Path]::Combine($AssumedPath, ($Library + ".dll"))
+
+                    if ((Test-Path $dllPath)) {
+                        $VInfo.dllPath = $dllPath
+                    }
+
+                    $xmlPath = [System.IO.Path]::Combine($AssumedPath, ($Library + ".xml"))
+
+                    if ((Test-Path $xmlPath)) {
+                        $VInfo.xmlPath = $xmlPath
+                    }
+                }
+            }
+        }
+    }
+
+    $LibraryIndex.Save()
+}

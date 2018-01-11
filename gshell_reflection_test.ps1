@@ -357,8 +357,17 @@ class ApiMethodProperty {
     #The property's name in first-lower case
     $NameLower
 
-    #The property's reflected type
+    #The property's reflected type, for general use in the .cs templates
     $Type
+
+    #The property's fully qualified type, eg string 
+    $FullyQualifiedType
+
+    #A type sanitized for the xml help documents, eg changing List<string> to string[]
+    $HelpDocShortType
+
+    #A long type sanitized for the xml help documents, eg changing 
+    $HelpDocLongType
 
     #Is this property mandatory for the API call
     [bool]$Required
@@ -430,6 +439,7 @@ function Get-ApiPropertyType {
     #if null, return it right here and now
     if ([string]::IsNullOrWhiteSpace($RefType.Name) -and [string]::IsNullOrWhiteSpace($RefType.FullName)) { return $null }
     
+    #is this a generic type? nullable, list, etc
     if (-not [string]::IsNullOrWhiteSpace($RefType.Name) -and $RefType.Name.Contains("``")) {
 
         $inners = New-Object System.Collections.ArrayList

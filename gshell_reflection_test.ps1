@@ -299,13 +299,14 @@ function New-ApiMethod ([ApiResource]$Resource, $Method, $UseReturnTypeGenericIn
     $M.Description = Clean-CommentString $M.DiscoveryObj.description
     $M.ReturnType =  New-ApiMethodProperty $M (Get-ApiMethodReturnType $Method -UseReturnTypeGenericInt $UseReturnTypeGenericInt)
     
+    #TODO - adjust this, where and when is it called?
     if (Has-ObjProperty $M.DiscoveryObj "response") {
-        $M.ReturnType.Type = Get-ApiPropertyTypeShortName $M.ReturnType.ReflectedObj.FullName $M.Api
+        #$M.ReturnType.Type = Get-ApiPropertyTypeShortName $M.ReturnType.ReflectedObj.FullName $M.Api
     } elseif ($M.ReturnType.Name -eq "String") {
         #Found in media downloads
-        $M.ReturnType.Type = "string"
+        $M.ReturnType.Type = New-BasicTypeStruct string
     } else {
-        $M.ReturnType.Type = "void"
+        $M.ReturnType.Type = New-BasicTypeStruct void
     }
     
     $ParameterNames = New-Object "System.Collections.Generic.HashSet[string]"
@@ -392,15 +393,44 @@ class ApiMethodProperty {
     [bool]$CustomProperty = $false
 }
 
+#used to pass around types until it can be put in to the MethodProperty
+class ApiPropertyTypeStruct {
+    #The property's reflected type, for general use in the .cs templates
+    $Type
+
+    #The property's fully qualified type, eg System.String 
+    $FullyQualifiedType
+
+    #A type sanitized for the xml help documents, eg changing List<string> to string[]
+    $HelpDocShortType
+
+    #A long type sanitized for the xml help documents, eg changing 
+    $HelpDocLongType
+
+    $InnerTypes = (New-Object System.Collections.ArrayList)
+
+    ApiPropertyTypeStruct () {}
+
+    ApiPropertyTypeStruct ($Type, $FullType, $HelpShort, $HelpLong) {
+        $this.Type = $Type
+        $this.FullyQualifiedType = $FullType
+        $this.HelpDocShortType = $HelpShort
+        $This.HelpDocLongType = $HelpLong
+    }
+}
+
 function Get-ApiPropertyTypeShortName($Name, $Api) {
     
 
     switch ($Name) {
         "System.String" {return "string"}
+        "String" {return "string"}
         "System.Int32" {return "int"}
         "int32" {return "int"}
         "System.Boolean" {return "bool"}
         "boolean" {return "bool"}
+        "System.Int64" {return "long"}        
+        "int64" {return "long"}
     }
 
     $Replaced = $Name -replace ($Api.RootNamespace + ".")
@@ -408,6 +438,72 @@ function Get-ApiPropertyTypeShortName($Name, $Api) {
     $Replaced = $Replaced -replace "[+]","."
 
     return $Replaced
+}
+
+function New-BasicTypeStruct{
+    param (
+        [ValidateSet("string","bool","int32","int64","void")]
+        $Type
+    )
+
+    switch ($Type) {
+        "string" {
+            return [ApiPropertyTypeStruct]::New("string","System.String","string","System.String")
+        }
+
+        "bool" {
+            return [ApiPropertyTypeStruct]::New("bool","System.Boolean","bool","System.Boolean")
+        }
+
+        "int32" {
+            return [ApiPropertyTypeStruct]::New("int","System.Int32","int","System.Int32")
+        }
+
+        "int64" {
+            return [ApiPropertyTypeStruct]::New("long","System.Int64","long","System.Int64")
+        }
+
+        "void" {
+            return [ApiPropertyTypeStruct]::New("void","void","void","void")
+        }
+    }
+}
+
+function Get-ApiPropertyTypeBasic {
+
+    param
+    (
+        $RefType,
+        $Api
+    )
+
+    #TODO - provide overload to provide just a string and create it from there for basic types
+
+    if ($RefType.FullName -eq "System.String" -or $RefType.FullName -eq "String") {
+        return (New-BasicTypeStruct string)
+    }
+
+    if ($RefType.FullName -eq "System.Boolean" -or $RefType.FullName -eq "boolean") {
+        return (New-BasicTypeStruct bool)
+    }
+
+    if ($RefType.FullName -eq "System.Int32" -or $RefType.FullName -eq "Int32") {
+        return (New-BasicTypeStruct int32)
+    }
+
+    if ($RefType.FullName -eq "System.Int64" -or $RefType.FullName -eq "Int64") {
+        return (New-BasicTypeStruct int64)
+    }
+
+    #otherwise...
+
+    $TypeStruct = New-Object ApiPropertyTypeStruct
+    $TypeStruct.Type = $RefType.FullName -replace ($Api.RootNamespace + ".") -replace "[+]","."
+    $TypeStruct.FullyQualifiedType = $RefType.FullName -replace "[+]","."
+    $TypeStruct.HelpDocShortType = $TypeStruct.Type -replace ("Data.") 
+    $TypeStruct.HelpDocLongType = $TypeStruct.FullyQualifiedType
+
+    return $TypeStruct
 }
 
 function Get-ApiPropertyType {
@@ -419,9 +515,9 @@ function Get-ApiPropertyType {
         [System.Type]$RuntimeType,
 
         [Parameter(ParameterSetName="runtimetype")]
-        $Api,
+        $Api#,
 
-        $GenericInners = $null
+        #$GenericInners = $null
     )
     if ($PSCmdlet.ParameterSetName -eq "property") {
         if ($Property.ReflectedObj.GetType().Name -eq "RuntimeParameterInfo") {
@@ -434,56 +530,6 @@ function Get-ApiPropertyType {
     } else {
         $RefType = $RuntimeType
     }
-    
-
-    #if null, return it right here and now
-    if ([string]::IsNullOrWhiteSpace($RefType.Name) -and [string]::IsNullOrWhiteSpace($RefType.FullName)) { return $null }
-    
-    #is this a generic type? nullable, list, etc
-    if (-not [string]::IsNullOrWhiteSpace($RefType.Name) -and $RefType.Name.Contains("``")) {
-
-        $inners = New-Object System.Collections.ArrayList
-
-        foreach ($I in $RefType.GenericTypeArguments) {
-            if ($I.GetType().Name -eq "RuntimeType") {
-                $InnerType = Get-ApiPropertyType -RuntimeType $I -Api $Api
-            } else {
-                $innerType = Get-ApiPropertyTypeShortName $I.FullName $Api
-            }
-
-            if (-not [string]::IsNullOrWhiteSpace($InnerType)) {
-                $inners.Add($innerType) | Out-Null
-            }
-        }
-
-        if ($GenericInners -ne $Null) {
-            $GenericInners | % {$inners.Add($_) | Out-Null}
-        }
-
-        #don't return any generics that don't have anything inside
-        if ($inners.Count -eq 0) { return $null }
-        
-        $InnerString = $inners -join ", "
-
-        if ($RefType.Name -eq "Repeatable``1") {
-            $Type = "Google.Apis.Util.Repeatable<{0}>" -f $InnerString
-
-        } elseif ($RefType.Name -eq "Nullable``1") {
-            $Type = $InnerString + "?"
-
-        } else {
-            $Type = "{0}<{1}>" -f $RefType.Name.Split("``")[0], $InnerString
-        }
-
-        $type = $type -replace "[+]","."
-
-    } else  {
-        if (-not [string]::IsNullOrWhiteSpace($RefType.FullName)) {
-            $type = (Get-ApiPropertyTypeShortName $RefType.FullName $Api)
-        } else {
-            $type = (Get-ApiPropertyTypeShortName $RefType.Name $Api)
-        }
-    }
 
     #Make sure we're not making a property that is declared as a subclass or object (struct, enum) within a generic class without providing the
     #generic type for said parent class.
@@ -495,7 +541,75 @@ function Get-ApiPropertyType {
         }
     }
 
-    return $Type
+    #if null, return it right here and now
+    if ([string]::IsNullOrWhiteSpace($RefType.Name) -and [string]::IsNullOrWhiteSpace($RefType.FullName)) { return $null }
+    
+    #is this a generic type? nullable, list, etc
+    if (-not [string]::IsNullOrWhiteSpace($RefType.Name) -and $RefType.Name.Contains("``")) {
+        
+        $TypeStruct = New-Object ApiPropertyTypeStruct
+
+        $inners = New-Object System.Collections.ArrayList
+        $InnerTypeStruct = New-Object ApiPropertyTypeStruct
+
+        foreach ($I in $RefType.GenericTypeArguments) {
+            if ($I.GetType().Name -eq "RuntimeType") {
+                $InnerTypeStruct = Get-ApiPropertyType -RuntimeType $I -Api $Api
+                $inners.Add
+            } else {
+                $InnerTypeStruct = Get-ApiPropertyTypeBasic $I $Api
+            }
+
+            #if (-not [string]::IsNullOrWhiteSpace($InnerType)) {
+            if ($InnerTypeStruct -ne $null) {
+                $TypeStruct.InnerTypes.Add($InnerTypeStruct) | Out-Null
+            }
+        }
+
+        #if ($GenericInners -ne $Null) {
+        #    $GenericInners | % {$inners.Add($_) | Out-Null}
+        #}
+
+        #don't return any generics that don't have anything inside
+        if ($TypeStruct.InnerTypes.Count -eq 0) { return $null }
+        
+        #$InnerString = $inners -join ", "
+
+        if ($TypeStruct.InnerTypes.Count -gt 1) { throw "ReflectionTest: Too Many Inner Generics!" }
+        
+        if ($RefType.Name -eq "Repeatable``1") {
+            $GenericInnerTypes = $TypeStruct.InnerTypes
+            $TypeStruct.Type = "Google.Apis.Util.Repeatable<{0}>" -f $TypeStruct.InnerTypes[0].Type
+            $TypeStruct.FullyQualifiedType = "Google.Apis.Util.Repeatable<{0}>" -f $TypeStruct.InnerTypes[0].FullyQualifiedType
+            $TypeStruct.HelpDocShortType = "{0}[]" -f $TypeStruct.InnerTypes[0].Type
+            $TypeStruct.HelpDocLongType = "{0}[]" -f $TypeStruct.InnerTypes[0].FullyQualifiedType
+
+        } elseif ($RefType.Name -eq "Nullable``1") {
+            $TypeStruct.Type = $TypeStruct.InnerTypes[0].Type + "?"
+            $TypeStruct.FullyQualifiedType = "System.Nullable<{0}>" -f $TypeStruct.InnerTypes[0].FullyQualifiedType 
+            $TypeStruct.HelpDocShortType = $TypeStruct.InnerTypes[0].Type
+            $TypeStruct.HelpDocLongType = $TypeStruct.InnerTypes[0].FullyQualifiedType
+
+        } else {
+            #TODO: figure out how  to handle this when there are multiple inner generics, like a Dictionary<a,b>
+            $TypeStruct.Type = "{0}<{1}>" -f ($RefType.Name.Split("``")[0] -replace "[+]","."), $TypeStruct.InnerTypes[0].Type
+            $TypeStruct.FullyQualifiedType = $TypeStruct.Type
+            $TypeStruct.HelpDocShortType = $TypeStruct.Type
+            $TypeStruct.HelpDocLongType = $TypeStruct.Type
+        }
+
+    } else  {
+        if (-not [string]::IsNullOrWhiteSpace($RefType.FullName)) {
+            
+            $TypeStruct = Get-ApiPropertyTypeBasic $RefType $Api
+        } else {
+            #TODO: when does this happen?
+            $TypeStruct.Type = (Get-ApiPropertyTypeBasic $RefType $Api)
+            throw "ReflectionTest: RefType FullName is null, please revise"
+        }
+    }
+
+    return $TypeStruct
 }
 
 function New-ApiMethodProperty {
@@ -516,9 +630,13 @@ function New-ApiMethodProperty {
     $P.NameLower = ConvertTo-FirstLower $Property.Name
     $P.ReflectedObj = $Property
     $P.DiscoveryObj = $Method.DiscoveryObj.parameters.($Property.Name)
-    $P.Type = Get-ApiPropertyType -Property $P
+    if ($P.ReflectedObj.GetType().Name -eq "RuntimeType") {
+        $P.Type = Get-ApiPropertyType -RuntimeType $P.ReflectedObj -Api $Api
+    } else {
+        $P.Type = Get-ApiPropertyType -Property $P
+    }
 
-    if ($P.Type -like "*Download.IMediaDownloader"){
+    if ($P.Type.FullyQualifiedType -like "*Download.IMediaDownloader"){
         #if ($Method.ReturnType.Type -eq "void") {
             $P.Method.SupportsMediaDownload = $true
         #}
@@ -554,7 +672,7 @@ class ApiClass {
     $Name
     $NameLower
     $Type
-    $TypeData
+    #$TypeData
     $Properties = (New-Object System.Collections.ArrayList)
     $Description
     #This class's reflected representation
@@ -572,10 +690,11 @@ function New-ApiClass {
         $Api
     )
 
-    $TypeData = Get-ApiPropertyTypeShortName $ReflectedObj.FullName $Api
+    #$TypeData = Get-ApiPropertyTypeShortName $ReflectedObj.FullName $Api
+    $TypeStruct = Get-ApiPropertyType -RuntimeType $ReflectedObj -Api $Api
 
-    if ($Api.SchemaObjectsDict.ContainsKey($TypeData)) {
-        return $Api.SchemaObjectsDict[$TypeData]
+    if ($Api.SchemaObjectsDict.ContainsKey($TypeStruct.Type)) {
+        return $Api.SchemaObjectsDict[$TypeStruct.Type]
     } else {
 
         $C = New-Object ApiClass
@@ -583,12 +702,13 @@ function New-ApiClass {
         $C.Api = $Api
 
         $C.ReflectedObj = $ReflectedObj
-        $C.Type = $ReflectedObj.Name
-        $C.DiscoveryObj = $C.Api.DiscoveryObj.schemas.($C.Type)
-        $C.TypeData = $TypeData
+        $C.Name = $ReflectedObj.Name
+        $C.DiscoveryObj = $C.Api.DiscoveryObj.schemas.($C.Name)
+        $C.Type = $TypeStruct
+        #$C.TypeData = $TypeData
         $C.Description = Clean-CommentString $C.DiscoveryObj.description
         $C.Api.SchemaObjects.Add($C) | Out-Null
-        $C.Api.SchemaObjectsDict[$C.TypeData] = $C
+        $C.Api.SchemaObjectsDict[$TypeStruct.Type] = $C
 
         foreach ($Property in ($ReflectedObj.DeclaredProperties | where Name -ne "ETag")) {
             $P = New-Object ApiMethodProperty #which can then in turn make their own API classes!
@@ -680,8 +800,8 @@ function Get-ApiResourceMethods($Resource, $ResourceType){
             $M = New-ApiMethod $resource $method -UseReturnTypeGenericInt 1
             $M.SupportsMediaUpload = $true
             foreach ($P in $M.Parameters) {
-                if ($P.type -eq "System.IO.Stream" -or `
-                    ($P.Name -eq "ContentType" -and $P.Type -eq "string")){
+                if ($P.type.type -eq "System.IO.Stream" -or `
+                    ($P.Name -eq "ContentType" -and $P.Type.Type -eq "string")){
                     $P.ShouldIncludeInTemplates = $false
                     $P.Required = $false
                 }
@@ -769,3 +889,4 @@ function Invoke-GShellReflection {
 #$Method = $Methods[1]
 #$M = $Method
 #$Init = $M.ReflectedObj.ReturnType.DeclaredMethods | where name -eq "InitParameters"
+#$Api = Invoke-GShellReflection -RestJson $RestJson -ApiName $ApiName -ApiFileVersion $LatestDllVersion -LibraryIndex $LibraryIndex

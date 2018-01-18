@@ -222,7 +222,7 @@ function Get-MediaDownloadProperty($Method) {
     $P.NameLower = "downloadPath"
     $P.Required = $true
     $P.Description = "The target download path of the file, including filename and extension."
-    $P.Type = "string"
+    $P.Type = New-BasicTypeStruct string
     $P.CustomProperty = $true
 
     return $P
@@ -236,7 +236,7 @@ function Get-MediaUploadProperty($Method) {
     $P.NameLower = "sourceFilePath"
     $P.Required = $true
     $P.Description = "The path of the target file to upload, including filename and extension."
-    $P.Type = "string"
+    $P.Type = New-BasicTypeStruct string
     $P.CustomProperty = $true
 
     return $P
@@ -359,7 +359,7 @@ function Write-SQP ($Api) {
     foreach ($Param in $Api.StandardQueryParams) {
         if ($Param.type -ne $null) {
             $Summary = Wrap-Text (("        /// <summary> {0} </summary>" -f (Format-CommentString $Param.description)))
-            $Property = "        public {0} {1} {{ get; set; }}" -f $Param.type, $Param.NameLower
+            $Property = "        public {0} {1} {{ get; set; }}" -f $Param.type.type, $Param.NameLower
 
             Add-String $Params ($Summary + "`r`n" + $Property)
         }
@@ -399,7 +399,7 @@ function Write-SQPB ($Api) {
     foreach ($Param in $Api.StandardQueryParams) {
             $Help = Format-HelpMessage $Param.description
             $ParamAttributes = Wrap-Text "    [Parameter(Mandatory = false, HelpMessage = `"$Help`")]"
-            $Signature = "        public {0} {1} {{ get; set; }}" -f $Param.type, $Param.NameLower
+            $Signature = "        public {0} {1} {{ get; set; }}" -f $Param.type.type, $Param.NameLower
 
             Add-String $Params ($Summary + "`r`n" + $Property)
         }
@@ -445,7 +445,7 @@ function Write-OCMethodProperties ($SchemaObj, $Level=0) {
     foreach ($Property in ($SchemaObj.Properties | where {$_.Name -ne "ETag" -and $_.ShouldIncludeInTemplates -eq $true})) {
         $CommentDescription = Format-CommentString $Property.Description
         $HelpDescription = Format-HelpMessage $Property.Description
-        $Type = $Property.Type
+        $Type = $Property.Type.Type
         $Name = $Property.Name
         
         $summary = Wrap-Text (Set-Indent "{%T}/// <summary> $CommentDescription </summary>" $Level)
@@ -467,8 +467,8 @@ function Write-OCMethodProperties ($SchemaObj, $Level=0) {
 
 function Write-OCMethod ($SchemaObj, $Level=0) {
     $Verb = "VerbsCommon.New"
-    $Noun = "G" + $SchemaObj.Api.Name + $SchemaObj.Type + "Obj"
-    $TypeData = $SchemaObj.TypeData
+    $Noun = "G" + $SchemaObj.Api.Name + $SchemaObj.Type.HelpDocShortType + "Obj"
+    $TypeData = $SchemaObj.Type.Type
     $Type = $SchemaObj.Type
     $ClassName = "New" + $Noun + "Command"
         
@@ -792,7 +792,7 @@ function Write-MCMediaUploadProperties($Method, $Level=0) {
         $Attributes = $Attributes -join "`r`n"
 
         $summary = Wrap-Text (Set-Indent ("{{%T}}/// <summary> {0} </summary>" -f (Format-CommentString $Parameter.Description)) $Level)
-        $declaration  = Wrap-Text (Set-Indent ("{{%T}}public {0} {1} {{ get; set; }}" -f $Parameter.Type, $Parameter.Name) $Level)
+        $declaration  = Wrap-Text (Set-Indent ("{{%T}}public {0} {1} {{ get; set; }}" -f $Parameter.Type.Type, $Parameter.Name) $Level)
 
         $ParameterText = $summary,$attributes,$declaration -join "`r`n"
 
@@ -803,7 +803,7 @@ function Write-MCMediaUploadProperties($Method, $Level=0) {
     foreach ($Parameter in $UploadParams) {
 
         if ($MethodParams.Name -contains $Parameter.Name `
-            -and (($MethodParams | where Name -eq $Parameter.Name).Type -ne $Parameter.Type)) {
+            -and (($MethodParams | where Name -eq $Parameter.Name).Type.Type -ne $Parameter.Type.Type)) {
             $Parameter.Name = "MediaUpload" + $Parameter.Name
         }
 
@@ -824,7 +824,7 @@ function Write-MCMediaUploadProperties($Method, $Level=0) {
             $Attributes = $Attributes -join "`r`n"
 
             $summary = Wrap-Text (Set-Indent ("{{%T}}/// <summary> {0} </summary>" -f (Format-CommentString $Parameter.Description)) $Level)
-            $declaration  = wrap-text (set-indent ("{{%T}}public {0} {1} {{ get; set; }}" -f $Parameter.Type, $Parameter.Name) $Level)
+            $declaration  = wrap-text (set-indent ("{{%T}}public {0} {1} {{ get; set; }}" -f $Parameter.Type.Type, $Parameter.Name) $Level)
 
             $ParameterText = $summary,$attributes,$declaration -join "`r`n"
 
@@ -844,7 +844,7 @@ function Write-MCMediaUploadProperties($Method, $Level=0) {
     }
     $Attributes = $Attributes -join "`r`n"
     $summary = Wrap-Text (Set-Indent ("{{%T}}/// <summary> {0} </summary>" -f (Format-CommentString $PMedia.Description)) $Level)
-    $declaration  = wrap-text (set-indent ("{{%T}}public {0} {1} {{ get; set; }}" -f $PMedia.Type, $PMedia.Name) $Level)
+    $declaration  = wrap-text (set-indent ("{{%T}}public {0} {1} {{ get; set; }}" -f $PMedia.Type.type, $PMedia.Name) $Level)
     $ParameterText = $summary,$Attributes,$declaration -join "`r`n"
     Add-String $ParameterTexts $ParameterText
 
@@ -876,8 +876,7 @@ function Write-MCMediaUploadProperties($Method, $Level=0) {
         }
         $Attributes = $Attributes -join "`r`n"
         $summary = wrap-text (set-indent ("{{%T}}/// <summary> {0} </summary>" -f (Format-CommentString $Method.BodyParameter.Description)) $Level)
-        $declaration  = wrap-text (set-indent ("{{%T}}public {0} {1} {{ get; set; }}" -f $Method.BodyParameter.TypeData, `
-            ($Method.BodyParameter.Type + " Body")) $Level)
+        $declaration  = wrap-text (set-indent ("{{%T}}public {0} Body {{ get; set; }}" -f $Method.BodyParameter.Type.Type) $Level)
             
         $BodyText = $summary,$attributes,$declaration -join "`r`n"
         Add-String $ParameterTexts $BodyText
@@ -890,7 +889,7 @@ function Write-MCMediaUploadProperties($Method, $Level=0) {
 
             if ($Method.Parameters.Name -contains $BodyProperty.Name `
                 -or $Method.UploadMethod.Parameters.Name -contains $BodyProperty.Name) {
-                $BPName = $Method.BodyParameter.SchemaObject.Type + $BodyProperty.Name
+                $BPName = $Method.BodyParameter.SchemaObject.Name + $BodyProperty.Name
             }
 
             $Attributes = New-Object System.Collections.ArrayList
@@ -907,7 +906,7 @@ function Write-MCMediaUploadProperties($Method, $Level=0) {
             $Attributes = $Attributes -join "`r`n"
 
             $summary = wrap-text (Set-Indent ("{{%T}}/// <summary> {0} </summary>" -f (Format-CommentString $BodyProperty.Description)) $Level)
-            $declaration  = wrap-text (Set-Indent ("{{%T}}public {0} {1} {{ get; set; }}" -f $BodyProperty.Type, $BPName) $Level)
+            $declaration  = wrap-text (Set-Indent ("{{%T}}public {0} {1} {{ get; set; }}" -f $BodyProperty.Type.Type, $BPName) $Level)
             
             $Text = $summary,$Attributes,$declaration -join "`r`n"
             Add-String $ParameterTexts $Text
@@ -961,7 +960,7 @@ function Write-MCMediaDownloadProperties($Method, $Level=0) {
         }
 
         $summary = Wrap-Text (Set-Indent ("{{%T}}/// <summary> {0} </summary>" -f (Format-CommentString $Parameter.Description)) $Level)
-        $declaration  = Wrap-Text (Set-Indent ("{{%T}}public {0} {1} {{ get; set; }}" -f $Parameter.Type, $Parameter.Name) $Level)
+        $declaration  = Wrap-Text (Set-Indent ("{{%T}}public {0} {1} {{ get; set; }}" -f $Parameter.Type.Type, $Parameter.Name) $Level)
 
         $ParameterText = $summary,$attribute,$declaration -join "`r`n"
 
@@ -980,7 +979,7 @@ function Write-MCMediaDownloadProperties($Method, $Level=0) {
     }
     $Attributes = $Attributes -join "`r`n"
     $summary = Wrap-Text (Set-Indent ("{{%T}}/// <summary> {0} </summary>" -f (Format-CommentString $PMedia.Description)) $Level)
-    $declaration  = wrap-text (set-indent ("{{%T}}public {0} {1} {{ get; set; }}" -f $PMedia.Type, $PMedia.Name) $Level)
+    $declaration  = wrap-text (set-indent ("{{%T}}public {0} {1} {{ get; set; }}" -f $PMedia.Type.Type, $PMedia.Name) $Level)
     $ParameterText = $summary,$Attributes,$declaration -join "`r`n"
     Add-String $ParameterTexts $ParameterText
 
@@ -998,8 +997,7 @@ function Write-MCMediaDownloadProperties($Method, $Level=0) {
         }
         $Attributes = $Attributes -join "`r`n"
         $summary = wrap-text (set-indent ("{{%T}}/// <summary> {0} </summary>" -f (Format-CommentString $Method.BodyParameter.Description)) $Level)
-        $declaration  = wrap-text (set-indent ("{{%T}}public {0} {1} {{ get; set; }}" -f $Method.BodyParameter.TypeData, `
-            ($Method.BodyParameter.Type + " Body")) $Level)
+        $declaration  = wrap-text (set-indent ("{{%T}}public {0} Body {{ get; set; }}" -f $Method.BodyParameter.Type.Type) $Level)
             
         $BodyText = $summary,$attributes,$declaration -join "`r`n"
         Add-String $ParameterTexts $BodyText
@@ -1012,7 +1010,7 @@ function Write-MCMediaDownloadProperties($Method, $Level=0) {
 
             if ($Method.Parameters.Name -contains $BodyProperty.Name `
                 -or $Method.UploadMethod.Parameters.Name -contains $BodyProperty.Name) {
-                $BPName = $Method.BodyParameter.SchemaObject.Type + $BodyProperty.Name
+                $BPName = $Method.BodyParameter.SchemaObject.Name + $BodyProperty.Name
             }
 
             $Attributes = New-Object System.Collections.ArrayList
@@ -1029,7 +1027,7 @@ function Write-MCMediaDownloadProperties($Method, $Level=0) {
             $Attributes = $Attributes -join "`r`n"
 
             $summary = wrap-text (Set-Indent ("{{%T}}/// <summary> {0} </summary>" -f (Format-CommentString $BodyProperty.Description)) $Level)
-            $declaration  = wrap-text (Set-Indent ("{{%T}}public {0} {1} {{ get; set; }}" -f $BodyProperty.Type, $BPName) $Level)
+            $declaration  = wrap-text (Set-Indent ("{{%T}}public {0} {1} {{ get; set; }}" -f $BodyProperty.Type.Type, $BPName) $Level)
             
             $Text = $summary,$Attributes,$declaration -join "`r`n"
             Add-String $ParameterTexts $Text
@@ -1058,7 +1056,7 @@ function Write-MCProperties ($Method, $Level=0) {
 
         $attributes = Write-MCPropertyAttribute -Mandatory $required -HelpMessage $Property.Description `
             -Position $StandardPositionInt -Level $Level
-        $signature  = wrap-text (set-indent ("{{%T}}public {0} {1} {{ get; set; }}" -f $Property.Type, $Property.Name) $Level)
+        $signature  = wrap-text (set-indent ("{{%T}}public {0} {1} {{ get; set; }}" -f $Property.Type.Type, $Property.Name) $Level)
 
         $PropertyText = $summary,$attributes,$signature -join "`r`n"
 
@@ -1069,8 +1067,7 @@ function Write-MCProperties ($Method, $Level=0) {
     if ($Method.HasBodyParameter -eq $true) {
         
         $summary = wrap-text (set-indent ("{{%T}}/// <summary> {0} </summary>" -f (Format-CommentString $Property.Description)) $Level)
-        $signature  = wrap-text (set-indent ("{{%T}}public {0} {1} {{ get; set; }}" -f $Method.BodyParameter.TypeData, `
-            ($Method.BodyParameter.Type + " Body")) $Level)
+        $signature  = wrap-text (set-indent ("{{%T}}public {0} Body {{ get; set; }}" -f $Method.BodyParameter.Type.Type) $Level)
         $attribute = Write-MCPropertyAttribute -Mandatory "true" -HelpMessage $Property.Description `
             -Position $StandardPositionInt -ParameterSetName "WithBody" -Level $Level
             
@@ -1087,12 +1084,12 @@ function Write-MCProperties ($Method, $Level=0) {
             $BPName = $BodyProperty.Name
 
             if ($Method.Parameters.Name -contains $BodyProperty.Name) {
-                $BPName = $Method.BodyParameter.SchemaObject.Type + $BodyProperty.Name
+                $BPName = $Method.BodyParameter.SchemaObject.Name + $BodyProperty.Name
             }
 
             $BPsummary = wrap-text (Set-Indent ("{{%T}}/// <summary> {0} </summary>" -f (Format-CommentString $BodyProperty.Description)) $Level)
             
-            $BPsignature  = wrap-text (Set-Indent ("{{%T}}public {0} {1} {{ get; set; }}" -f $BodyProperty.Type, $BPName) $Level)
+            $BPsignature  = wrap-text (Set-Indent ("{{%T}}public {0} {1} {{ get; set; }}" -f $BodyProperty.Type.Type, $BPName) $Level)
             $BPAttribute = Write-MCPropertyAttribute -Mandatory "false" -HelpMessage $BodyProperty.Description `
                 -Position $BodyPositionInt -ParameterSetName "NoBody" -Level $Level
 
@@ -1216,7 +1213,7 @@ function Write-MCUploadMethod ($Method, $Level=0) {
     $Properties = Write-MCMediaUploadProperties $Method ($Level+1)
     $MethodCallParams = Write-MCMethodCallParams $Method
     
-    if ($Method.ReturnType.Type -ne "void") {
+    if ($Method.ReturnType.Type.Type -ne "void") {
         $WriteObjectOpen = "WriteObject("
         $WriteObjectClose = ")"
     }
@@ -1226,7 +1223,7 @@ function Write-MCUploadMethod ($Method, $Level=0) {
 
     $MethodCallLine = "{%T}            $WriteObjectOpen $MethodChainLower($MethodCallParams)$WriteObjectClose;"
 
-    if ($Method.UploadMethod.ReturnType.Type -ne "void") {
+    if ($Method.UploadMethod.ReturnType.Type.Type -ne "void") {
         $MediaWriteObjectOpen = "WriteObject("
         $MediaWriteObjectClose = ")"
     }
@@ -1247,7 +1244,7 @@ function Write-MCUploadMethod ($Method, $Level=0) {
         }
         $BodyProperties = $BodyProperties -join ",`r`n"
 
-        $BodyPropertyType = $Method.BodyParameter.Type
+        $BodyPropertyType = $Method.BodyParameter.Type.Type
 
         $BodyParameterSets = @"
 {%T}            if (ParameterSetName.EndsWith("NoBody"))
@@ -1323,7 +1320,7 @@ function Write-MCMethod ($Method, $Level=0) {
     }
     $MethodCallParams = Write-MCMethodCallParams $Method
     
-    if ($Method.ReturnType.Type -ne "void") {
+    if ($Method.ReturnType.Type.Type -ne "void") {
         $WriteObjectOpen = "WriteObject("
         $WriteObjectClose = ")"
     }
@@ -1340,7 +1337,7 @@ function Write-MCMethod ($Method, $Level=0) {
         }
         $BodyProperties = $BodyProperties -join ",`r`n"
 
-        $BodyPropertyType = $Method.BodyParameter.Type
+        $BodyPropertyType = $Method.BodyParameter.Type.Type
 
         $BodyParameterSets = @"
 {%T}        if (ParameterSetName.EndsWith("NoBody"))
@@ -1495,7 +1492,7 @@ function Write-DNC_MethodSignatureParams ($Method, $Level=0,
     foreach ($P in $Method.Parameters){
         if ($P.Required -eq $true -and $P.ShouldIncludeInTemplates -eq $true){
             if ($NameOnly -ne $true) {
-                Add-String $Params ("{0} {1}" -f $P.Type, $P.Name)
+                Add-String $Params ("{0} {1}" -f $P.Type.Type, $P.Name)
             } else {
                 Add-String $Params $P.Name
             }
@@ -1506,7 +1503,7 @@ function Write-DNC_MethodSignatureParams ($Method, $Level=0,
         $P = Get-MediaDownloadProperty ($Method)
         
         if ($NameOnly -ne $true) {
-            Add-String $Params ("{0} {1}" -f $P.Type, $P.Name)
+            Add-String $Params ("{0} {1}" -f $P.Type.Type, $P.Name)
         } else {
             Add-String $Params $P.Name
         }
@@ -1516,7 +1513,7 @@ function Write-DNC_MethodSignatureParams ($Method, $Level=0,
         $P = Get-MediaUploadProperty ($Method)
         
         if ($NameOnly -ne $true) {
-            Add-String $Params ("{0} {1}" -f $P.Type, $P.Name)
+            Add-String $Params ("{0} {1}" -f $P.Type.Type, $P.Name)
             Add-String $Params ("string ContentType")
         } else {
             Add-String $Params $P.Name
@@ -1612,7 +1609,7 @@ function Write-DNC_MethodSignatureParams ($Method, $Level=0,
 #write a single wrapped method
 function Write-DNC_UploadMethod ($Method, $Level=0) {
     $MethodName = $Method.Name
-    $MethodReturnType = $Method.ReturnType.Type
+    $MethodReturnType = $Method.ReturnType.Type.Type
     
     $PropertiesObj = Write-DNC_MethodSignatureParams $Method `
         -AsMediaUploader $true -PropertyObjNameAddition "MediaUpload"
@@ -1635,7 +1632,7 @@ function Write-DNC_UploadMethod ($Method, $Level=0) {
         Add-String $sections "{%T}    $PropertiesObjVarName = $PropertiesObjVarName ?? new $PropertiesObjFullName();"
     }
 
-    if ($Method.ReturnType.Type -ne "void") {
+    if ($Method.ReturnType.Type.Type -ne "void") {
         $resultReturn = "return "
     }
 
@@ -1668,11 +1665,11 @@ function Write-DNC_UploadMethod ($Method, $Level=0) {
 function Write-DNC_Method ($Method, $Level=0, [bool]$AsMediaDownloader=$false, [bool]$AsMediaUploader=$false) {
     $MethodName = $Method.Name
     $MethodReturnType = if ($Method.HasPagedResults -eq $true) {
-        "List<{0}>" -f $Method.ReturnType.Type
+        "List<{0}>" -f $Method.ReturnType.Type.Type
     } elseif ($AsMediaDownloader -eq $true) {
         "void"
     } else {
-        $Method.ReturnType.Type
+        $Method.ReturnType.Type.Type
     }
     
     $PropertiesObj = Write-DNC_MethodSignatureParams $Method `
@@ -1703,7 +1700,7 @@ function Write-DNC_Method ($Method, $Level=0, [bool]$AsMediaDownloader=$false, [
         }
     }
 
-    if ($Method.ReturnType.Type -ne "void" -and -not $AsMediaDownloader -eq $true) {
+    if ($Method.ReturnType.Type.Type -ne "void" -and -not $AsMediaDownloader -eq $true) {
         $resultReturn = "return "
     }
 
@@ -1988,9 +1985,9 @@ function Write-DNSW_ResourceInstantiations ($Resources, $Level=0) {
 #the paged result block for a method
 function Write-DNSW_PagedResultBlock ($Method, $Level=0) {
     $MethodReturnTypeName = $Method.ReturnType.Name
-    $MethodReturnTypeFullName = $Method.ReturnType.Type
+    $MethodReturnTypeFullName = $Method.ReturnType.Type.Type
 
-    $resultsType = $Method.ReturnType.Type
+    $resultsType = $Method.ReturnType.Type.Type
 
     $PropertiesObjVarName = "{0}{1}Properties" -f $Method.Resource.NameLower, $Method.Name
 
@@ -2047,7 +2044,7 @@ function Write-DNSW_MethodSignatureParams ($Method, $Level=0, [bool]$RequiredOnl
             }
 
             if ($NameOnly -ne $true) {
-                Add-String $Params ("{0} {1}" -f $P.Type, $P.Name)
+                Add-String $Params ("{0} {1}" -f $P.Type.Type, $P.Name)
             } else {
                 Add-String $Params $P.Name
             }
@@ -2058,7 +2055,7 @@ function Write-DNSW_MethodSignatureParams ($Method, $Level=0, [bool]$RequiredOnl
         $P = Get-MediaDownloadProperty ($Method)
         
         if ($NameOnly -ne $true) {
-            Add-String $Params ("{0} {1}" -f $P.Type, $P.Name)
+            Add-String $Params ("{0} {1}" -f $P.Type.Type, $P.Name)
         } else {
             Add-String $Params $P.Name
         }
@@ -2078,7 +2075,7 @@ function Write-DNSW_MethodSignatureParams ($Method, $Level=0, [bool]$RequiredOnl
         $P = Get-MediaUploadProperty ($Method)
         
         if ($NameOnly -ne $true) {
-            Add-String $Params ("{0} {1}" -f $P.Type, $P.Name)
+            Add-String $Params ("{0} {1}" -f $P.Type.Type, $P.Name)
             Add-String $Params ("string ContentType")
         } else {
             Add-String $Params $P.Name
@@ -2137,7 +2134,7 @@ function Write-DNSW_MethodPropertyObj ($Method, $Level=0, [string]$NameAddition 
             }
 
             Add-String $Params (wrap-text (set-indent ("{{%T}}    /// <summary> {3} </summary>`r`n{{%T}}    public {0} {1} = {2};" `
-                -f $P.Type, $P.Name, $InitValue, (Format-CommentString $P.Description)) $Level))
+                -f $P.Type.Type, $P.Name, $InitValue, (Format-CommentString $P.Description)) $Level))
         }
 
         if ($Method.HasPagedResults -eq $true) {
@@ -2284,7 +2281,7 @@ $PropertyAssignments
 #writes a method specifically for media downloads
 function Write-DNSW_UploadMethod ($Method, $Level=0) {
     $MethodName = $Method.Name
-    $MethodReturnType = $Method.ReturnType.Type
+    $MethodReturnType = $Method.ReturnType.Type.Type
     $MethodSignatureParameters = Write-DNSW_MethodSignatureParams $Method -RequiredOnly $true `
         -IncludeGshellParams $true -AsMediaUploader $true -PropertyObjNameAddition "MediaUpload"
     $comments = Write-DNSW_MethodComments $Method $Level
@@ -2343,9 +2340,9 @@ $PropertyAssignments
 function Write-DNSW_Method ($Method, $Level=0) {
     $MethodName = $Method.Name
     $MethodReturnType = if ($Method.HasPagedResults -eq $true) {
-        "List<{0}>" -f $Method.ReturnType.Type
+        "List<{0}>" -f $Method.ReturnType.Type.Type
     } else {
-        $Method.ReturnType.Type
+        $Method.ReturnType.Type.Type
     }
 
     $PropertiesObj = Write-DNSW_MethodSignatureParams $Method -RequiredOnly $true -IncludeGshellParams $true
@@ -2391,7 +2388,7 @@ $SQParamsText
         $ResultsBlock = Write-DNSW_PagedResultBlock $Method -Level $Level
         Add-String $sections $PagedBlock
     } else {
-        if ($Method.ReturnType.Type -ne "void") {
+        if ($Method.ReturnType.Type.Type -ne "void") {
             $resultReturn = "return "
         }
         $ResultsBlock = ("{{%T}}    {0}request.Execute();" -f $resultReturn)
@@ -2733,4 +2730,3 @@ function Create-TemplatesFromDll ($LibraryIndex, $RestJson, $ApiName, $ApiFileVe
 
     return $Api
 }
-

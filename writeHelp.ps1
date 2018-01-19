@@ -368,7 +368,11 @@ function Write-MCHelpParams ($ParameterSet, [ref]$xmlWriter) {
         $x.WriteComment(("Parameter: " + $Parameter.Name))
         $x.WriteStartElement("command:parameter")
 
+        try {
         $x.WriteAttributeString("required",$null,($Parameter.Required.ToString().ToLower()))
+        } catch {
+            write-host ""
+        }
 
         $x.WriteAttributeString("globbing", $null, "false")
         if ($Parameter.Required -eq $true) {
@@ -427,8 +431,50 @@ function Write-MCHelpParams ($ParameterSet, [ref]$xmlWriter) {
     }
 }
 
-function Write-MCHelpInputTypes {
+function Write-MCHelpInputTypes ($ParameterSet, [ref]$xmlWriter) {
+    $x = $xmlWriter.Value
 
+    $x.WriteStartElement("command:inputTypes")
+
+    foreach ($Parameter in $ParameterSet) {
+        
+        $x.WriteStartElement("command:inputType")
+
+        $x.WriteStartElement("dev:type")
+        $x.WriteElementString("maml:name",$Parameter.Type.HelpDocLongType)
+        $x.WriteEndElement()
+
+        $x.WriteStartElement("maml:description")
+        $DescriptionLines = $Parameter.Description -split "(?:`n|`r`n?)"
+        foreach ($DLine in $DescriptionLines) {
+            if (-not [string]::IsNullOrWhiteSpace($DLine)) {
+                $x.WriteElementString("maml:para",$DLine)
+            }
+        }
+        #end maml:description
+        $x.WriteEndElement()
+
+        #end command:inputType
+        $x.WriteEndElement()
+    }
+
+    #end command:inputTypes
+        $x.WriteEndElement()
+}
+
+function Write-MCHelpReturnValues ($Method,[ref]$xmlWriter) {
+    $x = $xmlWriter.Value
+
+    $x.WriteStartElement("command:returnValues")
+
+    if ($Method.ReturnType.Type -ne $null -and $Method.ReturnType.Type.Type -ne "void") {
+        $x.WriteStartElement("dev:type")
+        $x.WriteElementString("maml:name",$Method.ReturnType.Type.HelpDocLongType)
+        $x.WriteEndElement()
+    }
+
+    #end command:returnValues
+    $x.WriteEndElement()
 }
 
 function Write-MCHelpSyntaxParams ($Verb, $Noun, $ParameterSetName, $ParameterSet, [ref]$xmlWriter) {
@@ -476,7 +522,7 @@ function Write-MCHelpProperties ($Method, $Verb, $Noun, [ref]$xmlWriter) {
     
     if ($Method.HasBodyParameter -eq $true) {
 
-        $ParameterSets["WithBody"].Add($Method.BodyParameter)
+        $ParameterSets["WithBody"].Add($Method.BodyParameter) | Out-Null
         $UniqueParams.Add($Method.BodyParameter) | Out-Null
 
         foreach ($BodyProperty in ($Method.BodyParameter.SchemaObject.Properties | where Name -ne "ETag")) {
@@ -496,6 +542,8 @@ function Write-MCHelpProperties ($Method, $Verb, $Noun, [ref]$xmlWriter) {
         }
     }
 
+    $AddedUniqueGauthId = $false
+    $AddedUniqueTargetUserEmail = $false
     foreach ($Key in $ParameterSets.Keys) {
 
         if (@("StandardQueryParametersBase","ServiceAccountCmdletBase","AuthenticatedCmdletBase") -contains $Method.Api.CmdletBaseType) {
@@ -506,7 +554,10 @@ function Write-MCHelpProperties ($Method, $Verb, $Noun, [ref]$xmlWriter) {
             $P.Type = New-BasicTypeStruct string
 
             $ParameterSets[$Key].Add($P) | Out-Null
-            $UniqueParams.Add($P) | Out-Null
+            if ($AddedUniqueGauthId -eq $false) {
+                $UniqueParams.Add($P) | Out-Null
+                $AddedUniqueGauthId = $true
+            }
         }
 
         if (@("StandardQueryParametersBase","ServiceAccountCmdletBase") -contains $Method.Api.CmdletBaseType) {
@@ -517,7 +568,10 @@ function Write-MCHelpProperties ($Method, $Verb, $Noun, [ref]$xmlWriter) {
             $P.Type = New-BasicTypeStruct string
 
             $ParameterSets[$Key].Add($P) | Out-Null
-            $UniqueParams.Add($P) | Out-Null
+            if ($AddedUniqueTargetUserEmail -eq $False) {
+                $UniqueParams.Add($P) | Out-Null
+                $AddedUniqueTargetUserEmail = $true
+            }
         }
     }
 
@@ -530,19 +584,12 @@ function Write-MCHelpProperties ($Method, $Verb, $Noun, [ref]$xmlWriter) {
     }
 
     Write-MCHelpSyntaxParams $Verb $Noun $DefaultParamSet $ParameterSets[$DefaultParamSet] ([ref]$x)
-
-    #now find unique, alphabetized set of params
-
-
-    $x.WriteStartElement("command:parameters")
-    Write-MCHelpParams -ParameterSet ($UniqueParams | sort Name) -xmlWriter ([ref]$x)
-    #end <command:parameters>
-    $x.WriteEndElement()
     
     foreach ($ParamSetName in ($ParameterSets.Keys | where {$_ -ne $DefaultParamSet})) {
         Write-MCHelpSyntaxParams $Verb $Noun $ParamSetName $ParameterSets[$ParamSetName] ([ref]$x)
     }
 
+    return $UniqueParams
 }
 
 #writes the method parameters for within the method call
@@ -777,116 +824,20 @@ function Write-MCHelpMethod ($Method, [ref]$xmlWriter, $Level=0) {
     if ($Method.UploadMethod -ne $null -and $Method.UploadMethod.SupportsMediaUpload -eq $true) {
 
     } else {
-        Write-MCHelpProperties $Method $Verb $Noun -xmlWriter ([ref]$x)
+        $UniqueParams = Write-MCHelpProperties $Method $Verb $Noun -xmlWriter ([ref]$x)
     }
 
     #end command:syntax
     $x.WriteEndElement()
 
+    $x.WriteStartElement("command:parameters")
+    Write-MCHelpParams -ParameterSet ($UniqueParams | sort Name) -xmlWriter ([ref]$x)
+    #end <command:parameters>
+    $x.WriteEndElement()
 
-#    $ParentResourceChainNoJoin = Get-ParentResourceChain -MethodOrResource $Method -JoinChar ""
-#    $ParentResourceChainLower = Get-ParentResourceChain -MethodOrResource $Method -UpperCase $false
-#    $ResourceName = $Method.Resource.Name
-#    
-#    $Verb = Get-McVerb $Method.Name
-#    $Noun = "G" + $Method.Api.Name + (ConvertTo-FirstUpper $Method.Api.Version) + $ParentResourceChainNoJoin
-#    $CmdletCommand = "{0}{1}Command" -f $Verb,$Noun
-#    $CmdletBase = $Method.Resource.Api.Name + "Base"
-#    
-#    $MethodName = $Method.Name
-#    $MethodChainLower = $ParentResourceChainLower, $MethodName -join "."
-#    
-#    if ($Method.HasBodyParameter -eq $true) {
-#        $DefaultParamSet = "WithBody"
-#    } elseif ($Method.SupportsMediaDownload -eq $true) {
-#        $DefaultParamSet = "Default"
-#    }
-#
-#    $CmdletAttribute = Write-MCHelpAttribute -Method $Method -Noun $Noun -DefaultParameterSet $DefaultParamSet
-#    if ($Method.SupportsMediaDownload -eq $true) {
-#        $Properties = Write-MCMediaDownloadProperties $Method ($Level+1)
-#    } else {
-#        $Properties = Write-MCHelpProperties $Method ($Level+1)
-#    }
-#    $MethodCallParams = Write-MCHelpMethodCallParams $Method
-#    
-#    if ($Method.ReturnType.Type -ne "void") {
-#        $WriteObjectOpen = "WriteObject("
-#        $WriteObjectClose = ")"
-#    }
-#
-#    $PropertyObject = Write-MCHelpMethodPropertiesObject $Method $Level
-#    
-#    if ($Method.HasBodyParameter -eq $true) {
-#        
-#        $BodyProperties = New-Object System.Collections.ArrayList
-#        foreach ($BodyProperty in ($Method.BodyParameter.SchemaObject.Properties `
-#            | where Name -ne "ETag"))
-#        {
-#            Add-String $BodyProperties ("{{%T}}                    {0} = this.{0}" -f $BodyProperty.Name)
-#        }
-#        $BodyProperties = $BodyProperties -join ",`r`n"
-#
-#        $BodyPropertyType = $Method.BodyParameter.Type
-#
-#        $BodyParameterSets = @"
-#{%T}        if (ParameterSetName.EndsWith("NoBody"))
-#{%T}        {
-#{%T}            Body = new $BodyPropertyType()
-#{%T}            {
-#$BodyProperties
-#{%T}            };
-#{%T}        }
-#{%T}
-#"@
-#    }
-#
-#    $MethodCall = "{%T}            $WriteObjectOpen $MethodChainLower($MethodCallParams)$WriteObjectClose;"
-#
-#    if ($Method.SupportsMediaDownload) {
-#        $MediaMethodCallParams = Write-MCHelpMethodCallParams $Method -AsMediaDownloader `
-#            $Method.SupportsMediaDownload
-#
-#        $MediaMethodCall = "{%T}                $MethodChainLower($MediaMethodCallParams);"
-#
-#        $MethodCallBlock = @"
-#{%T}            if (ParameterSetName.StartsWith("Media"))
-#{%T}            {
-#$MediaMethodCall
-#{%T}            }
-#{%T}            else
-#{%T}            {
-#    $MethodCall
-#{%T}            }
-#"@
-#    } else {
-#        $MethodCallBlock = $MethodCall
-#    }
-#    
-#    $text = @"
-#{%T}$CmdletAttribute
-#{%T}public class $CmdletCommand : $CmdletBase
-#{%T}{
-#{%T}    #region Properties
-#
-#$Properties
-#
-#{%T}    #endregion
-#
-#{%T}    protected override void ProcessRecord()
-#{%T}    {$PropertyObject
-#$BodyParameterSets
-#{%T}        if (ShouldProcess("$Noun $ResourceName", "$Verb-$Noun"))
-#{%T}        {
-#$MethodCallBlock
-#{%T}        }
-#{%T}    }
-#{%T}}
-#"@
-#
-#    $text = Wrap-Text (Set-Indent $text -TabCount $Level)
-#
-#    return $text
+    Write-MCHelpInputTypes -ParameterSet ($UniqueParams | sort Name) -xmlWriter ([ref]$x)
+
+    Write-MCHelpReturnValues -Method $Method -xmlWriter ([ref]$x)
 
     #end command:command
     $x.WriteEndElement()

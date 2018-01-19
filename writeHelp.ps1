@@ -491,6 +491,71 @@ function Write-MCHelpSyntaxParams ($Verb, $Noun, $ParameterSetName, $ParameterSe
     $x.WriteEndElement()
 }
 
+function Write-MCHelpAlertSet ([ref]$xmlWriter) {
+
+    $x = $xmlWriter.Value
+
+    #AlertSet
+    $x.WriteStartElement("maml:alertSet")
+    $x.WriteElementString("maml:title","About this Cmdlet")
+    $x.WriteStartElement("maml:alert")
+    $x.WriteElementString("maml:para","Part of the gShell Project, relating to the Google Directory API; see Related Links or use the -Online parameter.")
+    $x.WriteEndElement()
+
+    #end maml:alertSet
+    $x.WriteEndElement()
+
+}
+
+function Write-MCHelpExamples ($Verb, $Noun, [ref]$xmlWriter) {
+    #STARTHERE - need to expand on the example and make sure that it covers multiple param sets and params
+    $x = $xmlWriter.Value
+
+    $x.WriteStartElement("command:examples")
+
+    $x.WriteStartElement("command:example")
+
+    $x.WriteElementString("maml:title","----------  EXAMPLE 1  ----------")
+    $x.WriteElementString("dev:code","PS C:\> $Verb-$Noun")
+
+    $x.WriteStartElement("dev:remarks")
+    $x.WriteElementString("maml:para","This automatically generated example serves to show the bare minimum required to call this Cmdlet.")
+
+    #end dev:remarks
+    $x.WriteEndElement()
+
+    #end command:example
+    $x.WriteEndElement()
+
+    #end command:examples
+    $x.WriteEndElement()
+}
+
+function Write-MCHelpRelatedLink ($LinkText, $Link, [ref]$xmlWriter) {
+    $x = $xmlWriter.Value
+
+    $x.WriteStartElement("maml:navigationLink")
+
+    $x.WriteElementString("maml:linkText",$LinkText)
+    $x.WriteElementString("maml:uri",$Link)
+
+    #end maml:navigationLink
+    $x.WriteEndElement()
+}
+
+function Write-MCHelpRelatedLinks ([ref]$xmlWriter) {
+    $x = $xmlWriter.Value
+
+    $x.WriteStartElement("maml:relatedLinks")
+
+    Write-MCHelpRelatedLink -LinkText "[Getting started with gShell]" `
+        -Link "https://github.com/squid808/gShell/wiki/Getting-Started" `
+        -xmlWriter ([ref]$x)
+
+    #end maml:relatedLinks
+    $x.WriteEndElement()
+}
+
 #write the parameters for the cmdlet
 function Write-MCHelpProperties ($Method, $Verb, $Noun, [ref]$xmlWriter) {
 
@@ -838,6 +903,12 @@ function Write-MCHelpMethod ($Method, [ref]$xmlWriter, $Level=0) {
     Write-MCHelpInputTypes -ParameterSet ($UniqueParams | sort Name) -xmlWriter ([ref]$x)
 
     Write-MCHelpReturnValues -Method $Method -xmlWriter ([ref]$x)
+
+    Write-MCHelpAlertSet -xmlWriter ([ref]$x)
+
+    Write-MCHelpExamples -Verb $Verb -Noun $Noun -xmlWriter ([ref]$x)
+
+    Write-MCHelpRelatedLinks -xmlWriter ([ref]$x)
 
     #end command:command
     $x.WriteEndElement()

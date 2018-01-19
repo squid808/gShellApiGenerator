@@ -442,7 +442,7 @@ function Get-ApiPropertyTypeShortName($Name, $Api) {
 
 function New-BasicTypeStruct{
     param (
-        [ValidateSet("string","bool","int32","int64","void")]
+        [ValidateSet("string","bool","int32","int64","uint64","void")]
         $Type
     )
 
@@ -461,6 +461,10 @@ function New-BasicTypeStruct{
 
         "int64" {
             return [ApiPropertyTypeStruct]::New("long","System.Int64","long","System.Int64")
+        }
+
+        "uint64" {
+            return [ApiPropertyTypeStruct]::New("ulong","System.UInt64","ulong","System.UInt64")
         }
 
         "void" {
@@ -495,12 +499,16 @@ function Get-ApiPropertyTypeBasic {
         return (New-BasicTypeStruct int64)
     }
 
+    if ($RefType.FullName -eq "System.UInt64" -or $RefType.FullName -eq "UInt64") {
+        return (New-BasicTypeStruct uint64)
+    }
+
     #otherwise...
 
     $TypeStruct = New-Object ApiPropertyTypeStruct
     $TypeStruct.Type = $RefType.FullName -replace ($Api.RootNamespace + ".") -replace "[+]","."
     $TypeStruct.FullyQualifiedType = $RefType.FullName -replace "[+]","."
-    $TypeStruct.HelpDocShortType = $TypeStruct.Type -replace ("Data.") 
+    $TypeStruct.HelpDocShortType = $TypeStruct.Type.Split(".")[-1]
     $TypeStruct.HelpDocLongType = $TypeStruct.FullyQualifiedType
 
     return $TypeStruct
@@ -574,28 +582,32 @@ function Get-ApiPropertyType {
         if ($TypeStruct.InnerTypes.Count -eq 0) { return $null }
         
         #$InnerString = $inners -join ", "
-
-        if ($TypeStruct.InnerTypes.Count -gt 1) { throw "ReflectionTest: Too Many Inner Generics!" }
         
-        if ($RefType.Name -eq "Repeatable``1") {
-            $GenericInnerTypes = $TypeStruct.InnerTypes
-            $TypeStruct.Type = "Google.Apis.Util.Repeatable<{0}>" -f $TypeStruct.InnerTypes[0].Type
-            $TypeStruct.FullyQualifiedType = "Google.Apis.Util.Repeatable<{0}>" -f $TypeStruct.InnerTypes[0].FullyQualifiedType
-            $TypeStruct.HelpDocShortType = "{0}[]" -f $TypeStruct.InnerTypes[0].Type
-            $TypeStruct.HelpDocLongType = "{0}[]" -f $TypeStruct.InnerTypes[0].FullyQualifiedType
+        if ($TypeStruct.InnerTypes.Count -eq 1) {
+            if ($RefType.Name -eq "Repeatable``1") {
+                $GenericInnerTypes = $TypeStruct.InnerTypes
+                $TypeStruct.Type = "Google.Apis.Util.Repeatable<{0}>" -f $TypeStruct.InnerTypes[0].Type
+                $TypeStruct.FullyQualifiedType = "Google.Apis.Util.Repeatable<{0}>" -f $TypeStruct.InnerTypes[0].FullyQualifiedType
+                $TypeStruct.HelpDocShortType = "{0}[]" -f $TypeStruct.InnerTypes[0].HelpDocShortType
+                $TypeStruct.HelpDocLongType = "{0}[]" -f $TypeStruct.InnerTypes[0].FullyQualifiedType
 
-        } elseif ($RefType.Name -eq "Nullable``1") {
-            $TypeStruct.Type = $TypeStruct.InnerTypes[0].Type + "?"
-            $TypeStruct.FullyQualifiedType = "System.Nullable<{0}>" -f $TypeStruct.InnerTypes[0].FullyQualifiedType 
-            $TypeStruct.HelpDocShortType = $TypeStruct.InnerTypes[0].Type
-            $TypeStruct.HelpDocLongType = $TypeStruct.InnerTypes[0].FullyQualifiedType
+            } elseif ($RefType.Name -eq "Nullable``1") {
+                $TypeStruct.Type = $TypeStruct.InnerTypes[0].Type + "?"
+                $TypeStruct.FullyQualifiedType = "System.Nullable<{0}>" -f $TypeStruct.InnerTypes[0].FullyQualifiedType 
+                $TypeStruct.HelpDocShortType = $TypeStruct.InnerTypes[0].HelpDocShortType
+                $TypeStruct.HelpDocLongType = $TypeStruct.InnerTypes[0].FullyQualifiedType
 
+            } else {
+                $TypeStruct.Type = "{0}<{1}>" -f ($RefType.Name.Split("``")[0] -replace "[+]","."), $TypeStruct.InnerTypes[0].Type
+                $TypeStruct.FullyQualifiedType = $TypeStruct.Type
+                $TypeStruct.HelpDocShortType = $TypeStruct.Type
+                $TypeStruct.HelpDocLongType = $TypeStruct.Type
+            }
         } else {
-            #TODO: figure out how  to handle this when there are multiple inner generics, like a Dictionary<a,b>
-            $TypeStruct.Type = "{0}<{1}>" -f ($RefType.Name.Split("``")[0] -replace "[+]","."), $TypeStruct.InnerTypes[0].Type
-            $TypeStruct.FullyQualifiedType = $TypeStruct.Type
+            $TypeStruct.Type = "{0}<{1}>" -f ($RefType.Name.Split("``")[0] -replace "[+]","."), ($TypeStruct.InnerTypes.Type -join ", ")
+            $TypeStruct.FullyQualifiedType = "{0}<{1}>" -f ($RefType.FullName.Split("``")[0] -replace "[+]","."), ($TypeStruct.InnerTypes.FullyQualifiedType -join ", ")
             $TypeStruct.HelpDocShortType = $TypeStruct.Type
-            $TypeStruct.HelpDocLongType = $TypeStruct.Type
+            $TypeStruct.HelpDocLongType = $TypeStruct.FullyQualifiedType
         }
 
     } else  {

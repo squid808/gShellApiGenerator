@@ -359,17 +359,12 @@ function Write-MCHelpMediaDownloadProperties($Method, [ref]$xmlWriter, $Level=0)
     return $Properties
 }
 
-function Write-MCHelpSyntaxParams ($Verb, $Noun, $ParameterSetName, $ParameterSet, [ref]$xmlWriter) {
+function Write-MCHelpParams ($ParameterSet, [ref]$xmlWriter) {
     $x = $xmlWriter.Value
     
-    $x.WriteComment("Parameter set: $ParameterSetName")
-    $x.WriteStartElement("command:syntaxItem")
-
-    $x.WriteElementString("maml:name","$Verb-$Noun")
-
     $position = 0
 
-    foreach ($Parameter in $ParameterSet){
+    foreach ($Parameter in $ParameterSet) {
         $x.WriteComment(("Parameter: " + $Parameter.Name))
         $x.WriteStartElement("command:parameter")
 
@@ -399,7 +394,16 @@ function Write-MCHelpSyntaxParams ($Verb, $Noun, $ParameterSetName, $ParameterSe
         $x.WriteEndElement()
 
         #PARAMVALUE REQUIRED
-        if ($Parameter.Type.ToString() -like "*enum*") {
+        $x.WriteStartElement("command:parameterValue")
+        $x.WriteAttributeString("required", $Parameter.Required.ToString().ToLower())
+        $x.WriteString($Parameter.Type.HelpDocShortType)
+        $x.WriteEndElement()
+
+        $x.WriteStartElement("dev:type")
+        $x.WriteElementString("maml:name",$Parameter.Type.HelpDocLongType)
+        $x.WriteEndElement()
+
+        if ($Parameter.Type.Type -like "*enum*") {
             if ($Parameter.ReflectedObj.GetType() -like "*RuntimePropertyInfo*") {
                 $EnumValues = $Parameter.ReflectedObj.PropertyType.GenericTypeArguments[0].GetFields() `
                     | where {$_.FieldType.IsEnum -eq $true} | select -ExpandProperty Name
@@ -416,52 +420,26 @@ function Write-MCHelpSyntaxParams ($Verb, $Noun, $ParameterSetName, $ParameterSe
                 $x.WriteEndElement()
             }
             $x.WriteEndElement()
-        } else {
-
-            $x.WriteStartElement("command:parameterValue")
-            $x.WriteAttributeString("required", $Parameter.Required.ToString().ToLower())
-            
-            #TODO: yeah, make this better right
-            $ParameterType = $Parameter.Type -replace "Data.","" -replace "[?]","" `
-                -replace "System.Int64","long" -replace "IList<string>","string[]" `
-                -replace "System.UInt64","ulong" -replace "Google.Apis.Util.Repeatable<string>","string[]"
-
-            $x.WriteString($ParameterType)
-            #if ($Parameter.ReflectedObj -eq $null) {
-            #    write-host $Parameter.Type
-            #    $x.WriteString($Parameter.Type)
-            #} elseif ($Parameter.ReflectedObj.GetType() -like "*RuntimePropertyInfo*") {
-            #    write-host $Parameter.ReflectedObj.PropertyType.Name
-            #    $x.WriteString($Parameter.ReflectedObj.PropertyType.Name)
-            #} else {
-            #    write-host $Parameter.ReflectedObj.ParameterType.Name
-            #    $x.WriteString($Parameter.ReflectedObj.ParameterType.Name)
-            #}
-            
-            $x.WriteEndElement()
         }
-
-        $x.WriteStartElement("dev:type")
-
-        if (-not [string]::IsNullOrWhiteSpace($Parameter.ReflectedObj.ParameterType.FullName)) {
-            $ParamType = $Parameter.ReflectedObj.ParameterType.FullName
-        } elseif (-not [string]::IsNullOrWhiteSpace($Parameter.ReflectedObj.PropertyType.FullName)){
-            $ParamType = $Parameter.ReflectedObj.PropertyType.FullName
-        } else {
-            switch ($Parameter.Type) {
-                "string" {$ParamType = "System.String"}
-                "default" {$ParamType = $null}
-            }
-            
-        }
-        write-host $ParamType -ForegroundColor green
-        $x.WriteElementString("maml:name",$ParamType)
-        $x.WriteEndElement()
-
 
         #end command:parameter
         $x.WriteEndElement()
     }
+}
+
+function Write-MCHelpInputTypes {
+
+}
+
+function Write-MCHelpSyntaxParams ($Verb, $Noun, $ParameterSetName, $ParameterSet, [ref]$xmlWriter) {
+    $x = $xmlWriter.Value
+    
+    $x.WriteComment("Parameter set: $ParameterSetName")
+    $x.WriteStartElement("command:syntaxItem")
+
+    $x.WriteElementString("maml:name","$Verb-$Noun")
+
+    Write-MCHelpParams -ParameterSet $ParameterSet -xmlWriter ([ref]$x)
 
     #end command:syntaxItem
     $x.WriteEndElement()
@@ -475,6 +453,7 @@ function Write-MCHelpProperties ($Method, $Verb, $Noun, [ref]$xmlWriter) {
     $StandardPositionInt = 0
     $BodyPositionInt = 0
 
+    $UniqueParams = New-Object System.Collections.ArrayList
     $ParameterSets = @{}
 
     if ($Method.HasBodyParameter -eq $true) {
@@ -485,72 +464,35 @@ function Write-MCHelpProperties ($Method, $Verb, $Noun, [ref]$xmlWriter) {
     }
 
     #build, indent and wrap the pieces separately to allow for proper wrapping of comments and long strings
-    foreach ($Property in ($Method.Parameters | where { ` #$_.Required -eq $true -and `
+    foreach ($Property in ($Method.Parameters | where { `
             $_.Name -ne "Body" -and $_.ShouldIncludeInTemplates -eq $true})) {
-
-        #$summary = Wrap-Text (Set-Indent ("{{%T}}/// <summary> {0} </summary>" -f (Format-CommentString $Property.Description)) $Level)
-        #
-        #$required = $Property.Required.ToString().ToLower()
-        #
-        #$attributes = Write-MCHelpPropertyAttribute -Mandatory $required -HelpMessage $Property.Description `
-        #    -Position $StandardPositionInt -Level $Level
-        #$signature  = wrap-text (set-indent ("{{%T}}public {0} {1} {{ get; set; }}" -f $Property.Type, $Property.Name) $Level)
-        #
-        #$PropertyText = $summary,$attributes,$signature -join "`r`n"
-        #
-        #$PropertyTexts.Add($PropertyText) | Out-Null
-        #$StandardPositionInt++
 
         foreach ($Key in $ParameterSets.Keys) {
             $ParameterSets[$Key].Add($Property) | Out-Null
         }
+
+        $UniqueParams.Add($Property) | Out-Null
     }
     
     if ($Method.HasBodyParameter -eq $true) {
-        
-        #$summary = wrap-text (set-indent ("{{%T}}/// <summary> {0} </summary>" -f (Format-CommentString $Property.Description)) $Level)
-        #$signature  = wrap-text (set-indent ("{{%T}}public {0} {1} {{ get; set; }}" -f $Method.BodyParameter.TypeData, `
-        #    ($Method.BodyParameter.Type + " Body")) $Level)
-        #$attribute = Write-MCHelpPropertyAttribute -Mandatory "true" -HelpMessage $Property.Description `
-        #    -Position $StandardPositionInt -ParameterSetName "WithBody" -Level $Level
-        #    
-        #$BodyText = $summary,$attribute,$signature -join "`r`n"
-        #$PropertyTexts.Add($BodyText) | Out-Null
-        #
-        #$BodyPositionInt = $StandardPositionInt
-        #$StandardPositionInt++
-        #
-        #$BodyAttributes = New-Object System.Collections.ArrayList
 
         $ParameterSets["WithBody"].Add($Method.BodyParameter)
+        $UniqueParams.Add($Method.BodyParameter) | Out-Null
 
         foreach ($BodyProperty in ($Method.BodyParameter.SchemaObject.Properties | where Name -ne "ETag")) {
             
-            #$BPName = $BodyProperty.Name
-            #
             if ($Method.Parameters.Name -contains $BodyProperty.Name) {
                 $P = New-Object ApiMethodProperty
-                $P.Name = $Method.BodyParameter.SchemaObject.Type + $BodyProperty.Name
+                $P.Name = $Method.BodyParameter.SchemaObject.Type.Type + $BodyProperty.Name
                 $P.Description = $BodyProperty.Description
                 $P.Required = $BodyProperty.Required
                 $P.Type = $BodyProperty.Type
                 $ParameterSets["NoBody"].Add($P) | Out-Null
+                $UniqueParams.Add($P) | Out-Null
             } else {
                 $ParameterSets["NoBody"].Add($BodyProperty) | Out-Null
-            }
-            #
-            #$BPsummary = wrap-text (Set-Indent ("{{%T}}/// <summary> {0} </summary>" -f (Format-CommentString $BodyProperty.Description)) $Level)
-            #
-            #$BPsignature  = wrap-text (Set-Indent ("{{%T}}public {0} {1} {{ get; set; }}" -f $BodyProperty.Type, $BPName) $Level)
-            #$BPAttribute = Write-MCHelpPropertyAttribute -Mandatory "false" -HelpMessage $BodyProperty.Description `
-            #    -Position $BodyPositionInt -ParameterSetName "NoBody" -Level $Level
-            #
-            #$BodyPositionInt++
-            #
-            #$BPText = $BPSummary,$BPAttribute,$BPsignature -join "`r`n"
-            #$PropertyTexts.Add($BPText) | Out-Null
-
-            
+                $UniqueParams.Add($BodyProperty) | Out-Null
+            }            
         }
     }
 
@@ -561,9 +503,10 @@ function Write-MCHelpProperties ($Method, $Verb, $Noun, [ref]$xmlWriter) {
             $P.Name = "GAuthId"
             $P.Description = "The GAuthId representing the gShell auth credentials this cmdlet should use to run."
             $P.Required = $false
-            $P.Type = "string"
+            $P.Type = New-BasicTypeStruct string
 
             $ParameterSets[$Key].Add($P) | Out-Null
+            $UniqueParams.Add($P) | Out-Null
         }
 
         if (@("StandardQueryParametersBase","ServiceAccountCmdletBase") -contains $Method.Api.CmdletBaseType) {
@@ -571,9 +514,10 @@ function Write-MCHelpProperties ($Method, $Verb, $Noun, [ref]$xmlWriter) {
             $P.Name = "TargetUserEmail"
             $P.Description = "The email account to be targeted by the service account."
             $P.Required = $false
-            $P.Type = "string"
+            $P.Type = New-BasicTypeStruct string
 
             $ParameterSets[$Key].Add($P) | Out-Null
+            $UniqueParams.Add($P) | Out-Null
         }
     }
 
@@ -586,6 +530,14 @@ function Write-MCHelpProperties ($Method, $Verb, $Noun, [ref]$xmlWriter) {
     }
 
     Write-MCHelpSyntaxParams $Verb $Noun $DefaultParamSet $ParameterSets[$DefaultParamSet] ([ref]$x)
+
+    #now find unique, alphabetized set of params
+
+
+    $x.WriteStartElement("command:parameters")
+    Write-MCHelpParams -ParameterSet ($UniqueParams | sort Name) -xmlWriter ([ref]$x)
+    #end <command:parameters>
+    $x.WriteEndElement()
     
     foreach ($ParamSetName in ($ParameterSets.Keys | where {$_ -ne $DefaultParamSet})) {
         Write-MCHelpSyntaxParams $Verb $Noun $ParamSetName $ParameterSets[$ParamSetName] ([ref]$x)

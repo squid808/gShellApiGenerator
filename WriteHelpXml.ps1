@@ -978,6 +978,6 @@ $Resources
     $xmlWriter.Close()
 }
 
-$Path = "$env:USERPROFILE\desktop\xmltest2.xml"
+#$Path = "$env:USERPROFILE\desktop\xmltest2.xml"
 
-write-mchelp -Api $api -Path $Path
+#write-mchelp -Api $api -Path $Path

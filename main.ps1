@@ -69,26 +69,26 @@ function Invoke-GshellGeneratorMain {
                 $GShellApiName,$GShellApiVersion,$CompiledPath = CheckAndBuildGShellApi -ApiName $ApiName -RootProjPath $RootProjPath -LibraryIndex $LibraryIndex `
                     -Log $Log -Force $ForceBuildApis.IsPresent
 
-                #TEST
-                #for now, copy the compiled files to a 'modules' folder
-                $DebugFolder = [System.IO.Path]::GetDirectoryName($CompiledPath)
-
-                $P = get-content (dir $DebugFolder -Filter "*psd1").FullName
-
-                #find out the latest alpha version
-                if (($P | ? {$_ -like "*Moduleversion*"} | select -First 1) -match "[0-9]+.[0-9]+.[0-9]+") {
-                    $Matches[0]
-                }
-
-                #publish this new version with 
-                #TEST
+                ##TEST
+                ##for now, copy the compiled files to a 'modules' folder
+                #$DebugFolder = [System.IO.Path]::GetDirectoryName($CompiledPath)
+                #
+                #$P = get-content (dir $DebugFolder -Filter "*psd1").FullName
+                #
+                ##find out the latest alpha version
+                #if (($P | ? {$_ -like "*Moduleversion*"} | select -First 1) -match "[0-9]+.[0-9]+.[0-9]+") {
+                #    $Matches[0]
+                #}
+                #
+                ##publish this new version with 
+                ##TEST
             }
         }
     }
 }
 
 #TODO - add in some kind of build summary report at the end - provide error logs for those that didn't work?
-Invoke-GshellGeneratorMain -ApiFilter "gmail.v1" -ShouldBuildApis -ForceBuildApis -Log $Log
+#Invoke-GshellGeneratorMain -ApiFilter "gmail.v1" -ShouldBuildApis -ForceBuildApis -Log $Log
 
 #Invoke-GshellGeneratorMain -ForceBuildGShell -Log $Log
 

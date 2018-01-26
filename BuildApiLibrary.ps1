@@ -297,6 +297,10 @@ function CheckAndBuildGShellApi ($ApiName, $RootProjPath, $LibraryIndex, [bool]$
             Log "Building Psd1 file" $Log
             Write-ModuleManifest -Api $Api -ProjectRoot $BuildProjectPath
 
+            Log "Building Help XML file" $Log
+            
+            Write-MCHelp -Api $api -ApiName $gShellApiName -OutPath $BuildProjectPath
+
             Log ("Copying the compiled $gShellApiName.dll file to the Library Index path") $Log
 
             #copy the file to the library path

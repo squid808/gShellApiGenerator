@@ -1,18 +1,50 @@
 ﻿#TODO - fix in to using list?
-function Get-MCHelpMediaUploadPropertySets ($Method) {
+function Add-GShellPropertiesToSet ($Method, [ref]$PropertiesHash, [ref]$UniqueParams) {
+    $Hash = $PropertiesHash.Value
+    $Unique = $UniqueParams.Value
+
+    $AddedUniqueGauthId = $false
+    $AddedUniqueTargetUserEmail = $false
+    foreach ($Key in $Hash.Keys) {
+
+        if (@("StandardQueryParametersBase","ServiceAccountCmdletBase","AuthenticatedCmdletBase") -contains $Method.Api.CmdletBaseType) {
+            $P = Get-GauthIdPropertyObj
+
+            $Hash[$Key].Add($P) | Out-Null
+            if ($AddedUniqueGauthId -eq $false) {
+                $Unique.Add($P) | Out-Null
+                $AddedUniqueGauthId = $true
+            }
+        }
+
+        if (@("StandardQueryParametersBase","ServiceAccountCmdletBase") -contains $Method.Api.CmdletBaseType) {
+            $P = Get-TargetUserEmailObj
+
+            $Hash[$Key].Add($P) | Out-Null
+            if ($AddedUniqueTargetUserEmail -eq $False) {
+                $Unique.Add($P) | Out-Null
+                $AddedUniqueTargetUserEmail = $true
+            }
+        }
+    }
+}
+
+function Get-MCHelpMediaUploadProperties ($Method) {
+
+    $UniqueParams = New-Object System.Collections.ArrayList
 
     $PropertiesHash = @{}
-    $PropertiesHash["Media"] = @{}
-    $PropertiesHash["NoMedia"] = @{}
 
     if ($Method.HasBodyParameter -eq $true) {
-        $PropertiesHash["NoMedia"]["WithBody"] = (New-Object System.Collections.ArrayList)
-        $PropertiesHash["NoMedia"]["NoBody"] = (New-Object System.Collections.ArrayList)
-        $PropertiesHash["Media"]["MediaWithBody"] = (New-Object System.Collections.ArrayList)
-        $PropertiesHash["Media"]["MediaNoBody"] = (New-Object System.Collections.ArrayList)
+        $DefaultParamSet = "WithBody"
+        $PropertiesHash["WithBody"] = (New-Object System.Collections.ArrayList)
+        $PropertiesHash["NoBody"] = (New-Object System.Collections.ArrayList)
+        $PropertiesHash["MediaWithBody"] = (New-Object System.Collections.ArrayList)
+        $PropertiesHash["MediaNoBody"] = (New-Object System.Collections.ArrayList)
     } else {
-        $PropertiesHash["NoMedia"]["Default"] = (New-Object System.Collections.ArrayList)
-        $PropertiesHash["Media"]["Media"] = (New-Object System.Collections.ArrayList)
+        $DefaultParamSet = "Default"
+        $PropertiesHash["Default"] = (New-Object System.Collections.ArrayList)
+        $PropertiesHash["Media"] = (New-Object System.Collections.ArrayList)
     }
 
     $MethodParams = $Method.Parameters | where { `
@@ -23,87 +55,88 @@ function Get-MCHelpMediaUploadPropertySets ($Method) {
 
     #First iterate all methods in the main method
     foreach ($Parameter in $MethodParams) {
-
-        #if ($UploadParams.Name -contains $Parameter.Name) {
-        #    #contained in both methods
-        #    $KeysToProcess = @("NoMedia","Media")
-        #} else {
-        #    $KeysToProcess = @("NoMedia")
-        #}
         
         #specify the param sets if needed, regardless still increment the PropertiesHash 
         foreach ($Key in $PropertiesHash.Keys) {
-            foreach ($SubKey in $PropertiesHash[$Key].Keys) {
-                $PropertiesHash[$Key][$SubKey].Add($Parameter) | Out-Null
-            }
+            $PropertiesHash[$Key].Add($Parameter) | Out-Null
         }
+
+        $UniqueParams.Add($Parameter) | Out-Null
     }
 
     #Now add any methods from the media upload method that weren't used already
     foreach ($Parameter in $UploadParams) {
 
         if ($MethodParams.Name -contains $Parameter.Name `
-            -and (($MethodParams | where Name -eq $Parameter.Name).Type.Type -ne $Parameter.Type.Type)) {
+            -and (($MethodParams | where {$_.Name -eq $Parameter.Name}).Type.Type -ne $Parameter.Type.Type)) {
             $Parameter.Name = "MediaUpload" + $Parameter.Name
         }
 
         if ($MethodParams.Name -notcontains $Parameter.Name) {
 
-            foreach ($SubKey in $PropertiesHash["Media"].Keys) {
-                $PropertiesHash["Media"][$SubKey].Add($Parameter) | Out-Null
+            foreach ($Key in ($PropertiesHash.Keys | where {$_ -like "Media*"})) {
+                $PropertiesHash[$Key].Add($Parameter) | Out-Null
             }
         }
+
+        $UniqueParams.Add($Parameter) | Out-Null
     }
 
     #Handle the additional upload methods
     $PMedia = Get-MediaUploadProperty -Method $Method
 
-    foreach ($SubKey in $PropertiesHash["Media"].Keys) {
-        $PropertiesHash["Media"][$SubKey].Add($PMedia) | Out-Null
+    foreach ($Key in ($PropertiesHash.Keys | where {$_ -like "Media*"})) {
+        $PropertiesHash[$Key].Add($PMedia) | Out-Null
     }
+
+    $UniqueParams.Add($PMedia) | Out-Null
 
     #Now handle the body, if any
     if ($Method.HasBodyParameter -eq $true) {
         
-        foreach ($Key in $PropertiesHash.Keys) {
-            foreach ($SubKey in ($PropertiesHash[$Key].Keys | where {$_ -like "*WithBody"})) {
-                $PropertiesHash[$Key][$SubKey].Add($Method.BodyParameter) | Out-Null
-            }
+        foreach ($Key in ($PropertiesHash.Keys | where {$_ -like "*WithBody"})) {
+            $PropertiesHash[$Key].Add($Method.BodyParameter) | Out-Null
         }
 
+        $UniqueParams.Add($Method.BodyParameter) | Out-Null
+
         #Now write the non-body options
-        foreach ($BodyProperty in ($Method.BodyParameter.SchemaObject.Properties | where Name -ne "ETag")) {
+        foreach ($BodyProperty in ($Method.BodyParameter.SchemaObject.Properties | where {$_.Name -ne "ETag"})) {
             
             if ($Method.Parameters.Name -contains $BodyProperty.Name `
                 -or $Method.UploadMethod.Parameters.Name -contains $BodyProperty.Name) {
                 $BodyProperty.Name = $Method.BodyParameter.SchemaObject.Name + $BodyProperty.Name
             }
 
-            foreach ($Key in $PropertiesHash.Keys) {
-                foreach ($SubKey in ($PropertiesHash[$Key].Keys | where {$_ -like "*NoBody"})) {
-                    $PropertiesHash[$Key][$SubKey].Add($BodyProperty) | Out-Null
-                }
+            foreach ($Key in ($PropertiesHash.Keys | where {$_ -like "*NoBody"})) {
+                $PropertiesHash[$Key].Add($BodyProperty) | Out-Null
             }
+
+            $UniqueParams.Add($BodyProperty) | Out-Null
         }
     }
 
-    return $PropertiesHash
+    Add-GShellPropertiesToSet -Method $Method -PropertiesHash ([ref]$PropertiesHash) -UniqueParams ([ref]$UniqueParams)
+
+    return $UniqueParams, $PropertiesHash, $DefaultParamSet
 }
 
 function Get-MCHelpMediaDownloadProperties($Method) {
     
+    $UniqueParams = New-Object System.Collections.ArrayList
+
     #expect that there are two methods and maybe a body
     $PropertiesHash = @{}
-    $PropertiesHash["Media"] = @{}
-    $PropertiesHash["NoMedia"] = @{}
 
     if ($Method.HasBodyParameter -eq $true) {
-        $PropertiesHash["NoMedia"]["WithBody"] = (New-Object System.Collections.ArrayList)
-        $PropertiesHash["NoMedia"]["NoBody"] = (New-Object System.Collections.ArrayList)
-        $PropertiesHash["Media"]["MediaWithBody"] = (New-Object System.Collections.ArrayList)
-        $PropertiesHash["Media"]["MediaNoBody"] = (New-Object System.Collections.ArrayList)
+        $DefaultParamSet = "WithBody"
+        $PropertiesHash["WithBody"] = (New-Object System.Collections.ArrayList)
+        $PropertiesHash["NoBody"] = (New-Object System.Collections.ArrayList)
+        $PropertiesHash["MediaWithBody"] = (New-Object System.Collections.ArrayList)
+        $PropertiesHash["MediaNoBody"] = (New-Object System.Collections.ArrayList)
     } else {
-        $PropertiesHash["NoMedia"]["Default"] = (New-Object System.Collections.ArrayList)
+        $DefaultParamSet = "Default"
+        $PropertiesHash["Default"] = (New-Object System.Collections.ArrayList)
         $PropertiesHash["Media"]["Media"] = (New-Object System.Collections.ArrayList)
     }
 
@@ -113,55 +146,63 @@ function Get-MCHelpMediaDownloadProperties($Method) {
     #First iterate all methods in the main method
     foreach ($Parameter in $MethodParams) {
         foreach ($Key in $PropertiesHash) {
-            foreach ($SubKey in $PropertiesHash[$Key].Keys) {
-                $PropertiesHash[$Key][$SubKey].Add($Parameter) | Out-Null
-            }
+            $PropertiesHash[$Key].Add($Parameter) | Out-Null
         }
+
+        $UniqueParams.Add($Parameter) | Out-Null
     }
 
     #Handle the additional download methods
     $PMedia = Get-MediaDownloadProperty -Method $Method
 
-    foreach ($SubKey in $PropertiesHash["Media"].Keys) {
-        $PropertiesHash["Media"][$SubKey].Add($PMedia) | Out-Null
+    foreach ($Key in ($PropertiesHash.Keys | where {$_ -like "Media*"})) {
+        $PropertiesHash[$Key].Add($PMedia) | Out-Null
     }
+
+    $UniqueParams.Add($PMedia) | Out-Null
 
     #Now handle the body, if any
     if ($Method.HasBodyParameter -eq $true) {
         
-        foreach ($Key in $PropertiesHash.Keys) {
-            foreach ($SubKey in ($PropertiesHash[$Key].Keys | where {$_ -like "*WithBody"})) {
-                $PropertiesHash[$Key][$SubKey].Add($Method.BodyParameter) | Out-Null
-            }
+        foreach ($Key in ($PropertiesHash.Keys | where {$_ -like "*WithBody"})) {
+            $PropertiesHash[$Key].Add($Method.BodyParameter) | Out-Null
         }
 
+        $UniqueParams.Add($Method.BodyParameter) | Out-Null
+
         #Now write the non-body options
-        foreach ($BodyProperty in ($Method.BodyParameter.SchemaObject.Properties | where Name -ne "ETag")) {
+        foreach ($BodyProperty in ($Method.BodyParameter.SchemaObject.Properties | where {$_.Name -ne "ETag"})) {
             
             if ($Method.Parameters.Name -contains $BodyProperty.Name `
                 -or $Method.UploadMethod.Parameters.Name -contains $BodyProperty.Name) {
                 $BodyProperty.Name = $Method.BodyParameter.SchemaObject.Name + $BodyProperty.Name
             }
 
-            foreach ($Key in $PropertiesHash.Keys) {
-                foreach ($SubKey in ($PropertiesHash[$Key].Keys | where {$_ -like "*NoBody"})) {
-                    $PropertiesHash[$Key][$SubKey].Add($BodyProperty) | Out-Null
-                }
+            foreach ($Key in ($PropertiesHash.Keys | where {$_ -like "*NoBody"})) {
+                $PropertiesHash[$Key].Add($BodyProperty) | Out-Null
             }
+
+            $UniqueParams.Add($BodyProperty) | Out-Null
         }
     }
 
-    return $PropertiesHash
+    Add-GShellPropertiesToSet -Method $Method -PropertiesHash ([ref]$PropertiesHash) -UniqueParams ([ref]$UniqueParams)
+
+    return $UniqueParams, $PropertiesHash, $DefaultParamSet
 }
 
 #write the parameters for the cmdlet
 function Get-MCHelpProperties ($Method) {
     $PropertiesHash = @{}
-
-    $PropertiesHash["NoBody"] = (New-Object System.Collections.ArrayList)
+    $UniqueParams = New-Object System.Collections.ArrayList
 
     if ($Method.HasBodyParameter -eq $true) {
+        $DefaultParamSet = "WithBody"
         $PropertiesHash["WithBody"] = (New-Object System.Collections.ArrayList)
+        $PropertiesHash["NoBody"] = (New-Object System.Collections.ArrayList)
+    } else {
+        $DefaultParamSet = $null
+        $PropertiesHash["__AllParameterSets"] = (New-Object System.Collections.ArrayList)
     }
 
     #build, indent and wrap the pieces separately to allow for proper wrapping of comments and long strings
@@ -171,23 +212,47 @@ function Get-MCHelpProperties ($Method) {
         foreach ($Key in $PropertiesHash.Keys) {
             $PropertiesHash[$Key].Add($Parameter) | Out-Null
         }
+
+        $UniqueParams.Add($Parameter) | Out-Null
     }
     
     if ($Method.HasBodyParameter -eq $true) {
         
         $PropertiesHash["WithBody"].Add($Method.BodyParameter) | Out-Null
+        $UniqueParams.Add($Method.BodyParameter) | Out-Null
 
-        foreach ($BodyProperty in ($Method.BodyParameter.SchemaObject.Properties | where Name -ne "ETag")) {
+        foreach ($BodyProperty in ($Method.BodyParameter.SchemaObject.Properties | where {$_.Name -ne "ETag"})) {
             
             if ($Method.Parameters.Name -contains $BodyProperty.Name) {
                 $BodyProperty.Name = $Method.BodyParameter.SchemaObject.Name + $BodyProperty.Name
             }
 
             $PropertiesHash["NoBody"].Add($BodyProperty) | Out-Null
+            $UniqueParams.Add($BodyParameter) | Out-Null
         }
     }
 
-    return $PropertiesHash
+    Add-GShellPropertiesToSet -Method $Method -PropertiesHash ([ref]$PropertiesHash) -UniqueParams ([ref]$UniqueParams)
+
+    return $UniqueParams, $PropertiesHash, $DefaultParamSet
+}
+
+function Get-GauthIdPropertyObj {
+    $P = New-Object ApiMethodProperty
+    $P.Name = "GAuthId"
+    $P.Description = "The GAuthId representing the gShell auth credentials this cmdlet should use to run."
+    $P.Required = $false
+    $P.Type = New-BasicTypeStruct string
+    return $P
+}
+
+function Get-TargetUserEmailObj {
+    $P = New-Object ApiMethodProperty
+    $P.Name = "TargetUserEmail"
+    $P.Description = "The email account to be targeted by the service account."
+    $P.Required = $false
+    $P.Type = New-BasicTypeStruct string
+    return $P
 }
 
 function Format-DescriptionSynopsis ($Description) {
@@ -346,7 +411,7 @@ function Write-MCHelpAlertSet ([ref]$xmlWriter) {
 
 }
 
-function Write-MCHelpExample ($Verb, $Noun, $PropertySet, $ExampleNumber, [ref]$xmlWriter) {
+function Write-MCHelpExample ($Method, $Verb, $Noun, $PropertiesHash, $PropertySetName, $ExampleNumber, [ref]$xmlWriter) {
     $x = $xmlWriter.Value
 
     $x.WriteStartElement("command:example")
@@ -354,10 +419,25 @@ function Write-MCHelpExample ($Verb, $Noun, $PropertySet, $ExampleNumber, [ref]$
     $x.WriteElementString("maml:title","----------  EXAMPLE $ExampleNumber  ----------")
     $PropertiesList = New-Object System.Collections.ArrayList
     
-    foreach ($P in $PropertySet) {
-        
-        $VarName = "-" + $P.Name + ' $Some' + $P.Name + (ConvertTo-FirstUpper ($P.Type.HelpDocShortType -split "[^A-Za-z]" | select -first 1)) + "Obj"
-        $PropertiesList.Add($VarName) | Out-Null
+    $PropertiesToUse = New-Object System.Collections.ArrayList
+    $PropertiesHash[$PropertySetName] | where {$_.Required -eq $true} | % {$PropertiesToUse.Add($_) | Out-Null}
+
+    if ($PropertySetName -eq "NoBody") {
+        #Use anything but the gShell properties, and only the first 2 for the body property
+        $PropertiesHash[$PropertySetName] | where {$Method.BodyParameter.SchemaObject.Properties -contains $_.name} `
+            | select -First 2 | % {$PropertiesToUse.Add($_) | Out-Null}
+
+    }
+    
+    foreach ($P in $PropertiesToUse) {
+        if ($PropertySetName -eq "Body") {
+            $ObjNoun = "G" + $Method.Api.Name + $Method.BodyParameter.Type.HelpDocShortType + "Obj"
+            $VarName = "-" + $P.Name + ' (New-' + $ObjNoun + ")"
+            
+        } else {
+            $VarName = "-" + $P.Name + ' $Some' + $P.Name + (ConvertTo-FirstUpper ($P.Type.HelpDocShortType -split "[^A-Za-z]" | select -first 1)) + "Obj"
+            $PropertiesList.Add($VarName) | Out-Null
+        }
     }
 
     $PropertiesList = $PropertiesList -join " "
@@ -374,23 +454,17 @@ function Write-MCHelpExample ($Verb, $Noun, $PropertySet, $ExampleNumber, [ref]$
     $x.WriteEndElement()
 }
 
-function Write-MCHelpUploadExamples ($Verb, $Noun, $PropertySet, $ExampleNumber, [ref]$XmlWriter) {
-    
-}
-
-function Write-MCHelpExamples ($Method, $Verb, $Noun, [ref]$xmlWriter) {
+function Write-MCHelpExamples ($Method, $Verb, $Noun, $PropertiesHash, [ref]$xmlWriter) {
     #STARTHERE - need to expand on the example and make sure that it covers multiple param sets and params
     $x = $xmlWriter.Value
 
     $x.WriteStartElement("command:examples")
 
-    $Properties = Get-MCHelpProperties $Method
-
     $Counter = 1
-
-    foreach ($Key in $Properties.Keys) {
+    
+    foreach ($Key in $PropertiesHash.Keys) {
         #TODO: Start here, figure out how to include properties that aren't required when using a NoBody option
-        Write-MCHelpExample $Verb $Noun  ($Properties[$Key] | where Required -eq $true) $Counter ([ref]$x)
+        Write-MCHelpExample $Method $Verb $Noun $PropertiesHash $Key $Counter ([ref]$x)
         $Counter++
     }
 
@@ -422,107 +496,6 @@ function Write-MCHelpRelatedLinks ([ref]$xmlWriter) {
     #end maml:relatedLinks
     $x.WriteEndElement()
 }
-
-#write the parameters for the cmdlet
-#function Write-MCHelpProperties ($Method, $Verb, $Noun, [ref]$xmlWriter) {
-#
-#    $x = $xmlWriter.Value
-#    
-#    $StandardPositionInt = 0
-#    $BodyPositionInt = 0
-#
-#    $UniqueParams = New-Object System.Collections.ArrayList
-#    $ParameterSets = @{}
-#
-#    if ($Method.HasBodyParameter -eq $true) {
-#        $ParameterSets["WithBody"] = (New-Object System.Collections.ArrayList)
-#        $ParameterSets["NoBody"] = (New-Object System.Collections.ArrayList)
-#    } else {
-#        $ParameterSets["__AllParameterSets"] = (New-Object System.Collections.ArrayList)
-#    }
-#
-#    #build, indent and wrap the pieces separately to allow for proper wrapping of comments and long strings
-#    foreach ($Property in ($Method.Parameters | where { `
-#            $_.Name -ne "Body" -and $_.ShouldIncludeInTemplates -eq $true})) {
-#
-#        foreach ($Key in $ParameterSets.Keys) {
-#            $ParameterSets[$Key].Add($Property) | Out-Null
-#        }
-#
-#        $UniqueParams.Add($Property) | Out-Null
-#    }
-#    
-#    if ($Method.HasBodyParameter -eq $true) {
-#
-#        $ParameterSets["WithBody"].Add($Method.BodyParameter) | Out-Null
-#        $UniqueParams.Add($Method.BodyParameter) | Out-Null
-#
-#        foreach ($BodyProperty in ($Method.BodyParameter.SchemaObject.Properties | where Name -ne "ETag")) {
-#            
-#            if ($Method.Parameters.Name -contains $BodyProperty.Name) {
-#                $P = New-Object ApiMethodProperty
-#                $P.Name = $Method.BodyParameter.SchemaObject.Type.Type + $BodyProperty.Name
-#                $P.Description = $BodyProperty.Description
-#                $P.Required = $BodyProperty.Required
-#                $P.Type = $BodyProperty.Type
-#                $ParameterSets["NoBody"].Add($P) | Out-Null
-#                $UniqueParams.Add($P) | Out-Null
-#            } else {
-#                $ParameterSets["NoBody"].Add($BodyProperty) | Out-Null
-#                $UniqueParams.Add($BodyProperty) | Out-Null
-#            }            
-#        }
-#    }
-#
-#    $AddedUniqueGauthId = $false
-#    $AddedUniqueTargetUserEmail = $false
-#    foreach ($Key in $ParameterSets.Keys) {
-#
-#        if (@("StandardQueryParametersBase","ServiceAccountCmdletBase","AuthenticatedCmdletBase") -contains $Method.Api.CmdletBaseType) {
-#            $P = New-Object ApiMethodProperty
-#            $P.Name = "GAuthId"
-#            $P.Description = "The GAuthId representing the gShell auth credentials this cmdlet should use to run."
-#            $P.Required = $false
-#            $P.Type = New-BasicTypeStruct string
-#
-#            $ParameterSets[$Key].Add($P) | Out-Null
-#            if ($AddedUniqueGauthId -eq $false) {
-#                $UniqueParams.Add($P) | Out-Null
-#                $AddedUniqueGauthId = $true
-#            }
-#        }
-#
-#        if (@("StandardQueryParametersBase","ServiceAccountCmdletBase") -contains $Method.Api.CmdletBaseType) {
-#            $P = New-Object ApiMethodProperty
-#            $P.Name = "TargetUserEmail"
-#            $P.Description = "The email account to be targeted by the service account."
-#            $P.Required = $false
-#            $P.Type = New-BasicTypeStruct string
-#
-#            $ParameterSets[$Key].Add($P) | Out-Null
-#            if ($AddedUniqueTargetUserEmail -eq $False) {
-#                $UniqueParams.Add($P) | Out-Null
-#                $AddedUniqueTargetUserEmail = $true
-#            }
-#        }
-#    }
-#
-#    if ($Method.HasBodyParameter -eq $true) {
-#        $DefaultParamSet = "WithBody"
-#    } elseif ($Method.SupportsMediaDownload -eq $true) {
-#        $DefaultParamSet = "Default"
-#    } else {
-#        $DefaultParamSet = "__AllParameterSets"
-#    }
-#
-#    Write-MCHelpSyntaxParams $Verb $Noun $DefaultParamSet $ParameterSets[$DefaultParamSet] ([ref]$x)
-#    
-#    foreach ($ParamSetName in ($ParameterSets.Keys | where {$_ -ne $DefaultParamSet})) {
-#        Write-MCHelpSyntaxParams $Verb $Noun $ParamSetName $ParameterSets[$ParamSetName] ([ref]$x)
-#    }
-#
-#    return $UniqueParams
-#}
 
 function Write-MCHelpMethod ($Method, [ref]$xmlWriter, $Level=0) {
 
@@ -565,10 +538,23 @@ function Write-MCHelpMethod ($Method, [ref]$xmlWriter, $Level=0) {
 
     $x.WriteStartElement("command:syntax")
 
+    #Get the parameter sets and default parameter set
     if ($Method.UploadMethod -ne $null -and $Method.UploadMethod.SupportsMediaUpload -eq $true) {
-
+        $UniqueParams, $PropertiesHash, $DefaultParamSet = Get-MCHelpMediaUploadProperties -Method $Method
     } else {
-        $UniqueParams = Write-MCHelpProperties $Method $Verb $Noun -xmlWriter ([ref]$x)
+        if ($Method.SupportsMediaDownload -eq $true) {
+            $UniqueParams, $PropertiesHash, $DefaultParamSet = Get-MCHelpMediaDownloadProperties -Method $Method
+        } else {
+            $UniqueParams, $PropertiesHash, $DefaultParamSet = Get-MCHelpProperties -Method $Method
+        }
+    }
+
+    if  ($DefaultParamSet -ne $null) {
+        Write-MCHelpSyntaxParams $Verb $Noun $DefaultParamSet $PropertiesHash[$DefaultParamSet] ([ref]$x)
+    }
+    
+    foreach ($ParamSetName in ($PropertiesHash.Keys | where {$_ -ne $DefaultParamSet})) {
+        Write-MCHelpSyntaxParams $Verb $Noun $ParamSetName $PropertiesHash[$ParamSetName] ([ref]$x)
     }
 
     #end command:syntax
@@ -585,7 +571,7 @@ function Write-MCHelpMethod ($Method, [ref]$xmlWriter, $Level=0) {
 
     Write-MCHelpAlertSet -xmlWriter ([ref]$x)
 
-    Write-MCHelpExamples -Method $Method -Verb $Verb -Noun $Noun -xmlWriter ([ref]$x)
+    Write-MCHelpExamples -Method $Method -Verb $Verb -Noun $Noun -xmlWriter ([ref]$x) -PropertiesHash $PropertiesHash
 
     Write-MCHelpRelatedLinks -xmlWriter ([ref]$x)
 

@@ -17,6 +17,12 @@ if ((Get-Command "Invoke-MsBuild") -eq $null) {
     Install-Module -name "Invoke-MsBuild" -Scope CurrentUser -Force
 }
 
+#TODO - replace this sometime with proper module structuring, once the project is to that point
+function Load-GeneratorFiles {
+    dir "$env:USERPROFILE\Documents\gShellApiGenerator" -Filter "*.ps1" | `
+        where Name -notlike "main*" | % {. $_.FullName}
+}
+
 #To Run All Files
 function Invoke-GshellGeneratorMain {
 
@@ -88,8 +94,23 @@ function Invoke-GshellGeneratorMain {
 }
 
 #TODO - add in some kind of build summary report at the end - provide error logs for those that didn't work?
-#Invoke-GshellGeneratorMain -ApiFilter "gmail.v1" -ShouldBuildApis -ForceBuildApis -Log $Log
+Invoke-GshellGeneratorMain -ApiFilter "gmail.v1" -ShouldBuildApis -ForceBuildApis -Log $Log
 
 #Invoke-GshellGeneratorMain -ForceBuildGShell -Log $Log
 
 #Invoke-GshellGeneratorMain -ApiFilter "drive.v3" -ShouldBuildApis -ForceBuildApis -Log $Log
+
+<#
+TODO: 
+0) make test PoSh repo to get things working, including wiki
+1) Figure out how to commit / push to Git via powershell
+ options - https://github.com/dahlbyk/posh-git#installing-manual
+         - https://stackoverflow.com/questions/28685935/trying-to-commit-to-github-using-powershell-results-in-error-fatal-unable-to-a
+2) update a status wiki page with a success / failure (and only commit / push if changes were made)
+3) on success, use start-process to run the thing to create wiki pages
+    - https://social.technet.microsoft.com/Forums/scriptcenter/en-US/88903837-b9f2-41ea-986c-b66ce8854587/powershell-startprocess-how-to-start-a-powershell-script-with-arguments?forum=ITCG
+    - https://github.com/PowerShell/platyPS
+4) update wiki index, API page. only commit / push when done and if changed
+5) add generated code to repo, push only if any updates
+6) push to TEST repo for now.
+#>

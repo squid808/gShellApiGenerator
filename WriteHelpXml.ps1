@@ -1,4 +1,22 @@
 ﻿#TODO - fix in to using list?
+function Get-GauthIdPropertyObj {
+    $P = New-Object ApiMethodProperty
+    $P.Name = "GAuthId"
+    $P.Description = "The GAuthId representing the gShell auth credentials this cmdlet should use to run."
+    $P.Required = $false
+    $P.Type = New-BasicTypeStruct string
+    return $P
+}
+
+function Get-TargetUserEmailObj {
+    $P = New-Object ApiMethodProperty
+    $P.Name = "TargetUserEmail"
+    $P.Description = "The email account to be targeted by the service account."
+    $P.Required = $false
+    $P.Type = New-BasicTypeStruct string
+    return $P
+}
+
 function Add-GShellPropertiesToSet ($Method, [ref]$PropertiesHash, [ref]$UniqueParams) {
     $Hash = $PropertiesHash.Value
     $Unique = $UniqueParams.Value
@@ -237,24 +255,6 @@ function Get-MCHelpProperties ($Method) {
     return $UniqueParams, $PropertiesHash, $DefaultParamSet
 }
 
-function Get-GauthIdPropertyObj {
-    $P = New-Object ApiMethodProperty
-    $P.Name = "GAuthId"
-    $P.Description = "The GAuthId representing the gShell auth credentials this cmdlet should use to run."
-    $P.Required = $false
-    $P.Type = New-BasicTypeStruct string
-    return $P
-}
-
-function Get-TargetUserEmailObj {
-    $P = New-Object ApiMethodProperty
-    $P.Name = "TargetUserEmail"
-    $P.Description = "The email account to be targeted by the service account."
-    $P.Required = $false
-    $P.Type = New-BasicTypeStruct string
-    return $P
-}
-
 function Format-DescriptionSynopsis ($Description) {
     $Description = $Description -split "(?:`n|`r`n?)" | select -First 1
 
@@ -430,10 +430,11 @@ function Write-MCHelpExample ($Method, $Verb, $Noun, $PropertiesHash, $PropertyS
     }
     
     foreach ($P in $PropertiesToUse) {
-        if ($PropertySetName -eq "Body") {
+        if ($P.Name -eq "Body") {
+            #TODO: STart here, figure out why this isn't working
             $ObjNoun = "G" + $Method.Api.Name + $Method.BodyParameter.Type.HelpDocShortType + "Obj"
-            $VarName = "-" + $P.Name + ' (New-' + $ObjNoun + ")"
-            
+            $VarName = "-" + $P.Name + ' (New-' + $ObjNoun + "...)"
+            $PropertiesList.Add($VarName) | Out-Null
         } else {
             $VarName = "-" + $P.Name + ' $Some' + $P.Name + (ConvertTo-FirstUpper ($P.Type.HelpDocShortType -split "[^A-Za-z]" | select -first 1)) + "Obj"
             $PropertiesList.Add($VarName) | Out-Null
@@ -445,7 +446,7 @@ function Write-MCHelpExample ($Method, $Verb, $Noun, $PropertiesHash, $PropertyS
     $x.WriteElementString("dev:code","PS C:\> $Verb-$Noun $PropertiesList")
 
     $x.WriteStartElement("dev:remarks")
-    $x.WriteElementString("maml:para","This automatically generated example serves to show the bare minimum required to call this Cmdlet.")
+    $x.WriteElementString("maml:para","This automatically generated example shows a minimal way to call this cmdlet.")
 
     #end dev:remarks
     $x.WriteEndElement()

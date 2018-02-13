@@ -4,18 +4,20 @@
 #TODO: Clean up code!
 #TODO: allow main invokable to be called with a target path
 
+if ((Get-Command "Invoke-MsBuild") -eq $null) {
+    Install-Module -name "Invoke-MsBuild" -Scope CurrentUser -Force
+}
+
 $LibraryIndexRoot = "$env:USERPROFILE\Desktop\gShellGen\Libraries"
 $RootProjPath = "$env:USERPROFILE\Desktop\gShellGen\GenOutput"
 $JsonRootPath = "$env:USERPROFILE\Desktop\gShellGen\DiscoveryRestJson"
+$LibraryRepoPath = "$env:USERPROFILE\Documents\GshellAutomationTest"
+$WikiRepoPath = "$env:USERPROFILE\Documents\GshellAutomationTest.wiki"
 $Log = $true
 
 if (-not (test-path $LibraryIndexRoot)) {New-Item -Path $LibraryIndexRoot -ItemType "directory"}
 if (-not (test-path $RootProjPath)) {New-Item -Path $RootProjPath -ItemType "directory"}
 if (-not (test-path $JsonRootPath)) {New-Item -Path $JsonRootPath -ItemType "directory"}
-
-if ((Get-Command "Invoke-MsBuild") -eq $null) {
-    Install-Module -name "Invoke-MsBuild" -Scope CurrentUser -Force
-}
 
 #TODO - replace this sometime with proper module structuring, once the project is to that point
 function Load-GeneratorFiles {
@@ -56,6 +58,8 @@ function Invoke-GshellGeneratorMain {
         $GShellName,$GShellVersion = CheckAndBuildGshell ([System.IO.Path]::Combine($rootProjPath,"gShell.Main")) -LibraryIndex $LibraryIndex `
             -Log $Log -Force $ForceBuildGShell.IsPresent
     }
+
+    $BuildUpdates = @{}
     
     if ($ShouldBuildApis -or $ForceBuildApis) {
         #pull out all google apis for which we have an entry in the index
@@ -75,6 +79,18 @@ function Invoke-GshellGeneratorMain {
                 $GShellApiName,$GShellApiVersion,$CompiledPath = CheckAndBuildGShellApi -ApiName $ApiName -RootProjPath $RootProjPath -LibraryIndex $LibraryIndex `
                     -Log $Log -Force $ForceBuildApis.IsPresent
 
+                #for successful build
+                if ($null -ne $CompiledPath) {
+                    #TODO: Make this stateless - store in local db?
+                    $BuildUpdates[$GShellApiName] = @{$GShellApiVersion=[System.IO.Path]::GetDirectoryName($CompiledPath)}
+
+                    #TODO: The source code needs to be copied to the repo location for successful generations - can't keep all in one spot to avoid
+                    #pushing up bad source code that doesn't build, right?
+                } else {
+                    #TODO: Update the status on a status wiki page? something like that.
+                }
+
+
                 ##TEST
                 ##for now, copy the compiled files to a 'modules' folder
                 #$DebugFolder = [System.IO.Path]::GetDirectoryName($CompiledPath)
@@ -90,6 +106,19 @@ function Invoke-GshellGeneratorMain {
                 ##TEST
             }
         }
+    }
+
+    if ($BuildUpdates.Keys.Count -gt 0) {
+        foreach ($ApiKey in $BuildUpdates.Keys) {
+            foreach ($VersionKey in $BuildUpdates[$ApiKey].Keys) {
+                Write-host $ApiKey $VersionKey $BuildUpdates[$ApiKey][$VersionKey]
+            }
+        }
+        
+        #update the wiki and wiki repo here
+
+        #update the library repo
+
     }
 }
 

@@ -63,6 +63,7 @@ class Api {
     $DataNamespace
     $Version
     $ReflectedObj
+    $AssemblyVersion
     $DiscoveryObj
     $SchemaObjectsUsed = (New-Object System.Collections.ArrayList)
     $HasStandardQueryParams
@@ -84,6 +85,9 @@ function New-Api ([System.Reflection.Assembly]$Assembly, $RestJson) {
     $api.DataNamespace = $api.RootNamespace + ".Data"
     $api.Version = $api.RootNamespace.Split(".")[-1]
     $api.ReflectedObj = $Assembly
+    if ($Assembly.Fullname -match "(?<=Version=)([.0-9])+") {
+        $api.AssemblyVersion = $Matches[0]
+    }
 
     $api.Name = $Api.RootNamespace.Split(".")[-2]
     $api.NameLower = ConvertTo-FirstLower $Api.Name
@@ -866,12 +870,16 @@ function Import-GShellAssemblies($LibraryIndex, $LibraryIndexVersionInfo){
 function Invoke-GShellReflection {
 
     param (
+        #The rest json obj, eg a result of Load-RestJsonFile gmail v1
         [PSCustomObject]$RestJson,
 
+        #The full google name of the API, eg Google.Apis.Gmail.v1
         [string]$ApiName,
 
+        #The nuget version of the file, eg 1.30.0.1034
         [string]$ApiFileVersion,
 
+        #Library index, eg Get-LibraryIndex $LibraryIndexRoot -Log $False
         $LibraryIndex
     )
     $AssemblyName = Get-NugetPackageIdFromJson $RestJson
@@ -885,20 +893,6 @@ function Invoke-GShellReflection {
     return $api
 }
 
-#Write-Host $Method.ReflectedObj.ReturnType.FullName -ForegroundColor Green
-#$test = New-ObjectOfType $Method.ReflectedObj.ReturnType
-
-#$RestJson = Load-RestJsonFile admin directory_v1
-#$RestJson = Load-RestJsonFile admin reports_v1
-#$RestJson = Load-RestJsonFile discovery v1
-#$LibraryIndex = Get-JsonIndex $LibraryIndexRoot
-#$Api = Invoke-GShellReflection $RestJson $LibraryIndex
-#
-#
-#$Resources = $Api.Resources
-#$Resource = $Resources[0]
-#$Methods = $Resource.Methods
-#$Method = $Methods[1]
-#$M = $Method
-#$Init = $M.ReflectedObj.ReturnType.DeclaredMethods | where name -eq "InitParameters"
-#$Api = Invoke-GShellReflection -RestJson $RestJson -ApiName $ApiName -ApiFileVersion $LatestDllVersion -LibraryIndex $LibraryIndex
+#$RestJson = Load-RestJsonFile gmail v1
+#$LibraryIndex = Get-LibraryIndex $LibraryIndexRoot -Log $Log
+#$Api = Invoke-GShellReflection -RestJson $RestJson -ApiName "Google.Apis.Gmail.v1" -ApiFileVersion "1.30.0.1034" -LibraryIndex $LibraryIndex

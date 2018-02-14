@@ -288,6 +288,10 @@ Remarks - The api method call is broken up in to two parts in the underlying cod
 
     #A link to a version of this method that supports Media Upload
     $UploadMethod
+
+    [string]$MethodVerb
+
+    [string]$MethodNoun
 }
 
 function New-ApiMethod ([ApiResource]$Resource, $Method, $UseReturnTypeGenericInt=0) {
@@ -303,6 +307,10 @@ function New-ApiMethod ([ApiResource]$Resource, $Method, $UseReturnTypeGenericIn
     $M.Description = Clean-CommentString $M.DiscoveryObj.description
     $M.ReturnType =  New-ApiMethodProperty $M (Get-ApiMethodReturnType $Method -UseReturnTypeGenericInt $UseReturnTypeGenericInt)
     
+    $M.MethodVerb = Get-MCVerb $M.Name
+    $M.MethodNoun = $Noun = "G" + $M.Api.Name + (ConvertTo-FirstUpper $M.Api.Version) + `
+        (Get-ParentResourceChain -MethodOrResource $M -JoinChar "")
+
     #TODO - adjust this, where and when is it called?
     if (Has-ObjProperty $M.DiscoveryObj "response") {
         #$M.ReturnType.Type = Get-ApiPropertyTypeShortName $M.ReturnType.ReflectedObj.FullName $M.Api
@@ -895,4 +903,4 @@ function Invoke-GShellReflection {
 
 #$RestJson = Load-RestJsonFile gmail v1
 #$LibraryIndex = Get-LibraryIndex $LibraryIndexRoot -Log $Log
-#$Api = Invoke-GShellReflection -RestJson $RestJson -ApiName "Google.Apis.Gmail.v1" -ApiFileVersion "1.30.0.1034" -LibraryIndex $LibraryIndex
+$Api = Invoke-GShellReflection -RestJson $RestJson -ApiName "Google.Apis.Gmail.v1" -ApiFileVersion "1.30.0.1034" -LibraryIndex $LibraryIndex

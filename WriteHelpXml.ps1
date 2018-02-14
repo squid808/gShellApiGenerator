@@ -275,6 +275,7 @@ function Write-MCHelpParams ($ParameterSet, [ref]$xmlWriter) {
         try {
         $x.WriteAttributeString("required",$null,($Parameter.Required.ToString().ToLower()))
         } catch {
+            #TODO: fix this?
             write-host ""
         }
 
@@ -323,7 +324,7 @@ function Write-MCHelpParams ($ParameterSet, [ref]$xmlWriter) {
             foreach ($Enum in $EnumValues) {
                 $x.WriteStartElement("command:parameterValue")
                 $x.WriteAttributeString("required", "false")
-                $x.WriteAttributeString("variableLength", "false")
+                $x.WriteAttributeString("command:variableLength", "false")
                 $x.WriteString($Enum)
                 $x.WriteEndElement()
             }

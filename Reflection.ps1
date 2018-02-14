@@ -668,8 +668,12 @@ function New-ApiMethodProperty {
     } elseif ($P.Type -eq $Null) {
         $P.ShouldIncludeInTemplates = $false
     }
-
+    
     $P.Description = Clean-CommentString $P.DiscoveryObj.Description
+    if ([string]::IsNullOrWhiteSpace($P.Description)){
+        $P.Description = "Description for object of type {0} is unavailable." -f $P.Type.HelpDocLongType
+    }
+
     $P.Required = if ($ForceRequired -eq $true) {$true} else {[bool]($P.DiscoveryObj.required)}
     #TODO - is force required really needed?
 
@@ -900,7 +904,3 @@ function Invoke-GShellReflection {
 
     return $api
 }
-
-#$RestJson = Load-RestJsonFile gmail v1
-#$LibraryIndex = Get-LibraryIndex $LibraryIndexRoot -Log $Log
-$Api = Invoke-GShellReflection -RestJson $RestJson -ApiName "Google.Apis.Gmail.v1" -ApiFileVersion "1.30.0.1034" -LibraryIndex $LibraryIndex

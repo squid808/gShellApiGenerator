@@ -1,4 +1,5 @@
-﻿function Get-HtmlAnchor($AnchorText) {
+﻿#Returns an anchor text in a formatted anchor
+function Get-HtmlAnchor($AnchorText) {
     return "<a name=`"$AnchorText`"></a>"
 }
 
@@ -16,17 +17,18 @@ function Get-SubOrderedResources($Resource, [ref]$Results) {
     #return $R
 }
 
+#Get all resources, including sub-resources, in a single flat list
 function Get-OrderedResources ($Api) {
     $Results = New-Object System.Collections.ArrayList
     
     foreach ($Resource in $Api.Resources) {
-        #$Results.Add($Resource) | Out-Null
         Get-SubOrderedResources $Resource ([ref]$Results)
     }
 
     return $Results
 }
 
+#Outputs the wiki files including the main module page for a single API
 function Write-Wiki {
 [cmdletbinding()]
 
@@ -77,9 +79,9 @@ param($Api, [string]$ModulePath, [string]$ModuleVersion, [string]$HelpOutDirPath
     $AssemblyVersion = $Api.AssemblyVersion
     $ApiName = $Api.NameAndVersion
 
-    $TopAnchor = Get-HtmlAnchor "TopOfPage"
-    $IndexAnchor = Get-HtmlAnchor "ModuleList"
-    $OCAnchor = Get-HtmlAnchor "ObjectCmdlets"
+    $TopAnchor = Get-HtmlAnchor "topofpage"
+    $MCAnchor = Get-HtmlAnchor "methodcmdlets"
+    $OCAnchor = Get-HtmlAnchor "objectcmdlets"
 
     $MainFileSB.AppendFormat(@"
 
@@ -94,7 +96,7 @@ This document is representative of gShell.$ApiName (version $ModuleVersion), whi
 For installation, please visit [gShell.$ApiName in the PowerShell Gallery](https://www.powershellgallery.com/packages/gShell.$ApiName/$ModuleVersion).
 
 # {0}Cmdlet Index
-"@, $IndexAnchor) | Out-Null
+"@, $MCAnchor) | Out-Null
 
     foreach ($Resource in $OrderedResources) {
 
@@ -114,7 +116,8 @@ For installation, please visit [gShell.$ApiName in the PowerShell Gallery](https
             }
             $MainFileSB.AppendFormat("    <dd>{0}</dd>`r`n", $Description) | Out-Null
         }
-        $MainFileSB.Append("</dl>`r`n") | Out-Null
+        $MainFileSB.Append("</dl>`r`n`r`n") | Out-Null
+        $MainFileSB.Append("<sub>[Back To Top](#topofpage) | [[API Modules Index|ModulesIndex]]</sub>`r`n") | Out-Null
 
     }
 
@@ -130,35 +133,33 @@ For installation, please visit [gShell.$ApiName in the PowerShell Gallery](https
     foreach ($File in $Files) {
         Write-CustomVerbose $File.Name $CustomVerbose
         $Content = (Get-Content $File.FullName)
-        $WithLinks = Add-WikiCmdletLinks -ModuleName $ModuleName -FileContent $Content
+        $Noun = $File.Name.Split("-")[1].Split(".")[0]
+        $Related = $Files | where {$_.name -like "*-$Noun.md" -and $_ -ne $file} | select -ExpandProperty Name | % {$_.Replace(".md","")}
+        $WithLinks = Add-WikiCmdletLinks -ModuleName $ModuleName -FileContent $Content -RelatedCmdlets $Related
         ($WithLinks -join "`r`n") | Out-File $File.FullName -Encoding default -Force
     }
 
     $MainFileSB.ToString() | Out-File ([System.IO.Path]::Combine($SubPath, "$ModuleName.md")) -Encoding default -Force
 }
 
-#$RestJson = Load-RestJsonFile gmail v1
-#$LibraryIndex = Get-LibraryIndex $LibraryIndexRoot -Log $Log
-$Api = Invoke-GShellReflection -RestJson $RestJson -ApiName "Google.Apis.Gmail.v1" -ApiFileVersion "1.30.0.1034" -LibraryIndex $LibraryIndex
-
-Write-Wiki -ModulePath "C:\Users\svarney\Desktop\gShellGen\GenOutput\gShell.gmail.v1\bin\Debug\gShell.Gmail.v1.psd1" `
-    -ModuleVersion "1.30.1034-alpha01" `
-    -HelpOutDirPath "C:\Users\svarney\Documents\GshellAutomationTest.wiki" `
-    -CustomVerbose -Api $Api
-
-function Add-WikiCmdletLinks ($ModuleName, $FileContent)  {
-    $TopAnchor = Get-HtmlAnchor "TopOfPage"
-    $LinksLine = "<sub>[Back To Top](#TopOfPage) | [[$ModuleName Index|$ModuleName]] | [[Modules Index|ModulesIndex]]</sub>"
+#Add navigation links to a single cmdlet's page/file
+function Add-WikiCmdletLinks ($ModuleName, $FileContent, $RelatedCmdlets)  {
+    $TopAnchor = Get-HtmlAnchor "topofpage"
+    $LinksLine = "<sub>[Back To Top](#topofpage) | [[$ModuleName Index|$ModuleName]] | [[API Modules Index|ModulesIndex]]</sub>"
+    $TopLinks = @("[Synopsis](#synopsis)","[Syntax](#syntax)","[Description](#description)","[Examples](#examples)",
+        "[Parameters](#parameters)","[Inputs](#inputs)","[Outputs](#outputs)","[Notes](#notes)","[Related Links](#related-links)") -join " | "
     
-    $HeaderToMatch = "^##\s"
+    $LinksHeaderToMatch = "^##\s"
 
     $passedFirstHeader = $false
 
     $FileContent[0] = ($FileContent[0] -split " " -join " $TopAnchor")
+    $FileContent[0] += "`r`n$TopLinks"
 
     for ($i = 0; $i -lt $FileContent.Length; $i++) {
-        $line = $FileContent[$i]
-        if ($line -match $HeaderToMatch) {
+        if ($FileContent[$i] -match $LinksHeaderToMatch) {
+
+            #Add in anchor nav links above if not the first one
             if ($passedFirstHeader -eq $true) {
                 $FileContent[$i-2] += "  "
                 $FileContent[$i-1] = "$LinksLine`r`n`r`n" + $FileContent[$i-1]
@@ -166,9 +167,23 @@ function Add-WikiCmdletLinks ($ModuleName, $FileContent)  {
                 $passedFirstHeader = $true
             }
         }
+
+        if ($FileContent[$i] -eq "## RELATED LINKS") {
+            for ($j = $i+1; $j -lt $FileContent.Length; $j++) {$FileContent[$j] = ""}
+            $FileContent[$i] += "`r`n`r`n" + (($RelatedCmdlets | % {"[[$_]]"}) -join "  `r`n") + ("`r`n`r`n" + $LinksLine)
+        }
     }
 
-    $FileContent[($FileContent.Length - 1)] += ("`r`n`r`n" + $LinksLine)
+    #$FileContent[($FileContent.Length - 1)] += ("`r`n`r`n" + $LinksLine)
 
     return $FileContent
 }
+
+$RestJson = Load-RestJsonFile gmail v1
+$LibraryIndex = Get-LibraryIndex $LibraryIndexRoot -Log $Log
+$Api = Invoke-GShellReflection -RestJson $RestJson -ApiName "Google.Apis.Gmail.v1" -ApiFileVersion "1.30.0.1034" -LibraryIndex $LibraryIndex
+
+Write-Wiki -ModulePath "C:\Users\svarney\Desktop\gShellGen\GenOutput\gShell.gmail.v1\bin\Debug\gShell.Gmail.v1.psd1" `
+    -ModuleVersion "1.30.1034-alpha01" `
+    -HelpOutDirPath "C:\Users\svarney\Documents\GshellAutomationTest.wiki" `
+    -CustomVerbose -Api $Api

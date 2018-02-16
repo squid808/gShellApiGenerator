@@ -184,7 +184,25 @@ function Get-LibraryIndex ($Path, [bool]$Log=$false) {
         param([string]$LibName, [string]$Version)
         return Get-LibraryIndexLibVersionDependencyChain $this $LibName $Version
     }
-    
+
+    #HasLibraryVersionSourceVersion(LibName, Version, DependencyName, DependencyVersion)
+    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "HasLibraryVersionSourceVersion" -Value {
+        param([string]$LibName, [string]$Version)
+        return Test-LibraryVersionSourceVersion $this $LibName $Version
+    }
+
+    #GetLibraryVersionSourceVersion(LibName, Version)
+    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "GetLibraryVersionSourceVersion" -Value {
+        param([string]$LibName, [string]$Version)
+        return Get-LibraryVersionSourceVersion $this $LibName $Version
+    }
+
+    #SetLibraryVersionSourceVersion(LibName, Version, DependencyName, DependencyVersion)
+    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "SetLibraryVersionSourceVersion" -Value {
+        param([string]$LibName, [string]$Version, [string]$SourceVersion)
+        return Set-LibraryVersionSourceVersion $this $LibName $Version $SourceVersion
+    }
+
     Initialize-LibraryIndex $LibraryIndex
 
     return $LibraryIndex
@@ -437,6 +455,42 @@ function Get-LibraryIndexLibVersionDependencyChain {
     }
 
     return $DependenciesHash
+}
+
+#HasLibraryVersionSourceVersion(LibName, Version)
+function Test-LibraryVersionSourceVersion {
+    param($LibraryIndex, [string]$LibName, [string]$Version)
+
+    if ($LibraryIndex.HasLibVersion($LibName, $Version)){
+        $VersionInfo = $LibraryIndex.GetLibVersion($LibName, $Version)
+        return (-not [String]::IsNullOrWhiteSpace($VersionInfo.SourceVersion))
+    }
+}
+
+#GetLibraryVersionSourceVersion(LibName, Version)
+function Get-LibraryVersionSourceVersion {
+    param($LibraryIndex, [string]$LibName, [string]$Version)
+
+    if (Test-LibraryVersionSourceVersion $LibraryIndex $LibName $Version){
+        return $LibraryIndex.GetLibVersion($LibName, $Version).SourceVersion
+    }
+}
+
+#AddLibraryVersionSourceVersion(LibName, Version, SourceVersion)
+function Set-LibraryVersionSourceVersion {
+    param($LibraryIndex, [string]$LibName, [string]$Version, [string]$SourceVersion)
+
+    if (-not ($LibraryIndex.HasLibVersion($LibName, $Version))) {
+        $LibraryIndex.AddLibVersion($LibName, $Version)
+    }
+
+    $VersionInfo = $LibraryIndex.GetLibVersion($LibName, $Version)
+
+    if ($VersionInfo.PSObject.Properties.Name -notcontains "SourceVersion") {
+        $VersionInfo | Add-Member -NotePropertyName "SourceVersion" -NotePropertyValue $null
+    }
+
+    $VersionInfo.SourceVersion = $SourceVersion
 }
 
 function Initialize-LibraryIndex ($LibraryIndex) {

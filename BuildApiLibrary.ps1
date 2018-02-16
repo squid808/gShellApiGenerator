@@ -235,11 +235,13 @@ function Build-ApiLibrary ($LibraryIndex, $ApiName, $ApiObj, $LatestDependencyCh
 
 function SaveCompiledToLibraryIndex ($ApiName, $Version, $DllLocation, $LibraryIndex, $Dependencies, [bool]$Log = $false) {
     
+    #add library
     if (-not $LibraryIndex.HasLib($ApiName)) {
         Log ("$ApiName doesn't exist in the Library Index - adding entry") $Log
         $LibraryIndex.AddLib($ApiName)
     }
 
+    #add version to library
     if (-not $LibraryIndex.HasLibVersion($ApiName, $Version)) {
         Log ("$ApiName doesn't have an entry for version $Version - adding with dependencies") $Log
         $LibraryIndex.AddLibVersion($ApiName, $Version)
@@ -258,6 +260,60 @@ function SaveCompiledToLibraryIndex ($ApiName, $Version, $DllLocation, $LibraryI
     $LibraryIndex.SetLibLastVersionBuilt($ApiName, $Version)
 
     $LibraryIndex.Save()
+}
+
+function DetermineNextBuildVersion ($GoogleSourceVersion, $LastGshellVersionBuilt, [switch]$AsAlpha) {
+    #get the most recent build status
+    #if alpha, 
+    #if the version is different, do that version
+    #if the same, increment
+    $GoogleSplit = $GoogleSourceVersion.Split(".")
+    if ($GoogleSplit.Length -eq 4) {
+        $GoogleVersionArray = @($GoogleSplit[0], ($GoogleSplit[1] + $GoogleSplit[2]), $GoogleSplit[3])
+    } else {
+        $GoogleVersionArray = @($GoogleSplit[0], $GoogleSplit[1], $GoogleSplit[2])
+    }
+
+    $OldGShellVersion, $OldGShellAlpha = $LastGshellVersionBuilt.Split("-")
+
+    $GShellVersionArray = $OldGShellVersion.Split(".")
+
+    $UpdatedFromGoogle = $false
+
+    for ($i = 0; $i -lt 3; $i++) {
+        if ([int]$GoogleVersionArray[$i] -gt [int]$GShellVersionArray[$i]) {
+            $NewVersionArray =  $GoogleVersionArray
+            $UpdatedFromGoogle = $true
+            break
+        }
+    }
+
+    if ($UpdatedFromGoogle -eq $False) {
+        if ($AsAlpha) {
+            if ([string]::IsNullOrWhiteSpace($OldGShellAlpha)) {
+                [string]$GShellVersionArray[2] = [int]$GShellVersionArray[2]+ 1
+                $NewVersion = ($GShellVersionArray -join ".") + "-alpha01"
+            } else {
+                if ($LastGshellVersionBuilt -match "(?<=[a-z]+)[\d]+") {
+                    $newAlpha = "-alpha" + ([int]$matches[0] + 1).ToString("00")
+                    $NewVersion = ($GShellVersionArray -join ".") + $newAlpha
+                } else {
+                    throw "new alpha could not be determined"
+                }
+            }
+        } else {
+            [string]$GShellVersionArray[2] = [int]$GShellVersionArray[2] + 1
+            $NewVersion = ($GShellVersionArray -join ".")
+        }
+    } else {
+        $NewVersion = ($NewVersionArray -join ".")
+        if ($AsAlpha) {
+            $NewVersion += "-alpha01"
+        }
+    }
+
+    return $NewVersion
+
 }
 
 function CheckAndBuildGShellApi ($ApiName, $RootProjPath, $LibraryIndex, [bool]$Log = $false, [bool]$Force = $false) {

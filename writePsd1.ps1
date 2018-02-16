@@ -1,4 +1,4 @@
-﻿function Write-ModuleManifest ($Api, $ProjectRoot) {
+﻿function Write-ModuleManifest ($Api, $Version, $ProjectRoot, $AlphaVersion) {
 
     #$ProjectRoot = "$env:USERPROFILE\Desktop\GenOutput\gShell.gmail.v1"
     $ProjectDebugFolder = [System.IO.Path]::Combine($ProjectRoot, "bin\Debug")
@@ -10,16 +10,16 @@
         $Description = $Matches[0]
     }
 
-    if (((get-content "$ProjectRoot\Properties\AssemblyInfo.cs") `
-            -split "`r`n" | where {$_.Contains("AssemblyVersion")}) -match '(?<=").*(?=")')
-    {
-        $Version = $Matches[0]
-    }
+    #if (((get-content "$ProjectRoot\Properties\AssemblyInfo.cs") `
+    #        -split "`r`n" | where {$_.Contains("AssemblyVersion")}) -match '(?<=").*(?=")')
+    #{
+    #    $Version = $Matches[0]
+    #}
 
-    #Make sure the version is only 3 places long
-    $Split = $Version.Split(".")
-    $Version = ($Split[0], $Split[1], ($Split[2] + $Split[3]) -join ".")
-    $PrereleaseVersion = "-alpha01"
+    #Make sure the version is only 3 places long and allow for alpha options
+    #$Split = $Version.Split(".")
+    #$Version = ($Split[0], $Split[1], ($Split[2] + $Split[3]) -join ".")
+    #$PrereleaseVersion = "-alpha01"
 
     $Author = "Spencer Varney"
 
@@ -55,7 +55,7 @@
 
         $P.Replace("    } # End of PSData hashtable",@"
         # Prerelease Version
-        Prerelease = 'alpha01'
+        Prerelease = $AlphaVersion
     } # End of PSData hashtable
 "@) | Out-File -FilePath "$ProjectDebugFolder\$ModuleName.psd1"
 }""

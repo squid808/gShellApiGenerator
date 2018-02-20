@@ -203,6 +203,24 @@ function Get-LibraryIndex ($Path, [bool]$Log=$false) {
         return Set-LibraryVersionSourceVersion $this $LibName $Version $SourceVersion
     }
 
+    #HasLibraryVersionSuccessfulGeneration(LibName, Version, DependencyName, DependencyVersion)
+    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "HasLibraryVersionSuccessfulGeneration" -Value {
+        param([string]$LibName, [string]$Version)
+        return Test-LibraryVersionSuccessfulGeneration $this $LibName $Version
+    }
+
+    #GetLibraryVersionSuccessfulGeneration(LibName, Version)
+    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "GetLibraryVersionSuccessfulGeneration" -Value {
+        param([string]$LibName, [string]$Version)
+        return Get-LibraryVersionSuccessfulGeneration $this $LibName $Version
+    }
+
+    #SetLibraryVersionSuccessfulGeneration(LibName, Version, DependencyName, DependencyVersion)
+    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "SetLibraryVersionSuccessfulGeneration" -Value {
+        param([string]$LibName, [string]$Version, [bool]$SuccessfulGeneration)
+        return Set-LibraryVersionSuccessfulGeneration $this $LibName $Version $SuccessfulGeneration
+    }
+
     Initialize-LibraryIndex $LibraryIndex
 
     return $LibraryIndex
@@ -476,7 +494,7 @@ function Get-LibraryVersionSourceVersion {
     }
 }
 
-#AddLibraryVersionSourceVersion(LibName, Version, SourceVersion)
+#SetLibraryVersionSourceVersion(LibName, Version, SourceVersion)
 function Set-LibraryVersionSourceVersion {
     param($LibraryIndex, [string]$LibName, [string]$Version, [string]$SourceVersion)
 
@@ -491,6 +509,42 @@ function Set-LibraryVersionSourceVersion {
     }
 
     $VersionInfo.SourceVersion = $SourceVersion
+}
+
+#HasLibraryVersionSuccessfulGeneration(LibName, Version)
+function Test-LibraryVersionSuccessfulGeneration {
+    param($LibraryIndex, [string]$LibName, [string]$Version)
+
+    if ($LibraryIndex.HasLibVersion($LibName, $Version)){
+        $VersionInfo = $LibraryIndex.GetLibVersion($LibName, $Version)
+        return (-not [String]::IsNullOrWhiteSpace($VersionInfo.SuccessfulGeneration))
+    }
+}
+
+#GetLibraryVersionSuccessfulGeneration(LibName, Version)
+function Get-LibraryVersionSuccessfulGeneration {
+    param($LibraryIndex, [string]$LibName, [string]$Version)
+
+    if (Test-LibraryVersionSourceVersion $LibraryIndex $LibName $Version){
+        return $LibraryIndex.GetLibVersion($LibName, $Version).SuccessfulGeneration
+    }
+}
+
+#SetLibraryVersionSuccessfulGeneration(LibName, Version, SourceVersion)
+function Set-LibraryVersionSuccessfulGeneration {
+    param($LibraryIndex, [string]$LibName, [string]$Version, [bool]$SuccessfulGeneration)
+
+    if (-not ($LibraryIndex.HasLibVersion($LibName, $Version))) {
+        $LibraryIndex.AddLibVersion($LibName, $Version)
+    }
+
+    $VersionInfo = $LibraryIndex.GetLibVersion($LibName, $Version)
+
+    if ($VersionInfo.PSObject.Properties.Name -notcontains "SuccessfulGeneration") {
+        $VersionInfo | Add-Member -NotePropertyName "SuccessfulGeneration" -NotePropertyValue $null
+    }
+
+    $VersionInfo.SuccessfulGeneration = $SuccessfulGeneration
 }
 
 function Initialize-LibraryIndex ($LibraryIndex) {

@@ -140,6 +140,8 @@ For installation, please visit [gShell.$ApiName in the PowerShell Gallery](https
     }
 
     $MainFileSB.ToString() | Out-File ([System.IO.Path]::Combine($SubPath, "$ModuleName.md")) -Encoding default -Force
+
+    return $Files
 }
 
 #Add navigation links to a single cmdlet's page/file
@@ -174,16 +176,49 @@ function Add-WikiCmdletLinks ($ModuleName, $FileContent, $RelatedCmdlets)  {
         }
     }
 
-    #$FileContent[($FileContent.Length - 1)] += ("`r`n`r`n" + $LinksLine)
-
     return $FileContent
 }
 
-$RestJson = Load-RestJsonFile gmail v1
-$LibraryIndex = Get-LibraryIndex $LibraryIndexRoot -Log $Log
-$Api = Invoke-GShellReflection -RestJson $RestJson -ApiName "Google.Apis.Gmail.v1" -ApiFileVersion "1.30.0.1034" -LibraryIndex $LibraryIndex
+function New-WikiMarkdownApiTable ($LibraryIndex, $Apis) {
+    $Content = New-Object System.Collections.ArrayList
+    
+    $Header = @"
+| Google API | Most Recent Successful Version | Most Recent Build Status |
+| ----------------------- | :------------: | :------------: |
+"@
+    
+    foreach ($Api in $Apis) {
+        $Info = $LibraryIndex.GetLib($Api)
+        $Info2 = $LibraryIndex.GetLin("gShell." + $Info.RestNameAndVersion)
+        #First, if  the api name != the RestNameAndVersion, it was redirected. Which one to use?
+        $Line = "| {0} | {1} | {2} |" -f (ConvertTo-FirstUpper $Info.RestNameAndVersion), $Info2.LastVersionBuilt,
+        $Content.Add($Line) | Out-Null
+    }
+    
+}
 
-Write-Wiki -ModulePath "C:\Users\svarney\Desktop\gShellGen\GenOutput\gShell.gmail.v1\bin\Debug\gShell.Gmail.v1.psd1" `
-    -ModuleVersion "1.30.1034-alpha01" `
-    -HelpOutDirPath "C:\Users\svarney\Documents\GshellAutomationTest.wiki" `
-    -CustomVerbose -Api $Api
+function Make-ApiModulePage ($LibraryIndex, [string]$HelpOutDirPath) {
+    $TopOfPageAnchor = Get-HtmlAnchor "topofpage"
+
+    $KnownApis = $LibraryIndex.GetLibAll() | where {$_ -match "Google.Apis\..+"}
+
+    $Content = @"
+# $TopOfPageAnchor Modules
+Below is the list of APIs that have been processed by the [gShell Api Generator](https://github.com/squid808/gShellApiGenerator), along with the most recent successful version's documentation as well as the most recent attempted build status.
+
+## 
+
+[shieldPassed]: https://img.shields.io/badge/-Passed-green.svg "Build Passed"
+[shieldFailed]: https://img.shields.io/badge/-Failed-red.svg "Build Failed"
+[shieldNA]: https://img.shields.io/badge/-N/A-lightgrey.svg "Not Available"
+"@
+}
+
+#$RestJson = Load-RestJsonFile gmail v1
+#$LibraryIndex = Get-LibraryIndex $LibraryIndexRoot -Log $Log
+#$Api = Invoke-GShellReflection -RestJson $RestJson -ApiName "Google.Apis.Gmail.v1" -ApiFileVersion "1.30.0.1034" -LibraryIndex $LibraryIndex
+#
+#$Files = Write-Wiki -ModulePath "C:\Users\svarney\Desktop\gShellGen\GenOutput\gShell.gmail.v1\bin\Debug\gShell.Gmail.v1.psd1" `
+#    -ModuleVersion "1.30.1034-alpha01" `
+#    -HelpOutDirPath "C:\Users\svarney\Documents\GshellAutomationTest.wiki" `
+#    -CustomVerbose -Api $Api

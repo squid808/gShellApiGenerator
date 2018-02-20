@@ -274,20 +274,25 @@ function DetermineNextBuildVersion ($GoogleSourceVersion, $LastGshellVersionBuil
         $GoogleVersionArray = @($GoogleSplit[0], $GoogleSplit[1], $GoogleSplit[2])
     }
 
-    $OldGShellVersion, $OldGShellAlpha = $LastGshellVersionBuilt.Split("-")
+    if (-not [string]::IsNullOrWhiteSpace($LastGshellVersionBuilt) ) {
+        $OldGShellVersion, $OldGShellAlpha = $LastGshellVersionBuilt.Split("-")
 
-    $GShellVersionArray = $OldGShellVersion.Split(".")
+        $GShellVersionArray = $OldGShellVersion.Split(".")
 
-    $UpdatedFromGoogle = $false
+        $UpdatedFromGoogle = $false
 
-    for ($i = 0; $i -lt 3; $i++) {
-        if ([int]$GoogleVersionArray[$i] -gt [int]$GShellVersionArray[$i]) {
-            $NewVersionArray =  $GoogleVersionArray
-            $UpdatedFromGoogle = $true
-            break
+        for ($i = 0; $i -lt 3; $i++) {
+            if ([int]$GoogleVersionArray[$i] -gt [int]$GShellVersionArray[$i]) {
+                $NewVersionArray =  $GoogleVersionArray
+                $UpdatedFromGoogle = $true
+                break
+            }
         }
+    } else {
+        $NewVersionArray =  $GoogleVersionArray
+        $UpdatedFromGoogle = $true
     }
-
+    
     if ($UpdatedFromGoogle -eq $False) {
         if ($AsAlpha) {
             if ([string]::IsNullOrWhiteSpace($OldGShellAlpha)) {

@@ -184,9 +184,11 @@ function New-CsProjFile ($LibraryIndex, $DependencyChain, $BuildProjectPath, $Ap
     $projText | Out-File -FilePath $projFilePath -Encoding utf8 -Force
 }
 
-function Build-ApiLibrary ($LibraryIndex, $ApiName, $ApiObj, $LatestDependencyChain, $BuildProjectPath, $LatestDllVersion) {
+function Build-ApiLibrary ($LibraryIndex, [ref]$BuildResultObj, [bool]$Log=$false) {
 
-    $LatestAuthVersion = $LatestDependencyChain.'Google.Apis.Auth'
+    $BuildResult = $BuildResultObj.Value
+
+    $LatestAuthVersion = $BuildResult.DependencyChain.'Google.Apis.Auth'
 
     $gShellVersionToUse = $LibraryIndex.GetLibVersionAll("gShell.Main") | % {`
         if (($_.Value.Dependencies | where {$_.Name -eq "Google.Apis.Auth" -and $_.Versions -like "*1.*"}) -ne $null) { `
@@ -195,41 +197,46 @@ function Build-ApiLibrary ($LibraryIndex, $ApiName, $ApiObj, $LatestDependencyCh
         | sort -Descending | select -First 1
 
     if ([string]::IsNullOrWhiteSpace($gShellVersionToUse)) {
-        throw "gShell version $LatestAuthVersion not found for $ApiName"
+        throw ("gShell version $LatestAuthVersion not found for {0}" -f $BuildResult.Api.RootNameSpace)
     }
 
     $gShellDependencyChain = $LibraryIndex.GetLibVersionDependencyChain("gShell.Main", $gShellVersionToUse)
 
     #sync the dependencies for this gshell version with this api
     foreach ($pair in $gShellDependencyChain.GetEnumerator()) {
-        $LatestDependencyChain[$pair.name] = $pair.Value
+        $BuildResult.DependencyChain[$pair.name] = $pair.Value
     }
 
     #Now we need to generate the files and get the csproj location
-    $dllPath = $LibraryIndex.GetLibVersion($ApiName, $LatestDllVersion).dllPath
+    #$dllPath = $LibraryIndex.GetLibVersion($BuildResult.Api.RootNameSpace, $BuildResult.Api.AssemblyVersion).dllPath
 
+    #TODO - move this in to the templating and generation method
     #Now create the meta files
-    New-PackagesConfig -LibraryIndex $LibraryIndex -DependenciesChain $LatestDependencyChain -BuildProjectPath $BuildProjectPath
+    New-PackagesConfig -LibraryIndex $LibraryIndex -DependenciesChain $BuildResult.DependencyChain -BuildProjectPath `
+        $BuildResult.GeneratedProjectPath
         
-    New-CsProjFile -LibraryIndex $LibraryIndex -DependencyChain $LatestDependencyChain -BuildProjectPath $BuildProjectPath -Api $Api
+    New-CsProjFile -LibraryIndex $LibraryIndex -DependencyChain $BuildResult.DependencyChain -BuildProjectPath `
+        $BuildResult.GeneratedProjectPath -Api $BuildResult.Api
 
     #Start here - need the Properties / AssemblyInfo.cs file! Need to update this for gshell too, to update the versions
-    New-AssemblyInfoFile -AssemblyTitle ("gShell." + $Api.NameAndVersion) `
-        -AssemblyDescription ("PowerShell Client for Google {0} Apis" -f $Api.NameAndVersion) `
-        -AssemblyVersion $LatestDllVersion -BuildProjectPath $BuildProjectPath
+    New-AssemblyInfoFile -AssemblyTitle ("gShell." + $BuildResult.Api.NameAndVersion) `
+        -AssemblyDescription ("PowerShell Client for Google {0} Apis" -f $BuildResult.Api.NameAndVersion) `
+        -AssemblyVersion $BuildResult.Api.AssemblyVersion -BuildProjectPath $BuildResult.GeneratedProjectPath
 
-    Log ("Building gShell." + $Api.NameAndVersion) $Log
+    Log ("Building gShell." + $BuildResult.Api.NameAndVersion) $Log
 
-    $BuildResult = Invoke-MsBuild -Path ([System.IO.Path]::Combine($BuildProjectPath, ("gShell." + $Api.NameAndVersion + ".csproj")))
+    $CompileResult = Invoke-MsBuild -Path ([System.IO.Path]::Combine($BuildResult.GeneratedProjectPath, ("gShell." + `
+        $BuildResult.Api.NameAndVersion + ".csproj")))
+
+    $BuildResult.BuildSucceeded = $CompileResult.BuildSucceeded
+    $BuildResult.BuildMessage = $CompileResult.Message
 
     if ($BuildResult.BuildSucceeded -eq $true) {
         Log ("Building succeeded") $Log
-        #return the path to the resulting dll file
-        $compiledDllPath = [System.IO.Path]::Combine($BuildProjectPath,"bin\Debug\gShell." + $Api.NameAndVersion + ".dll")
-        return $compiledDllPath
+
+        $BuildResult.CompiledDirPath = [System.IO.Path]::Combine($BuildResult.GeneratedProjectPath,"bin\Debug\")
     } else {
         Log ("Build failed") $Log
-        #todo: throw error and stop process here?
     }
 }
 
@@ -321,76 +328,124 @@ function DetermineNextBuildVersion ($GoogleSourceVersion, $LastGshellVersionBuil
 
 }
 
-function CheckAndBuildGShellApi ($ApiName, $RootProjPath, $LibraryIndex, [bool]$Log = $false, [bool]$Force = $false) {
-    $LatestDllVersion = $LibraryIndex.GetLibVersionLatestName($ApiName)
+class BuildResult {
+    #The API object used to build this library
+    $Api
 
+    #The name of the compiled library, eg gShell.Gmail.v1
+    [string]$LibName
+
+    #The version of the compiled library, eg 1.300.1034-alpha01
+    [string]$LibVersion
+    
+    #Did the build compile successfully?
+    [bool]$BuildSucceeded
+
+    #The status message for the build
+    [string]$BuildMessage
+
+    #The directory path for the generated project
+    [string]$GeneratedProjectPath
+
+    #The directory path for the compiled output, generally GeneratedProjectPath/bin/debug
+    [string]$CompiledDirPath
+
+    #Is this an alpha build?
+    [bool]$IsAlpha
+
+    #The dependency chain for this library
+    [hashtable]$DependencyChain
+
+    #Should the generated source code be pushed to git
+    [bool]$ShouldPushSourceToGit
+
+    #Should the Wiki be regenerated
+    [bool]$ShouldGenerateWiki
+    
+    #Should the modules wiki page be updated for this api
+    [bool]$ShouldUpdateModulesWiki
+
+    #Should the wiki be pushed to git
+    [bool]$ShouldPushWikiToGit
+
+
+}
+
+#TODO: Split this code up so that all it does is build the library and return the result?
+#TODO: have a class to store all necessary result information, a counterpart to $Api?
+function CheckAndBuildGShellApi ($ApiName, $RootProjPath, $LibraryIndex, [bool]$Log = $false, [bool]$Force = $false) {
+    
+    #This is the latest dll version of the google api library that is available
+    $LatestDllVersion = $LibraryIndex.GetLibVersionLatestName($ApiName)
+    
+    #This is the last version of the google api library that was used to build something
     $LastVersionBuilt = $LibraryIndex.GetLibLastVersionBuilt($ApiName)
 
-    $RestNameAndVersion = $LibraryIndex.GetLibRestNameAndVersion($ApiName)
+    $BuildResult = New-Object BuildResult
 
-    $gShellApiName = "gShell." + (ConvertTo-FirstUpper $RestNameAndVersion)
+    $RestNameAndVersion = $LibraryIndex.GetLibRestNameAndVersion($ApiName)
+    $BuildResult.LibName = "gShell." + (ConvertTo-FirstUpper $RestNameAndVersion)
+    $BuildResult.LibVersion = DetermineNextBuildVersion -GoogleSourceVersion $LatestDllVersion `
+        -LastGshellVersionBuilt $LibraryIndex.GetLibLastVersionBuilt($BuildResult.LibName) -AsAlpha
+    $BuildResult.GeneratedProjectPath = [System.IO.Path]::Combine($RootProjPath, $BuildResult.LibName)
+
 
     if (-not $LibraryIndex.HasLib($ApiName) -or $LastVersionBuilt -eq $null `
         -or $LastVersionBuilt -ne $LatestDllVersion -or $Force) {
 
-        Log ("$gShellApiName $LastVersionBuilt either doesn't exist or needs to be updated to $LatestDllVersion.") $Log
+        Log ($BuildResult.LibName +" $LastVersionBuilt either doesn't exist or needs to be updated to $LatestDllVersion.") $Log
 
         #TODO: make $JsonRootPath global?
         $JsonFileInfo = Get-MostRecentJsonFile -Path ([System.IO.Path]::Combine($JsonRootPath, $RestNameAndVersion))
 
         $RestJson = Get-Content $JsonFileInfo.FullName | ConvertFrom-Json
 
-        $BuildProjectPath = [System.IO.Path]::Combine($RootProjPath, ("gShell.$RestNameAndVersion"))
+        #TODO: Move API out of here and add it directly to the main program - along with json file bits
+        $BuildResult.Api = Create-TemplatesFromDll -LibraryIndex $LibraryIndex -ApiName $ApiName -ApiFileVersion $LatestDllVersion `
+            -OutPath $BuildResult.GeneratedProjectPath -RestJson $RestJson -Log $Log
 
-        $Api = Create-TemplatesFromDll -LibraryIndex $LibraryIndex -ApiName $ApiName -ApiFileVersion $LatestDllVersion `
-            -OutPath $BuildProjectPath -RestJson $RestJson -Log $Log
+        $BuildResult.DependencyChain = $LibraryIndex.GetLibVersionDependencyChain($ApiName, $LatestDllVersion)
 
-        $gShellApiName = "gShell." + $Api.NameAndVersion
-
-        $LatestDependencyChain = $LibraryIndex.GetLibVersionDependencyChain($ApiName, $LatestDllVersion)
-
+        #TODO - Almost all of this info should be on the $Api object - api name, dll version. Fix it.
         #First, try to build
-        $CompiledPath = Build-ApiLibrary -LibraryIndex $LibraryIndex -ApiName $ApiName -ApiObj $Api `
-              -LatestDependencyChain $LatestDependencyChain -BuildProjectPath $BuildProjectPath -LatestDllVersion $LatestDllVersion
+        Build-ApiLibrary -LibraryIndex $LibraryIndex -BuildResultObj ([ref]$BuildResult) -Log $Log
 
-        if ($CompiledPath -ne $null) {            
-
+        if ($BuildResult.BuildSucceeded -eq $true) {            
+            
+            #TODO - move this out to a controller method - or maybe in to the generation?
             Log "Building Psd1 file" $Log
-            Write-ModuleManifest -Api $Api -ProjectRoot $BuildProjectPath
+            Write-ModuleManifest -Api $BuildResult.Api -Version $BuildResult.LibVersion -ProjectRoot $BuildResult.GeneratedProjectPath
 
             Log "Building Help XML file" $Log
             
-            Write-MCHelp -Api $api -ApiName $gShellApiName -OutPath $BuildProjectPath
+            Write-MCHelp -Api $BuildResult.Api -ApiName $BuildResult.LibName -OutPath $BuildResult.GeneratedProjectPath
 
             Log ("Copying the compiled $gShellApiName.dll file to the Library Index path") $Log
 
-            #copy the file to the library path
+            #copy the file to the library path. 
             $LibraryRootPath = [System.IO.Path]::GetDirectoryName($LibraryIndex.RootPath)
-            $NewDllFolderPath = [System.IO.Path]::Combine($LibraryRootPath, $gShellApiName, $LatestDllVersion)
-            $NewDllPath = [System.IO.Path]::Combine($NewDllFolderPath, "$gShellApiName.dll")
+            $NewDllFolderPath = [System.IO.Path]::Combine($LibraryRootPath, $BuildResult.LibName, `
+                $BuildResult.LibVersion)
 
             if (-not (Test-Path $NewDllFolderPath)) {
                 New-Item -Path $NewDllFolderPath -ItemType "Directory" | Out-Null
             }
 
-            Copy-Item -Path $CompiledPath -Destination $NewDllPath | Out-Null
+            #TODO - update this to have the proper files
+            dir $BuildResult.CompiledDirPath | where {$_.BaseName -like ($BuildResult.LibName + "*") -and `
+                $_.Extension -ne ".pdb"} | % {Copy-Item -Path $_.FullName -Destination $NewDllFolderPath `
+                | Out-Null }
 
+            #TODO - move this out of this function? ALSO, make sure the proper version built is set on the google library!
             #update the library
             $LibraryIndex.SetLibLastVersionBuilt($ApiName, $LatestDllVersion)
-            SaveCompiledToLibraryIndex -ApiName $gShellApiName -Version $LatestDllVersion -DllLocation $NewDllPath `
-                -LibraryIndex $LibraryIndex -Dependencies $LatestDependencyChain -Log $Log
+            SaveCompiledToLibraryIndex -ApiName $BuildResult.LibName -Version $LatestDllVersion -DllLocation $NewDllPath `
+                -LibraryIndex $LibraryIndex -Dependencies $BuildResult.DependencyChain -Log $Log
             
-        } else {
-            #throw some error right?
         }
     } else {
         Log ("$gShellApiName $LastVersionBuilt appears to be up to date") $Log
     }
 
-    return $gShellApiName, $LatestDllVersion, $CompiledPath
-        
-
-        #$gShellVersion = $LibraryIndex.GetLibVersionLatestName($gShellMain)
-
-    #return $gShellMain, $gShellNewVersion
+    return $BuildResult
 }

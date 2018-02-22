@@ -386,6 +386,8 @@ $ScopesBlock
 
 
 function Create-TemplatesFromDll ($LibraryIndex, $RestJson, $ApiName, $ApiFileVersion, $OutPath, [bool]$Log=$false) {
+    
+    #TODO - move this to main
     Log "Loading .dll library in to Api template object" $Log
     $Api = Invoke-GShellReflection -RestJson $RestJson -ApiName $ApiName -ApiFileVersion $ApiFileVersion -LibraryIndex $LibraryIndex
 

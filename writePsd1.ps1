@@ -1,4 +1,4 @@
-﻿function Write-ModuleManifest ($Api, $Version, $ProjectRoot, $AlphaVersion) {
+﻿function Write-ModuleManifest ($Api, $Version, $ProjectRoot) {
 
     #$ProjectRoot = "$env:USERPROFILE\Desktop\GenOutput\gShell.gmail.v1"
     $ProjectDebugFolder = [System.IO.Path]::Combine($ProjectRoot, "bin\Debug")
@@ -28,6 +28,8 @@
 
     $ModuleName = "gShell.$ApiName.$ApiVersionNoDots"
 
+    $AlphaVersion = $Version.Split("-")[0]
+
     New-ModuleManifest `
         -Path "$ProjectDebugFolder\$ModuleName.psd1" `
         -Author $Author `
@@ -35,7 +37,7 @@
         -CompanyName $Author `
         -Copyright ("(c) {0} $Author. All rights reserved." -f (Get-Date -Format "yyyy")) `
         -Description $Description `
-        -ModuleVersion $Version `
+        -ModuleVersion $Version.Split("-")[0] `
         -PowerShellVersion 4.0 `
         -DotNetFrameworkVersion "4.5.1" `
         -NestedModules @(

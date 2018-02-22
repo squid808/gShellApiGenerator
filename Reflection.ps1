@@ -53,26 +53,70 @@ class ApiScope {
 }
 
 class Api {
+    #The name of the API, eg Gmail
     $Name
+
+    #The lowercase name of the API, eg gmail
     $NameLower
+
+    #The name AND API version, eg Gmail.v1
     $NameAndVersion
+
+    #The lowercase name AND API version, eg gmail.v1
     $NameAndVersionLower
+
+    #The API resources
     $Resources = (New-Object System.Collections.ArrayList)
+
+    #The API resources in a formatted dictionary
     $ResourcesDict = @{}
+
+    #The root namespace, eg Google.Apis.Gmail.v1  (this may not match the APIName)
     $RootNamespace
+    
+    #The root data namespace, eg Google.Apis.Gmail.v1.Data
     $DataNamespace
+
+    #The API version, eg v1
     $Version
+
+    #The reflection object resulting from the Client Library
     $ReflectedObj
+
+    #The version of the Client Library, eg 1.30.0.1034
     $AssemblyVersion
+    
+    #The name as coming from the nuget files and rest api, eg Google.Apis.Gmail.v1
+    $ApiName
+
+    #The REST object from the Discovery API
     $DiscoveryObj
+
+    #A list of schema objects involved in the API calls - NOT USED?
     $SchemaObjectsUsed = (New-Object System.Collections.ArrayList)
+
+    #Does this have standard query params
     $HasStandardQueryParams
+
+    #A list of the standard query params
     $StandardQueryparams = (New-Object System.Collections.ArrayList)
+
+    #The base type for the standard query params code, eg ServiceAccountCmdletBase
     $StandardQueryParamsBaseType
+
+    #Can this API use service accounts (eg, is it not an Admin API?)
     $CanUseServiceAccount
+
+    #A list of schema objects involved in the API calls
     $SchemaObjects = (New-Object System.Collections.ArrayList)
+
+    #A dictionary of schema objects by key
     $SchemaObjectsDict = @{}
+
+    #The base type for cmdlets code, eg StandardQueryParametersBase
     $CmdletBaseType
+
+    #The scopes for this API
     $Scopes = (New-Object System.Collections.ArrayList)
 }
 
@@ -901,6 +945,9 @@ function Invoke-GShellReflection {
     $Assembly = Import-GShellAssemblies $LibraryIndex $LatestVersionInfo
 
     $Api = New-Api $Assembly $RestJson
+
+    #TODO - can this just be the root namespace? What about for APIs that are named differently
+    $Api.ApiName = $ApiName
 
     return $api
 }

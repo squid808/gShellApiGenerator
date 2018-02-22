@@ -385,11 +385,11 @@ $ScopesBlock
 #endregion
 
 
-function Create-TemplatesFromDll ($LibraryIndex, $RestJson, $ApiName, $ApiFileVersion, $OutPath, [bool]$Log=$false) {
+function Create-TemplatesFromDll ($LibraryIndex, $RestJson, $Api, $OutPath, [bool]$Log=$false) {
     
     #TODO - move this to main
-    Log "Loading .dll library in to Api template object" $Log
-    $Api = Invoke-GShellReflection -RestJson $RestJson -ApiName $ApiName -ApiFileVersion $ApiFileVersion -LibraryIndex $LibraryIndex
+    #Log "Loading .dll library in to Api template object" $Log
+    #$Api = Invoke-GShellReflection -RestJson $RestJson -ApiName $ApiName -ApiFileVersion $ApiFileVersion -LibraryIndex $LibraryIndex
 
     if (-not (Test-Path $OutPath)) {
         New-Item -Path $OutPath -ItemType "Directory" | Out-Null

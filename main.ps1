@@ -75,8 +75,24 @@ function Invoke-GshellGeneratorMain {
             Log "No Apis found with the filter `"$ApiFilter`"" $Log
         } else {
             foreach ($ApiName in $ApisFromNuget) {
-                Log "" $Log
-                $GShellApiName,$GShellApiVersion,$CompiledPath = CheckAndBuildGShellApi -ApiName $ApiName -RootProjPath $RootProjPath -LibraryIndex $LibraryIndex `
+                
+                $LatestDllVersion = $LibraryIndex.GetLibVersionLatestName($ApiName)
+                
+                $RestNameAndVersion = $LibraryIndex.GetLibRestNameAndVersion($ApiName)
+
+                #TODO: make $JsonRootPath global?
+                $JsonFileInfo = Get-MostRecentJsonFile -Path ([System.IO.Path]::Combine($JsonRootPath, $RestNameAndVersion))
+
+                $RestJson = Get-Content $JsonFileInfo.FullName | ConvertFrom-Json
+
+                #TODO: Move API out of here and add it directly to the main program - along with json file bits
+                #$BuildResult.Api = Create-TemplatesFromDll -LibraryIndex $LibraryIndex -ApiName $ApiName -ApiFileVersion $LatestDllVersion `
+                #    -OutPath $BuildResult.GeneratedProjectPath -RestJson $RestJson -Log $Log
+
+                Log "Loading .dll library in to Api template object" $Log
+                $Api = Invoke-GShellReflection -RestJson $RestJson -ApiName $ApiName -ApiFileVersion $LatestDllVersion -LibraryIndex $LibraryIndex
+
+                $GShellApiName,$GShellApiVersion,$CompiledPath = CheckAndBuildGShellApi -Api $Api -RootProjPath $RootProjPath -LibraryIndex $LibraryIndex `
                     -Log $Log -Force $ForceBuildApis.IsPresent
 
                 #for successful build

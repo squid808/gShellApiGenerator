@@ -373,38 +373,38 @@ class BuildResult {
 
 #TODO: Split this code up so that all it does is build the library and return the result?
 #TODO: have a class to store all necessary result information, a counterpart to $Api?
-function CheckAndBuildGShellApi ($ApiName, $RootProjPath, $LibraryIndex, [bool]$Log = $false, [bool]$Force = $false) {
+function CheckAndBuildGShellApi ($Api, $RootProjPath, $LibraryIndex, [bool]$Log = $false, [bool]$Force = $false) {
     
     #This is the latest dll version of the google api library that is available
-    $LatestDllVersion = $LibraryIndex.GetLibVersionLatestName($ApiName)
+    #$LatestDllVersion = $LibraryIndex.GetLibVersionLatestName($ApiName)
     
     #This is the last version of the google api library that was used to build something
-    $LastVersionBuilt = $LibraryIndex.GetLibLastVersionBuilt($ApiName)
+    $LastVersionBuilt = $LibraryIndex.GetLibLastVersionBuilt($Api.ApiName)
 
     $BuildResult = New-Object BuildResult
 
-    $RestNameAndVersion = $LibraryIndex.GetLibRestNameAndVersion($ApiName)
+    #$RestNameAndVersion = $LibraryIndex.GetLibRestNameAndVersion($ApiName)
     $BuildResult.LibName = "gShell." + (ConvertTo-FirstUpper $RestNameAndVersion)
-    $BuildResult.LibVersion = DetermineNextBuildVersion -GoogleSourceVersion $LatestDllVersion `
+    $BuildResult.LibVersion = DetermineNextBuildVersion -GoogleSourceVersion $Api.AssemblyVersion `
         -LastGshellVersionBuilt $LibraryIndex.GetLibLastVersionBuilt($BuildResult.LibName) -AsAlpha
     $BuildResult.GeneratedProjectPath = [System.IO.Path]::Combine($RootProjPath, $BuildResult.LibName)
 
+    if (-not $LibraryIndex.HasLib($Api.ApiName) -or $LastVersionBuilt -eq $null `
+        -or $LastVersionBuilt -ne $Api.AssemblyVersion -or $Force) {
 
-    if (-not $LibraryIndex.HasLib($ApiName) -or $LastVersionBuilt -eq $null `
-        -or $LastVersionBuilt -ne $LatestDllVersion -or $Force) {
+        Log ("{0} {1} either doesn't exist or needs to be updated to {2}." -f $BuildResult.LibName, `
+            $LastVersionBuilt, $Api.AssemblyVersion) $Log
 
-        Log ($BuildResult.LibName +" $LastVersionBuilt either doesn't exist or needs to be updated to $LatestDllVersion.") $Log
-
-        #TODO: make $JsonRootPath global?
-        $JsonFileInfo = Get-MostRecentJsonFile -Path ([System.IO.Path]::Combine($JsonRootPath, $RestNameAndVersion))
-
-        $RestJson = Get-Content $JsonFileInfo.FullName | ConvertFrom-Json
-
-        #TODO: Move API out of here and add it directly to the main program - along with json file bits
-        $BuildResult.Api = Create-TemplatesFromDll -LibraryIndex $LibraryIndex -ApiName $ApiName -ApiFileVersion $LatestDllVersion `
+        ##TODO: make $JsonRootPath global?
+        #$JsonFileInfo = Get-MostRecentJsonFile -Path ([System.IO.Path]::Combine($JsonRootPath, $RestNameAndVersion))
+        #
+        #$RestJson = Get-Content $JsonFileInfo.FullName | ConvertFrom-Json
+        #
+        ##TODO: Move API out of here and add it directly to the main program - along with json file bits
+        $BuildResult.Api = Create-TemplatesFromDll -LibraryIndex $LibraryIndex -Api $Api `
             -OutPath $BuildResult.GeneratedProjectPath -RestJson $RestJson -Log $Log
 
-        $BuildResult.DependencyChain = $LibraryIndex.GetLibVersionDependencyChain($ApiName, $LatestDllVersion)
+        $BuildResult.DependencyChain = $LibraryIndex.GetLibVersionDependencyChain($Api.ApiName, $Api.AssemblyVersion)
 
         #TODO - Almost all of this info should be on the $Api object - api name, dll version. Fix it.
         #First, try to build
@@ -414,11 +414,11 @@ function CheckAndBuildGShellApi ($ApiName, $RootProjPath, $LibraryIndex, [bool]$
             
             #TODO - move this out to a controller method - or maybe in to the generation?
             Log "Building Psd1 file" $Log
-            Write-ModuleManifest -Api $BuildResult.Api -Version $BuildResult.LibVersion -ProjectRoot $BuildResult.GeneratedProjectPath
+            Write-ModuleManifest -Api $Api -Version $BuildResult.LibVersion -ProjectRoot $BuildResult.GeneratedProjectPath
 
             Log "Building Help XML file" $Log
             
-            Write-MCHelp -Api $BuildResult.Api -ApiName $BuildResult.LibName -OutPath $BuildResult.GeneratedProjectPath
+            Write-MCHelp -Api $Api -ApiName $BuildResult.LibName -OutPath $BuildResult.GeneratedProjectPath
 
             Log ("Copying the compiled $gShellApiName.dll file to the Library Index path") $Log
 
@@ -438,8 +438,8 @@ function CheckAndBuildGShellApi ($ApiName, $RootProjPath, $LibraryIndex, [bool]$
 
             #TODO - move this out of this function? ALSO, make sure the proper version built is set on the google library!
             #update the library
-            $LibraryIndex.SetLibLastVersionBuilt($ApiName, $LatestDllVersion)
-            SaveCompiledToLibraryIndex -ApiName $BuildResult.LibName -Version $LatestDllVersion -DllLocation $NewDllPath `
+            $LibraryIndex.SetLibLastVersionBuilt($Api.ApiName, $Api.AssemblyVersion)
+            SaveCompiledToLibraryIndex -ApiName $BuildResult.LibName -Version $Api.AssemblyVersion -DllLocation $NewDllPath `
                 -LibraryIndex $LibraryIndex -Dependencies $BuildResult.DependencyChain -Log $Log
             
         }

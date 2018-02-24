@@ -72,7 +72,6 @@ param($Api, [string]$ModulePath, [string]$ModuleVersion, [string]$HelpOutDirPath
 
     $OrderedResources = Get-OrderedResources $Api
 
-    #Build it in to one file
     $MainFileSB = new-object System.Text.StringBuilder
 
     $ApiDescription = $Api.DiscoveryObj.description
@@ -179,39 +178,124 @@ function Add-WikiCmdletLinks ($ModuleName, $FileContent, $RelatedCmdlets)  {
     return $FileContent
 }
 
-function New-WikiMarkdownApiTable ($LibraryIndex, $Apis) {
+function New-WikiMarkdownApiTable ($LibraryIndex, $Apis, $RecentLetter) {
     $Content = New-Object System.Collections.ArrayList
+    $ModulesWithCmdlets = 0
+    $CmdletsTotal = 0
     
+    $GShellLibs = $LibraryIndex.GetLibAll() | where {$_ -match "^gShell"}
+
     $Header = @"
-| Google API | Most Recent Successful Version | Most Recent Build Status |
-| ----------------------- | :------------: | :------------: |
+
+| Google API | Most Recent <br>Successful Version | Most Recent <br>Build Status |
+| ---------------------------------------- | :------------: | :------------: |
 "@
-    
+
+    $Content.Add($Header) | Out-Null
+
     foreach ($Api in $Apis) {
-        $Info = $LibraryIndex.GetLib($Api)
-        $Info2 = $LibraryIndex.GetLin("gShell." + $Info.RestNameAndVersion)
+        $NA = $false
+        if ($Api -like "*gmail*") {
+            write-host ""
+}
+        $Info = $LibraryIndex.GetLib("gShell.$Api")
+        if ($null -ne $Info) {
+            if ([string]::IsNullOrWhiteSpace($Info.LastSuccessfulVersionBuilt)) {
+                $NA = $true
+            } else {
+                $Version = "[{0}]({1})" -f $Info.LastSuccessfulVersionBuilt, ("gShell.$Api")
+                $SuccessfulCmdletCount = $Info.Versions.($Info.LastSuccessfulVersionBuilt).CmdletCount
+                if ($SuccessfulCmdletCount -gt 0) {
+                    $CmdletsTotal += $SuccessfulCmdletCount
+                    $ModulesWithCmdlets += 1
+                }
+                $LastBuilt = $LibraryIndex.GetLibLastVersionBuilt("gShell.$Api")
+                if ($Info.Versions.$LastBuilt.SuccessfulGeneration -eq $true) {
+                    $Status = "![Built][shieldBuilt]"
+                } else {
+                    $Status = "![Failed][shieldFailed]"
+                }
+            }
+        } else {
+            $NA = $true
+        }
+
+        if ($NA -eq $true) {
+            $Version = "-"
+            $Status = "![NA][shieldNA]"
+        }
+
+        #Check if we should put a name anchor
+        #TODO - pass in the letters dict by ref, maybe the counters too. any time a letter changes, update the dict and add an anchor
+        
         #First, if  the api name != the RestNameAndVersion, it was redirected. Which one to use?
-        $Line = "| {0} | {1} | {2} |" -f (ConvertTo-FirstUpper $Info.RestNameAndVersion), $Info2.LastVersionBuilt,
+        $Line = "| {0} | {1} | {2} |" -f $Api, $Version, $Status
         $Content.Add($Line) | Out-Null
     }
     
+    return ($Content -join "`r`n"), $ModulesWithCmdlets, $CmdletsTotal
+
 }
 
-function Make-ApiModulePage ($LibraryIndex, [string]$HelpOutDirPath) {
+function Make-ApiModulePage ($LibraryIndex, [string]$HelpOutDirPath, $PerTable=15) {
     $TopOfPageAnchor = Get-HtmlAnchor "topofpage"
 
+    $Letters = [ordered]@{}; 65..90 | % {$Letters[[char]$_] = $false}
+
     $KnownApis = $LibraryIndex.GetLibAll() | where {$_ -match "Google.Apis\..+"}
+
+    $ContentCollection = New-Object System.Collections.ArrayList
 
     $Content = @"
 # $TopOfPageAnchor Modules
 Below is the list of APIs that have been processed by the [gShell Api Generator](https://github.com/squid808/gShellApiGenerator), along with the most recent successful version's documentation as well as the most recent attempted build status.
+{3}
 
-## 
+## Stats
 
-[shieldPassed]: https://img.shields.io/badge/-Passed-green.svg "Build Passed"
+#### Total APIs: {0}
+
+#### Total Modules: {1}
+
+#### Total Cmdlets: {2} 
+
+## Modules
+
+[shieldBuilt]: https://img.shields.io/badge/-Built-green.svg "Build Succeeded"
 [shieldFailed]: https://img.shields.io/badge/-Failed-red.svg "Build Failed"
 [shieldNA]: https://img.shields.io/badge/-N/A-lightgrey.svg "Not Available"
 "@
+
+    $ContentCollection.Add($Content) | Out-Null
+
+    #$GShellLibs = $LibraryIndex.GetLibAll() | where {$_ -match "^gShell"} | where {$_ -ne "gShell.Main"} | sort
+
+    $Libs = $LibraryIndex.GetLibAll() | where {$_ -match "^Google\.Apis\..+"}  | % {$_ -replace "Google.Apis.",""} | sort
+
+    $RecentLetter = $null
+    $ModulesWithCmdlets = 0
+    $CmdletsCount = 0
+
+    #if 14 -ge 14 end = len - 1
+    for ($i = 0; $i -lt $Libs.Length; $i+=$PerTable) {
+        $end = $i + $PerTable - 1
+
+        if ($end -ge $Libs.Length) {
+            $end = $Libs.Length - 1
+        }
+
+        $Table,$TableModulesWithCmdlets,$TableCmdletsCount,$RecentLetter = `
+            New-WikiMarkdownApiTable -LibraryIndex $LibraryIndex -Apis $Libs[$i..$end] -RecentLetter $RecentLetter
+        $ModulesWithCmdlets += $TableModulesWithCmdlets
+        $CmdletsCount += $TableCmdletsCount
+        $ContentCollection.Add($Table) | Out-Null
+    }
+
+    $ContentCollection[0] = $ContentCollection[0] -f $Libs.Count, $ModulesWithCmdlets, $CmdletsCount
+
+    $Text = $ContentCollection -join "`r`n"
+
+    $Text | Out-File ([System.IO.Path]::Combine($HelpOutDirPath, "ModulesIndex.md")) -Encoding default -Force
 }
 
 #$RestJson = Load-RestJsonFile gmail v1
@@ -222,3 +306,5 @@ Below is the list of APIs that have been processed by the [gShell Api Generator]
 #    -ModuleVersion "1.30.1034-alpha01" `
 #    -HelpOutDirPath "C:\Users\svarney\Documents\GshellAutomationTest.wiki" `
 #    -CustomVerbose -Api $Api
+
+Make-ApiModulePage -LibraryIndex $LibraryIndex -HelpOutDirPath $WikiRepoPath

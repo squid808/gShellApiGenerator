@@ -240,7 +240,8 @@ function Build-ApiLibrary ($LibraryIndex, [ref]$BuildResultObj, [bool]$Log=$fals
     }
 }
 
-function SaveCompiledToLibraryIndex ($ApiName, $Version, $DllLocation, $LibraryIndex, $Dependencies, [bool]$Log = $false) {
+#Sets the libsource to local, sets dependencies, dll path,  last version built
+function SaveCompiledToLibraryIndex ($ApiName, $Version, $DllLocation, $SourceVersion, $BuildSucceeded, $LibraryIndex, $Dependencies, [bool]$Log = $false) {
     
     #add library
     if (-not $LibraryIndex.HasLib($ApiName)) {
@@ -265,7 +266,11 @@ function SaveCompiledToLibraryIndex ($ApiName, $Version, $DllLocation, $LibraryI
 
     $LibraryIndex.GetLibVersion($ApiName, $Version)."dllPath" = $DllLocation
     $LibraryIndex.SetLibLastVersionBuilt($ApiName, $Version)
-
+    if ($BuildSucceeded -eq $true) {
+        $LibraryIndex.SetLibLastSuccessfulVersionBuilt($ApiName, $Version)
+    }
+    $LibraryIndex.SetLibraryVersionSourceVersion($ApiName, $Version, $SourceVersion)
+    $LibraryIndex.SetLibraryVersionSuccessfulGeneration($ApiName, $Version, $BuildSucceeded)
     $LibraryIndex.Save()
 }
 
@@ -426,6 +431,7 @@ function CheckAndBuildGShellApi ($Api, $RootProjPath, $LibraryIndex, [bool]$Log 
             $LibraryRootPath = [System.IO.Path]::GetDirectoryName($LibraryIndex.RootPath)
             $NewDllFolderPath = [System.IO.Path]::Combine($LibraryRootPath, $BuildResult.LibName, `
                 $BuildResult.LibVersion)
+            $NewDllFilePath = [System.IO.Path]::Combine($NewDllFolderPath, ($BuildResult.LibName + ".dll"))
 
             if (-not (Test-Path $NewDllFolderPath)) {
                 New-Item -Path $NewDllFolderPath -ItemType "Directory" | Out-Null
@@ -439,9 +445,12 @@ function CheckAndBuildGShellApi ($Api, $RootProjPath, $LibraryIndex, [bool]$Log 
             #TODO - move this out of this function? ALSO, make sure the proper version built is set on the google library!
             #update the library
             $LibraryIndex.SetLibLastVersionBuilt($Api.ApiName, $Api.AssemblyVersion)
-            SaveCompiledToLibraryIndex -ApiName $BuildResult.LibName -Version $Api.AssemblyVersion -DllLocation $NewDllPath `
-                -LibraryIndex $LibraryIndex -Dependencies $BuildResult.DependencyChain -Log $Log
+            SaveCompiledToLibraryIndex -ApiName $BuildResult.LibName -Version $BuildResult.LibVersion -DllLocation $NewDllFilePath `
+                -SourceVersion $Api.AssemblyVersion -BuildSucceeded $true -LibraryIndex $LibraryIndex -Dependencies $BuildResult.DependencyChain -Log $Log
             
+        } else {
+            SaveCompiledToLibraryIndex -ApiName $BuildResult.LibName -Version $BuildResult.LibVersion `
+                -SourceVersion $Api.AssemblyVersion -BuildSucceeded $false -LibraryIndex $LibraryIndex -Dependencies $BuildResult.DependencyChain -Log $Log
         }
     } else {
         Log ("$gShellApiName $LastVersionBuilt appears to be up to date") $Log

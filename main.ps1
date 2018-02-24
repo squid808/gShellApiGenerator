@@ -92,13 +92,19 @@ function Invoke-GshellGeneratorMain {
                 Log "Loading .dll library in to Api template object" $Log
                 $Api = Invoke-GShellReflection -RestJson $RestJson -ApiName $ApiName -ApiFileVersion $LatestDllVersion -LibraryIndex $LibraryIndex
 
-                $GShellApiName,$GShellApiVersion,$CompiledPath = CheckAndBuildGShellApi -Api $Api -RootProjPath $RootProjPath -LibraryIndex $LibraryIndex `
+                $BuildResult = CheckAndBuildGShellApi -Api $Api -RootProjPath $RootProjPath -LibraryIndex $LibraryIndex `
                     -Log $Log -Force $ForceBuildApis.IsPresent
 
                 #for successful build
-                if ($null -ne $CompiledPath) {
+                if ($BuildResult.BuildSucceeded) {
+                    $WikiFiles = Write-wiki -Api $Api -ModulePath ([System.IO.Path]::Combine($BuildResult.CompiledDirPath, ($BuildResult.LibName + ".psd1"))) -ModuleVersion $BuildResult.LibVersion -HelpOutDirPath $WikiRepoPath
+
+                    #Use WikiFiles.Count to get the Cmdlets count!
+                    $LibraryIndex.SetLibraryVersionCmdletCount($BuildResult.LibName, $BuildResult.LibVersion, $WikiFiles.Count)
+                    $LibraryIndex.Save()
+
                     #TODO: Make this stateless - store in local db?
-                    $BuildUpdates[$GShellApiName] = @{$GShellApiVersion=[System.IO.Path]::GetDirectoryName($CompiledPath)}
+                    #$BuildUpdates[$GShellApiName] = @{$GShellApiVersion=[System.IO.Path]::GetDirectoryName($CompiledPath)}
 
                     #TODO: The source code needs to be copied to the repo location for successful generations - can't keep all in one spot to avoid
                     #pushing up bad source code that doesn't build, right?
@@ -124,18 +130,18 @@ function Invoke-GshellGeneratorMain {
         }
     }
 
-    if ($BuildUpdates.Keys.Count -gt 0) {
-        foreach ($ApiKey in $BuildUpdates.Keys) {
-            foreach ($VersionKey in $BuildUpdates[$ApiKey].Keys) {
-                Write-host $ApiKey $VersionKey $BuildUpdates[$ApiKey][$VersionKey]
-            }
-        }
-        
-        #update the wiki and wiki repo here
-
-        #update the library repo
-
-    }
+    #if ($BuildUpdates.Keys.Count -gt 0) {
+    #    foreach ($ApiKey in $BuildUpdates.Keys) {
+    #        foreach ($VersionKey in $BuildUpdates[$ApiKey].Keys) {
+    #            Write-host $ApiKey $VersionKey $BuildUpdates[$ApiKey][$VersionKey]
+    #        }
+    #    }
+    #    
+    #    #update the wiki and wiki repo here
+    #
+    #    #update the library repo
+    #
+    #}
 }
 
 #TODO - add in some kind of build summary report at the end - provide error logs for those that didn't work?
@@ -159,3 +165,8 @@ TODO:
 5) add generated code to repo, push only if any updates
 6) push to TEST repo for now.
 #>
+
+#$OldPath = $env:PSModulePath
+#$Paths = $OldPath -split ";" | where {-not [string]::IsNullOrWhiteSpace($_)}
+#$Paths += "C:\Users\svarney\Desktop\gShellGen\GenOutput\gShell.gmail.v1\bin\Debug"
+#$env:Path = ($Paths -join ";") + ";"

@@ -111,6 +111,18 @@ function Get-LibraryIndex ($Path, [bool]$Log=$false) {
         return Set-LibraryIndexLibLastVersionBuilt $this $LibName $Version
     }
 
+    #GetLibLastSuccessfulVersionBuilt(LibName)
+    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "GetLibLastSuccessfulVersionBuilt" -Value {
+        param([string]$LibName)
+        return Get-LibraryIndexLibLastSuccessfulVersionBuilt $this $LibName
+    }
+
+    #SetLibLastSuccessfulVersionBuilt(LibName, Version)
+    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "SetLibLastSuccessfulVersionBuilt" -Value {
+        param([string]$LibName, [string]$Version = $null)
+        return Set-LibraryIndexLibLastSuccessfulVersionBuilt $this $LibName $Version
+    }
+
     #GetLibRestNameAndVersion(LibName)
     $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "GetLibRestNameAndVersion" -Value {
         param([string]$LibName)
@@ -203,6 +215,18 @@ function Get-LibraryIndex ($Path, [bool]$Log=$false) {
         return Set-LibraryVersionSourceVersion $this $LibName $Version $SourceVersion
     }
 
+    #GetLibraryVersionCmdletCount(LibName, Version)
+    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "GetLibraryVersionCmdletCount" -Value {
+        param([string]$LibName, [string]$Version)
+        return Get-LibraryVersionCmdletCount $this $LibName $Version
+    }
+
+    #SetLibraryVersionCmdletCount(LibName, Version, DependencyName, DependencyVersion)
+    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "SetLibraryVersionCmdletCount" -Value {
+        param([string]$LibName, [string]$Version, [int]$CmdletCount)
+        return Set-LibraryVersionCmdletCount $this $LibName $Version $CmdletCount
+    }
+
     #HasLibraryVersionSuccessfulGeneration(LibName, Version, DependencyName, DependencyVersion)
     $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "HasLibraryVersionSuccessfulGeneration" -Value {
         param([string]$LibName, [string]$Version)
@@ -258,6 +282,7 @@ function Add-LibraryIndexLib {
     param($LibraryIndex, [string]$LibName )
 
     $L = New-Object PSCustomObject
+    $L | Add-Member -MemberType NoteProperty -Name "LastSuccessfulVersionBuilt" -Value $null
     $L | Add-Member -MemberType NoteProperty -Name "LastVersionBuilt" -Value $null
     $L | Add-Member -MemberType NoteProperty -Name "Source" -Value $null
     $L | Add-Member -MemberType NoteProperty -Name "Versions" -Value (New-Object psobject)
@@ -313,6 +338,20 @@ function Set-LibraryIndexLibLastVersionBuilt {
     param($LibraryIndex, [string]$LibName, $Version = $null)
 
     $LibraryIndex.Libraries.$LibName.LastVersionBuilt = $Version
+}
+
+#GetLibLastSuccessfulVersionBuilt
+function Get-LibraryIndexLibLastSuccessfulVersionBuilt {
+    param($LibraryIndex, [string]$LibName)
+
+    return $LibraryIndex.Libraries.$LibName.LastSuccessfulVersionBuilt
+}
+
+#SetLibLastSuccessfulVersionBuilt
+function Set-LibraryIndexLibLastSuccessfulVersionBuilt {
+    param($LibraryIndex, [string]$LibName, $Version = $null)
+
+    $LibraryIndex.Libraries.$LibName.LastSuccessfulVersionBuilt = $Version
 }
 
 #GetLibRestNameAndVersion
@@ -509,6 +548,30 @@ function Set-LibraryVersionSourceVersion {
     }
 
     $VersionInfo.SourceVersion = $SourceVersion
+}
+
+#GetLibraryVersionCmdletCount(LibName, Version)
+function Get-LibraryVersionCmdletCount {
+    param($LibraryIndex, [string]$LibName, [string]$Version)
+
+    return $LibraryIndex.GetLibVersion($LibName, $Version).CmdletCount
+}
+
+#SetLibraryVersionCmdletCount(LibName, Version, CmdletCount)
+function Set-LibraryVersionCmdletCount {
+    param($LibraryIndex, [string]$LibName, [string]$Version, [int]$CmdletCount)
+
+    if (-not ($LibraryIndex.HasLibVersion($LibName, $Version))) {
+        $LibraryIndex.AddLibVersion($LibName, $Version)
+    }
+
+    $VersionInfo = $LibraryIndex.GetLibVersion($LibName, $Version)
+
+    if ($VersionInfo.PSObject.Properties.Name -notcontains "CmdletCount") {
+        $VersionInfo | Add-Member -NotePropertyName "CmdletCount" -NotePropertyValue $null
+    }
+
+    $VersionInfo.CmdletCount = $CmdletCount
 }
 
 #HasLibraryVersionSuccessfulGeneration(LibName, Version)

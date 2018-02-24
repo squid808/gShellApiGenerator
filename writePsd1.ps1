@@ -28,7 +28,11 @@
 
     $ModuleName = "gShell.$ApiName.$ApiVersionNoDots"
 
-    $AlphaVersion = $Version.Split("-")[0]
+    $Matches = $null
+
+    if ($Version -match "-.*") {
+        $AlphaVersion = "'{0}'" -f $Matches[0]
+    }
 
     New-ModuleManifest `
         -Path "$ProjectDebugFolder\$ModuleName.psd1" `

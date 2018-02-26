@@ -36,6 +36,7 @@ function Invoke-GshellGeneratorMain {
         [switch]$ForceBuildGShell,
         [switch]$ShouldBuildApis,
         [switch]$ForceBuildApis,
+        [switch]$ShouldRebuildModuleIndex,
         [bool]$Log = $False
     )
 
@@ -63,7 +64,7 @@ function Invoke-GshellGeneratorMain {
     
     if ($ShouldBuildApis -or $ForceBuildApis) {
         #pull out all google apis for which we have an entry in the index
-        $ApisFromNuget = $LibraryIndex.Libraries.psobject.Properties.Name | where {$_ -like "Google.Apis*"}
+        $ApisFromNuget = $LibraryIndex.Libraries.psobject.Properties.Name | where {$_ -match "Google\.Apis\..+"} | sort
     
         if (-not [string]::IsNullOrWhiteSpace($ApiFilter)) {
             $ApisFromNuget = $ApisFromNuget | where {$_ -like ("Google.Apis." + $ApiFilter)}
@@ -75,43 +76,51 @@ function Invoke-GshellGeneratorMain {
             Log "No Apis found with the filter `"$ApiFilter`"" $Log
         } else {
             foreach ($ApiName in $ApisFromNuget) {
+
+                try {
                 
-                $LatestDllVersion = $LibraryIndex.GetLibVersionLatestName($ApiName)
+                    $LatestDllVersion = $LibraryIndex.GetLibVersionLatestName($ApiName)
                 
-                $RestNameAndVersion = $LibraryIndex.GetLibRestNameAndVersion($ApiName)
+                    $RestNameAndVersion = $LibraryIndex.GetLibRestNameAndVersion($ApiName)
 
-                #TODO: make $JsonRootPath global?
-                $JsonFileInfo = Get-MostRecentJsonFile -Path ([System.IO.Path]::Combine($JsonRootPath, $RestNameAndVersion))
+                    #TODO: make $JsonRootPath global?
+                    $JsonFileInfo = Get-MostRecentJsonFile -Path ([System.IO.Path]::Combine($JsonRootPath, $RestNameAndVersion))
 
-                $RestJson = Get-Content $JsonFileInfo.FullName | ConvertFrom-Json
+                    $RestJson = Get-Content $JsonFileInfo.FullName | ConvertFrom-Json
 
-                #TODO: Move API out of here and add it directly to the main program - along with json file bits
-                #$BuildResult.Api = Create-TemplatesFromDll -LibraryIndex $LibraryIndex -ApiName $ApiName -ApiFileVersion $LatestDllVersion `
-                #    -OutPath $BuildResult.GeneratedProjectPath -RestJson $RestJson -Log $Log
+                    #TODO: Move API out of here and add it directly to the main program - along with json file bits
+                    #$BuildResult.Api = Create-TemplatesFromDll -LibraryIndex $LibraryIndex -ApiName $ApiName -ApiFileVersion $LatestDllVersion `
+                    #    -OutPath $BuildResult.GeneratedProjectPath -RestJson $RestJson -Log $Log
 
-                Log "Loading .dll library in to Api template object" $Log
-                $Api = Invoke-GShellReflection -RestJson $RestJson -ApiName $ApiName -ApiFileVersion $LatestDllVersion -LibraryIndex $LibraryIndex
+                    Log "Loading .dll library in to Api template object" $Log
+                    $Api = Invoke-GShellReflection -RestJson $RestJson -ApiName $ApiName -ApiFileVersion $LatestDllVersion -LibraryIndex $LibraryIndex
 
-                $BuildResult = CheckAndBuildGShellApi -Api $Api -RootProjPath $RootProjPath -LibraryIndex $LibraryIndex `
-                    -Log $Log -Force $ForceBuildApis.IsPresent
+                    $BuildResult = CheckAndBuildGShellApi -Api $Api -RootProjPath $RootProjPath -LibraryIndex $LibraryIndex `
+                        -Log $Log -Force $ForceBuildApis.IsPresent
 
-                #for successful build
-                if ($BuildResult.BuildSucceeded) {
-                    $WikiFiles = Write-wiki -Api $Api -ModulePath ([System.IO.Path]::Combine($BuildResult.CompiledDirPath, ($BuildResult.LibName + ".psd1"))) -ModuleVersion $BuildResult.LibVersion -HelpOutDirPath $WikiRepoPath
 
-                    #Use WikiFiles.Count to get the Cmdlets count!
-                    $LibraryIndex.SetLibraryVersionCmdletCount($BuildResult.LibName, $BuildResult.LibVersion, $WikiFiles.Count)
-                    $LibraryIndex.Save()
 
-                    #TODO: Make this stateless - store in local db?
-                    #$BuildUpdates[$GShellApiName] = @{$GShellApiVersion=[System.IO.Path]::GetDirectoryName($CompiledPath)}
+                    #for successful build
+                    if ($BuildResult.BuildSucceeded) {
+                        $WikiFiles = Write-wiki -Api $Api -ModulePath ([System.IO.Path]::Combine($BuildResult.CompiledDirPath, ($BuildResult.LibName + ".psd1"))) -ModuleVersion $BuildResult.LibVersion -HelpOutDirPath $WikiRepoPath
 
-                    #TODO: The source code needs to be copied to the repo location for successful generations - can't keep all in one spot to avoid
-                    #pushing up bad source code that doesn't build, right?
-                } else {
-                    #TODO: Update the status on a status wiki page? something like that.
+                        #Use WikiFiles.Count to get the Cmdlets count!
+                        $LibraryIndex.SetLibraryVersionCmdletCount($BuildResult.LibName, $BuildResult.LibVersion, $WikiFiles.Count)
+                        $LibraryIndex.Save()
+
+                        #TODO: Make this stateless - store in local db?
+                        #$BuildUpdates[$GShellApiName] = @{$GShellApiVersion=[System.IO.Path]::GetDirectoryName($CompiledPath)}
+
+                        #TODO: The source code needs to be copied to the repo location for successful generations - can't keep all in one spot to avoid
+                        #pushing up bad source code that doesn't build, right?
+                    } else {
+                        #TODO: Update the status on a status wiki page? something like that.
+                    }
+
+                } catch {
+                    #should probably mark this as a failed build
+                    Write-Error $_
                 }
-
 
                 ##TEST
                 ##for now, copy the compiled files to a 'modules' folder
@@ -130,6 +139,10 @@ function Invoke-GshellGeneratorMain {
         }
     }
 
+    if ($ShouldRebuildModuleIndex) {
+        Make-ApiModulePage -LibraryIndex $LibraryIndex -HelpOutDirPath $WikiRepoPath
+    }
+
     #if ($BuildUpdates.Keys.Count -gt 0) {
     #    foreach ($ApiKey in $BuildUpdates.Keys) {
     #        foreach ($VersionKey in $BuildUpdates[$ApiKey].Keys) {
@@ -145,7 +158,7 @@ function Invoke-GshellGeneratorMain {
 }
 
 #TODO - add in some kind of build summary report at the end - provide error logs for those that didn't work?
-Invoke-GshellGeneratorMain -ApiFilter "gmail.v1" -ShouldBuildApis -ForceBuildApis -Log $Log
+#Invoke-GshellGeneratorMain -ApiFilter "gmail.v1" -ShouldBuildApis -ForceBuildApis -Log $Log
 
 #Invoke-GshellGeneratorMain -ForceBuildGShell -Log $Log
 
@@ -170,3 +183,5 @@ TODO:
 #$Paths = $OldPath -split ";" | where {-not [string]::IsNullOrWhiteSpace($_)}
 #$Paths += "C:\Users\svarney\Desktop\gShellGen\GenOutput\gShell.gmail.v1\bin\Debug"
 #$env:Path = ($Paths -join ";") + ";"
+
+Invoke-GshellGeneratorMain -ShouldBuildGShell -ShouldBuildApis -Log $true -ApiFilter "AdSense.v1_4" -ForceBuildApis -ShouldRebuildModuleIndex

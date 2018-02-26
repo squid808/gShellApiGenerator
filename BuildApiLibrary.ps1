@@ -112,6 +112,7 @@ using System.Runtime.InteropServices;
     $AssemblyText | Out-File -FilePath $AssemblyFilePath -Encoding utf8 -Force
 }
 
+#TODO: Move to WriteCSProj?
 function New-CsProjFile ($LibraryIndex, $DependencyChain, $BuildProjectPath, $Api) {
 
     $NewGuid = [System.Guid]::NewGuid().ToString("B").ToUpper()
@@ -389,7 +390,7 @@ function CheckAndBuildGShellApi ($Api, $RootProjPath, $LibraryIndex, [bool]$Log 
     $BuildResult = New-Object BuildResult
 
     #$RestNameAndVersion = $LibraryIndex.GetLibRestNameAndVersion($ApiName)
-    $BuildResult.LibName = "gShell." + (ConvertTo-FirstUpper $RestNameAndVersion)
+    $BuildResult.LibName = "gShell." + (ConvertTo-FirstUpper $Api.NameAndVersion)
     $BuildResult.LibVersion = DetermineNextBuildVersion -GoogleSourceVersion $Api.AssemblyVersion `
         -LastGshellVersionBuilt $LibraryIndex.GetLibLastVersionBuilt($BuildResult.LibName) -AsAlpha
     $BuildResult.GeneratedProjectPath = [System.IO.Path]::Combine($RootProjPath, $BuildResult.LibName)
@@ -423,7 +424,7 @@ function CheckAndBuildGShellApi ($Api, $RootProjPath, $LibraryIndex, [bool]$Log 
 
             Log "Building Help XML file" $Log
             
-            Write-MCHelp -Api $Api -ApiName $BuildResult.LibName -OutPath $BuildResult.GeneratedProjectPath
+            Write-MCHelp -Api $Api -OutPath $BuildResult.GeneratedProjectPath
 
             Log ("Copying the compiled $gShellApiName.dll file to the Library Index path") $Log
 

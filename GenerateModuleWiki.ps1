@@ -178,7 +178,8 @@ function Add-WikiCmdletLinks ($ModuleName, $FileContent, $RelatedCmdlets)  {
     return $FileContent
 }
 
-function New-WikiMarkdownApiTable ($LibraryIndex, $Apis, $RecentLetter) {
+function New-WikiMarkdownApiTable ($LibraryIndex, $Apis) {
+
     $Content = New-Object System.Collections.ArrayList
     $ModulesWithCmdlets = 0
     $CmdletsTotal = 0
@@ -194,6 +195,7 @@ function New-WikiMarkdownApiTable ($LibraryIndex, $Apis, $RecentLetter) {
     $Content.Add($Header) | Out-Null
 
     foreach ($Api in $Apis) {
+
         $NA = $false
         if ($Api -like "*gmail*") {
             write-host ""
@@ -225,22 +227,19 @@ function New-WikiMarkdownApiTable ($LibraryIndex, $Apis, $RecentLetter) {
             $Status = "![NA][shieldNA]"
         }
 
-        #Check if we should put a name anchor
-        #TODO - pass in the letters dict by ref, maybe the counters too. any time a letter changes, update the dict and add an anchor
-        
         #First, if  the api name != the RestNameAndVersion, it was redirected. Which one to use?
         $Line = "| {0} | {1} | {2} |" -f $Api, $Version, $Status
         $Content.Add($Line) | Out-Null
     }
+
+    $Content = ($Content -join "`r`n") + "`r`n<sub>[Back To Top](#topofpage)</sub>"
     
-    return ($Content -join "`r`n"), $ModulesWithCmdlets, $CmdletsTotal
+    return $Content, $ModulesWithCmdlets, $CmdletsTotal
 
 }
 
 function Make-ApiModulePage ($LibraryIndex, [string]$HelpOutDirPath, $PerTable=15) {
     $TopOfPageAnchor = Get-HtmlAnchor "topofpage"
-
-    $Letters = [ordered]@{}; 65..90 | % {$Letters[[char]$_] = $false}
 
     $KnownApis = $LibraryIndex.GetLibAll() | where {$_ -match "Google.Apis\..+"}
 
@@ -248,7 +247,7 @@ function Make-ApiModulePage ($LibraryIndex, [string]$HelpOutDirPath, $PerTable=1
 
     $Content = @"
 # $TopOfPageAnchor Modules
-Below is the list of APIs that have been processed by the [gShell Api Generator](https://github.com/squid808/gShellApiGenerator), along with the most recent successful version's documentation as well as the most recent attempted build status.
+Below is the list of APIs that have been processed by the [gShell Api Generator](https://github.com/squid808/gShellApiGenerator), along with the most recent successful version's documentation as well as the most recent attempted build status.  
 {3}
 
 ## Stats
@@ -264,14 +263,16 @@ Below is the list of APIs that have been processed by the [gShell Api Generator]
 [shieldBuilt]: https://img.shields.io/badge/-Built-green.svg "Build Succeeded"
 [shieldFailed]: https://img.shields.io/badge/-Failed-red.svg "Build Failed"
 [shieldNA]: https://img.shields.io/badge/-N/A-lightgrey.svg "Not Available"
+
 "@
 
-    $ContentCollection.Add($Content) | Out-Null
+    #$ContentCollection.Add($Content) | Out-Null
 
     #$GShellLibs = $LibraryIndex.GetLibAll() | where {$_ -match "^gShell"} | where {$_ -ne "gShell.Main"} | sort
 
     $Libs = $LibraryIndex.GetLibAll() | where {$_ -match "^Google\.Apis\..+"}  | % {$_ -replace "Google.Apis.",""} | sort
 
+    #To use in keeping track of the letters index
     $RecentLetter = $null
     $ModulesWithCmdlets = 0
     $CmdletsCount = 0
@@ -284,16 +285,38 @@ Below is the list of APIs that have been processed by the [gShell Api Generator]
             $end = $Libs.Length - 1
         }
 
-        $Table,$TableModulesWithCmdlets,$TableCmdletsCount,$RecentLetter = `
-            New-WikiMarkdownApiTable -LibraryIndex $LibraryIndex -Apis $Libs[$i..$end] -RecentLetter $RecentLetter
+        $Table,$TableModulesWithCmdlets,$TableCmdletsCount = `
+            New-WikiMarkdownApiTable -LibraryIndex $LibraryIndex -Apis $Libs[$i..$end]
         $ModulesWithCmdlets += $TableModulesWithCmdlets
         $CmdletsCount += $TableCmdletsCount
         $ContentCollection.Add($Table) | Out-Null
     }
 
-    $ContentCollection[0] = $ContentCollection[0] -f $Libs.Count, $ModulesWithCmdlets, $CmdletsCount
+    $Letters = [ordered]@{}
+    65..90 | % {$Letters[[string]([char]$_)] = $false}
+    $LetterIndex = New-Object System.Collections.ArrayList
 
-    $Text = $ContentCollection -join "`r`n"
+    $ContentCollection = $ContentCollection -join "`r`n" -split "`r`n"
+
+    #Add anchors to any lines with letters, and update the dict
+    foreach ($Letter in $Letters.Keys) {
+
+        $LetterSearch = ($ContentCollection | ? {$_ -match "^\| $Letter" -and $_ -notmatch "Google API" } | select -First 1)
+        if (-not [string]::IsNullOrWhiteSpace($LetterSearch)){
+            $LetterLower = $Letter.ToLower()
+            $LetterIndex.Add(("[$Letter](#modules-$LetterLower)")) | Out-Null
+            $LetterLine = $ContentCollection.IndexOf($LetterSearch)
+            $ContentCollection[$LetterLine] = $LetterSearch.Insert(2,(Get-HtmlAnchor "modules-$LetterLower"))
+        } else {
+            $LetterIndex.Add($Letter) | Out-Null
+        }
+    }
+
+    $LetterIndex = $LetterIndex -join " "
+
+    $Content = $Content -f $Libs.Count, $ModulesWithCmdlets, $CmdletsCount, $LetterIndex
+
+    $Text = $Content + ($ContentCollection -join "`r`n")
 
     $Text | Out-File ([System.IO.Path]::Combine($HelpOutDirPath, "ModulesIndex.md")) -Encoding default -Force
 }

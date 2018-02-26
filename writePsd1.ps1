@@ -24,9 +24,9 @@
     $Author = "Spencer Varney"
 
     $ApiName = $Api.Name
-    $ApiVersionNoDots = $Api.Version -replace "[.]","_"
+    $ApiVersion = $Api.Version
 
-    $ModuleName = "gShell.$ApiName.$ApiVersionNoDots"
+    $ModuleName = "gShell." + $Api.NameAndVersion
 
     $Matches = $null
 

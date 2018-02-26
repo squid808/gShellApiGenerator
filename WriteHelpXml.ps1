@@ -155,7 +155,7 @@ function Get-MCHelpMediaDownloadProperties($Method) {
     } else {
         $DefaultParamSet = "Default"
         $PropertiesHash["Default"] = (New-Object System.Collections.ArrayList)
-        $PropertiesHash["Media"]["Media"] = (New-Object System.Collections.ArrayList)
+        $PropertiesHash["Media"] = (New-Object System.Collections.ArrayList)
     }
 
     $MethodParams = $Method.Parameters | where `
@@ -163,7 +163,7 @@ function Get-MCHelpMediaDownloadProperties($Method) {
 
     #First iterate all methods in the main method
     foreach ($Parameter in $MethodParams) {
-        foreach ($Key in $PropertiesHash) {
+        foreach ($Key in $PropertiesHash.Keys) {
             $PropertiesHash[$Key].Add($Parameter) | Out-Null
         }
 
@@ -600,9 +600,9 @@ function Write-MCHelpResources ($Resources, [ref]$xmlWriter) {
     }
 }
 
-function Write-MCHelp ($Api, $ApiName, $OutPath) {
+function Write-MCHelp ($Api, $OutPath) {
 
-    $HelpFileName = $ApiName + ".dll-Help.xml"
+    $HelpFileName = "gShell." + $Api.NameAndVersion + ".dll-Help.xml"
     $Path = ([System.IO.Path]::Combine($OutPath, "bin\Debug", $HelpFileName))
     
     $xmlWriter = New-Object System.XML.XmlTextWriter($Path,$Null)

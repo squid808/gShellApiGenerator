@@ -119,7 +119,7 @@ function Get-LibraryIndex ($Path, [bool]$Log=$false) {
 
     #SetLibLastSuccessfulVersionBuilt(LibName, Version)
     $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "SetLibLastSuccessfulVersionBuilt" -Value {
-        param([string]$LibName, [string]$Version = $null)
+        param([string]$LibName, [string]$Version)
         return Set-LibraryIndexLibLastSuccessfulVersionBuilt $this $LibName $Version
     }
 
@@ -337,6 +337,10 @@ function Get-LibraryIndexLibLastVersionBuilt {
 function Set-LibraryIndexLibLastVersionBuilt {
     param($LibraryIndex, [string]$LibName, $Version = $null)
 
+    if ($LibraryIndex.Libraries.$LibName.PSObject.Properties.Name -notcontains "LastVersionBuilt") {
+        $LibraryIndex.Libraries.$LibName | add-member -Name "LastVersionBuilt" -MemberType NoteProperty -Value $null
+    }
+
     $LibraryIndex.Libraries.$LibName.LastVersionBuilt = $Version
 }
 
@@ -349,7 +353,11 @@ function Get-LibraryIndexLibLastSuccessfulVersionBuilt {
 
 #SetLibLastSuccessfulVersionBuilt
 function Set-LibraryIndexLibLastSuccessfulVersionBuilt {
-    param($LibraryIndex, [string]$LibName, $Version = $null)
+    param($LibraryIndex, [string]$LibName, $Version)
+
+    if ($LibraryIndex.Libraries.$LibName.PSObject.Properties.Name -notcontains "LastSuccessfulVersionBuilt") {
+        $LibraryIndex.Libraries.$LibName | add-member -Name "LastSuccessfulVersionBuilt" -MemberType NoteProperty -Value $null
+    }
 
     $LibraryIndex.Libraries.$LibName.LastSuccessfulVersionBuilt = $Version
 }

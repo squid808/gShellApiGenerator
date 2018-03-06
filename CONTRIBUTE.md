@@ -57,6 +57,8 @@ Currently all major components are implemented into a working script, but there 
 
 Unit tests are only just beginning.
 
+Full progress can currently be found in the [*develop branch*](https://github.com/squid808/gShellApiGenerator/tree/develop).
+
 # <a name="history"></a>Project history until now
 The first thing to say is that, in its current form it produces relatively consistant and viable results. But, it has a long way to go.
 

@@ -184,4 +184,4 @@ TODO:
 #$Paths += "C:\Users\svarney\Desktop\gShellGen\GenOutput\gShell.gmail.v1\bin\Debug"
 #$env:Path = ($Paths -join ";") + ";"
 
-Invoke-GshellGeneratorMain -ShouldBuildGShell -ShouldBuildApis -Log $true -ApiFilter "AdSense.v1_4" -ForceBuildApis -ShouldRebuildModuleIndex
+Invoke-GshellGeneratorMain -ShouldBuildGShell -ShouldBuildApis -Log $true -ForceBuildApis -ShouldRebuildModuleIndex

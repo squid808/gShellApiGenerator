@@ -1,38 +1,41 @@
 ﻿# Formats JSON in a nicer output format than the built-in ConvertTo-Json does.
 #via https://github.com/PowerShell/PowerShell/issues/2736
-function Format-Json([Parameter(Mandatory, ValueFromPipeline)][String] $json) {
-  $indent = 0;
-  $previousLine = $null
-  $Lines = $json -Split "`r`n"
+function Format-Json {
 
-  for ($i = 0; $i -lt $lines.Length; $i++) {
-    if ($Lines[$i] -match '[\}\]]') {
-        # This line contains  ] or }, decrement the indentation level
-        $indent--
-    }
+    param (
+        [Parameter(Mandatory, ValueFromPipeline)]
+        [String]$json
+    )
 
-    if (-not [string]::IsNullOrWhiteSpace($Lines[$i])) {
-        $lines[$i] = ('  ' * $indent) + $Lines[$i].TrimStart().TrimEnd().Replace(':  ', ': ')
-    }
+    $indent = 0;
+    $previousLine = $null
+    $Lines = $json -Split "`r`n"
+
+    for ($i = 0; $i -lt $lines.Length; $i++) {
+        if ($Lines[$i] -match '[\}\]]') {
+            # This line contains  ] or }, decrement the indentation level
+            $indent--
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($Lines[$i])) {
+            $lines[$i] = ('  ' * $indent) + $Lines[$i].TrimStart().TrimEnd().Replace(':  ', ': ')
+        }
     
-    if ($Lines[$i] -match '[\{\[]$') {
-        # This line contains [ or {, increment the indentation level
-        $indent++
-    }
+        if ($Lines[$i] -match '[\{\[]$') {
+            # This line contains [ or {, increment the indentation level
+            $indent++
+        }
 
-    if (-not [string]::IsNullOrWhiteSpace($Lines[$i])) {
-        $lines[$i] = $lines[$i] + "`r`n"
-    }
+        if (-not [string]::IsNullOrWhiteSpace($Lines[$i])) {
+            $lines[$i] = $lines[$i] + "`r`n"
+        }
 
-  }
+    }
   
-  $Lines -Join ""
+    $Lines -Join ""
 }
 
-function Get-LibraryIndex ($Path, [bool]$Log=$false) {
-
-    Log "Loading or Creating Json Index File" $Log
-
+function Load-LibraryIndexFile ($Path) {
     $DllPathsJsonPath = [System.IO.Path]::Combine($Path, "LibPaths.json")
     
     if (-not (Test-Path ($DllPathsJsonPath))){
@@ -40,6 +43,15 @@ function Get-LibraryIndex ($Path, [bool]$Log=$false) {
     }
 
     $LibraryIndex = Get-Content $DllPathsJsonPath -Raw | ConvertFrom-Json
+
+    return $LibraryIndex
+}
+
+function Get-LibraryIndex ($Path, [bool]$Log=$false) {
+
+    Log "Loading or Creating Json Index File" $Log
+
+    $LibraryIndex = Load-LibraryIndexFile $Path
 
     $LibraryIndex | Add-Member -MemberType NoteProperty -Name "RootPath" -Value $DllPathsJsonPath -Force
 

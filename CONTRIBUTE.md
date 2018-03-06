@@ -71,7 +71,7 @@ I realize this isn't best practice, but if I followed best practice I'd still be
 # <a name="help"></a>How can I help?
 At this point I have proven that it can be done, and the bulk of the discovery and implementation is taken care of. While the code is a mess and at some points inconsistant, but it *does* produce viable results.
 
-Please consider the following main goals, following standard Git etiquette, and if you think you can help please feel free to get in touch with me. I guess the trendy thing right now is to [join us in Discord](https://discord.gg/EbvD7Nq).
+Please consider the following main goals, following standard Git etiquette, and if you think you can help please feel free to get in touch with me. I guess the trendy thing right now is to [join us in Discord](https://discord.gg/Q2vz4hJ).
 
 ### <a name="help-powershell"></a>For PowerShell coders
 * Make code less smelly

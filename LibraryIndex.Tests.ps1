@@ -1,4 +1,6 @@
-﻿Describe "Format-Json" {
+﻿. ($MyInvocation.InvocationName -replace "Tests.ps1","ps1")
+
+Describe "Format-Json" {
 
     It 'errors on null input' {
         {$null | Format-Json -ErrorAction Stop} | Should Throw "Cannot bind argument to parameter 'json' because it is an empty string."
@@ -47,7 +49,16 @@ Describe "Save-LibraryIndex" {
     $MockIndex | Add-Member -MemberType NoteProperty -Name "Libraries" -Value (New-Object psobject)
 
     Context "Null Object" {
-        
+        Save-LibraryIndex -LibraryIndex $null
+        $result = Get-Content $MockIndex.RootPath -Raw
+
+        It "file exists" {
+            test-path $MockIndex.RootPath | Should -BeExactly $true
+        }
+
+        It "has content" {
+            $result | Should -BeExactly '{ }`r`n`r`n'
+        }
     }
 
     Context "Null Root Path" {
@@ -63,15 +74,7 @@ Describe "Save-LibraryIndex" {
         }
 
         It "has content" {
-            $result | Should -BeExactly @"
-{
-  "RootPath": "TestDrive:\\library.json",
-  "Libraries": {
-  }
-}
-
-
-"@
+            $result | Should -BeExactly '"{`r`n  "RootPath": "TestDrive:\\library.json",`r`n  "Libraries": {`r`n  }`r`n}`r`n`r`n'
         }
     }
 }

@@ -1,4 +1,36 @@
-. ($MyInvocation.InvocationName -replace "Tests.ps1","ps1")
+. ($MyInvocation.MyCommand.Path -replace "Tests.","")
+
+#region General Functions
+Describe Test-ObjectType {
+    it "handles simple objects" {
+        (42 | Test-ObjectType "System.Int32") | should be $true
+        (42 | Test-ObjectType "int") | should be $true
+        (42 | Test-ObjectType "System.String") | should be $false
+        ("hi" | Test-ObjectType "System.String") | should be $true
+    }
+
+    it "handles simple multimatch" {
+        (42 | Test-ObjectType "System.Int32","int" -MatchAll) | should be $true
+        (42 | Test-ObjectType "System.Int32","int","string" -MatchAll) | should be $false
+    }
+
+    it "handles interfaces" {
+        ,(New-Object System.Collections.ArrayList) | Test-ObjectType "System.Collections.IEnumerable" | should be $true
+
+        Test-ObjectType -Object (New-Object System.Collections.ArrayList) `
+            "System.Collections.ArrayList","System.Collections.IEnumerable" -MatchAll | should be $true
+    }
+
+    it "handles complex or mocked objects" {
+        $MyTestObj = [pscustomobject]@{
+            PSTypeName = 'System.Reflection.Assembly'
+            ImageRuntimeVersion = "v 1.2.3"
+        }
+
+        $MyTestObj | Test-ObjectType "PSCustomObject","System.Reflection.Assembly" | should be $true
+        $MyTestObj | Test-ObjectType "PSCustomObject","System.Reflection.Assembly" -MatchAll | should be $true
+    }
+}
 
 Describe "Clean-CommentString" {
     It "handles null" {
@@ -81,5 +113,38 @@ Describe Has-ObjProperty {
 
     it "throws error on missing object" {
         {Has-ObjProperty $null "foo" -ErrorAction Stop} | should -throw
+    }
+}
+#endregion
+
+function Test-Assembly {
+    [CmdletBinding()]
+    
+    param (
+        [ValidateScript({($_ | gm | select -ExpandProperty TypeName -Unique) -eq "System.Reflection.Assembly"})]
+        $Assembly
+    )
+
+    return [string]$Assembly.ImageRuntimeVersion
+}
+    
+Describe Test-Assembly {
+    
+    it "throws type error" {
+        $MyTestObj = New-Object -TypeName psobject -Property @{ImageRuntimeVersion = "v 1.2.3"}
+
+        {Test-Assembly $MyTestObj} | Should -Throw "Cannot validate argument on parameter 'Assembly'."
+        
+    }
+
+    it "returns runtime version" {
+        $MyTestObj = [pscustomobject]@{
+            PSTypeName = 'System.Reflection.Assembly'
+            ImageRuntimeVersion = "v 1.2.3"
+        }
+
+        $result = Test-Assembly $MyTestObj
+        $result | should be "v 1.2.3"
+        $result | should not BeNullOrEmpty
     }
 }

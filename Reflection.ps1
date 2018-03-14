@@ -1,5 +1,53 @@
 ﻿#region General Functions
 
+#Test that the object appears to be of type $Type
+function Test-ObjectType {
+    [CmdletBinding()]
+    param (
+
+        [Parameter(Mandatory=$true,
+            ValueFromPipeline=$false)]
+        [ValidateScript({$null -ne $_})]
+        $Types,
+
+        [Parameter(Mandatory=$true,
+            ValueFromPipeline=$true)]
+        [ValidateScript({$null -ne $_})]
+        $Object,
+
+        [Parameter(Mandatory=$false)]
+        [switch]
+        $MatchAll
+    )
+
+    #Make sure Types is iterable
+    if ($Types -isnot [System.Collections.IEnumerable]) {
+        $Types = @($Types)
+    }
+
+    if ($MatchAll) {
+        foreach ($Type in $Types) {
+
+            if ($Object -isnot $Type -and $Object.PSObject.TypeNames -notcontains $Type) {
+                return $false
+            }
+        }
+
+        return $true
+    } else {
+        foreach ($Type in $Types) {
+
+            if ($Object -is $Type -or $Object.PSObject.TypeNames -contains $Type) {
+                return $true
+            }
+        }
+    }
+
+    #if nothing matches
+    return $false
+}
+
+
 #Sanitize comment strings to make sure \n is always \r\n
 function Clean-CommentString($String) {
     $string = $string -replace '"',"'"

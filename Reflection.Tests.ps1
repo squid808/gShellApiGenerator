@@ -117,34 +117,41 @@ Describe Has-ObjProperty {
 }
 #endregion
 
-function Test-Assembly {
-    [CmdletBinding()]
-    
-    param (
-        [ValidateScript({($_ | gm | select -ExpandProperty TypeName -Unique) -eq "System.Reflection.Assembly"})]
-        $Assembly
-    )
+#Create and return a known, false Assembly object for use in unit tests
+function Get-TestAssemblyObject {
+    $TestAssembly = [pscustomobject]@{
+        PSTypeName = 'System.Reflection.Assembly'
+        ImageRuntimeVersion = "v 1.2.3"
+        FullName = "Google.Apis.Something.v1, Version=1.32.2.1139, Culture=neutral, PublicKeyToken=4b01fa6e34db77ab"
+    }
 
-    return [string]$Assembly.ImageRuntimeVersion
+    return $TestAssembly
 }
-    
-Describe Test-Assembly {
-    
-    it "throws type error" {
-        $MyTestObj = New-Object -TypeName psobject -Property @{ImageRuntimeVersion = "v 1.2.3"}
 
-        {Test-Assembly $MyTestObj} | Should -Throw "Cannot validate argument on parameter 'Assembly'."
-        
+function Get-TestRestJson {
+    #TODO: Start here
+    $TestJson = [pscustomobject]@{
+
     }
+    return $TestJson
+}
 
-    it "returns runtime version" {
-        $MyTestObj = [pscustomobject]@{
-            PSTypeName = 'System.Reflection.Assembly'
-            ImageRuntimeVersion = "v 1.2.3"
-        }
+Describe New-Api {
+    #TODO why is reflection.ps1 line 242 failing with PSInvalidCastException: Cannot convert the "Api" value of type "Api" to type "Api".
+    
+    mock ConvertTo-FirstLower {}
+    mock Get-ApiStandardQueryParams {return @("StdQueryParamList")}
+    mock Get-Resources {}
+    mock Get-ApiScopes {}
+    mock Get-ApiGShellBaseTypes {}
 
-        $result = Test-Assembly $MyTestObj
-        $result | should be "v 1.2.3"
-        $result | should not BeNullOrEmpty
-    }
+    $FakeAssembly = Get-TestAssemblyObject
+    $FakeRestJson = Get-TestRestJson
+    New-Api -Assembly $FakeAssembly -RestJson $FakeRestJson
+
+    Assert-MockCalled ConvertTo-FirstLower
+    Assert-MockCalled Get-ApiStandardQueryParams
+    Assert-MockCalled Get-Resources
+    Assert-MockCalled Get-ApiScopes
+    Assert-MockCalled Get-ApiGShellBaseTypes
 }

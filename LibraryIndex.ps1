@@ -44,6 +44,8 @@ function Load-LibraryIndexFile ($Path) {
 
     $LibraryIndex = Get-Content $DllPathsJsonPath -Raw | ConvertFrom-Json
 
+    $LibraryIndex | Add-Member -MemberType NoteProperty -Name "RootPath" -Value $DllPathsJsonPath -Force
+
     return $LibraryIndex
 }
 
@@ -53,7 +55,6 @@ function Get-LibraryIndex ($Path, [bool]$Log=$false) {
 
     $LibraryIndex = Load-LibraryIndexFile $Path
 
-    $LibraryIndex | Add-Member -MemberType NoteProperty -Name "RootPath" -Value $DllPathsJsonPath -Force
 
     if (-NOT (Has-ObjProperty $LibraryIndex "Libraries")) {
         $LibraryIndex | Add-Member -MemberType NoteProperty -Name "Libraries" -Value (New-Object psobject)

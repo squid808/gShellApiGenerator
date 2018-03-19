@@ -1,20 +1,24 @@
 ﻿#region General Functions
 
-#Test that the object appears to be of type $Type
+#Test that the object is (or appears) to be one or all of type $Type
 function Test-ObjectType {
     [CmdletBinding()]
     param (
 
+        #One or more types to check the object against. Can include interfaces
         [Parameter(Mandatory=$true,
             ValueFromPipeline=$false)]
         [ValidateScript({$null -ne $_})]
         $Types,
 
+        #The object to check the type(s) of
         [Parameter(Mandatory=$true,
             ValueFromPipeline=$true)]
         [ValidateScript({$null -ne $_})]
         $Object,
 
+        #Return true only if all types provided are a match.
+        #By default, only one needs to match.
         [Parameter(Mandatory=$false)]
         [switch]
         $MatchAll
@@ -168,47 +172,179 @@ class Api {
     $Scopes = (New-Object System.Collections.ArrayList)
 }
 
-function New-Api ([System.Reflection.Assembly]$Assembly, $RestJson) {
-    $api = New-Object Api
+function New-Api {
+[CmdletBinding()]
+    param(
+        #The reflected assembly for the api
+        [Parameter(Mandatory=$true)]
+        [ValidateScript({Test-ObjectType "System.Reflection.Assembly" $_})]
+        $Assembly,
 
-    $api.DiscoveryObj = $RestJson
+        #The api's json information from the Google Discovery API
+        [Parameter(Mandatory=$true)]
+        $RestJson
+    )
+    $Api = New-Object Api
+
+    $Api.DiscoveryObj = $RestJson
         
-    $api.RootNamespace = $Assembly.FullName.Split(",")[0] -replace "\.Admin\.",".admin."
-    $api.DataNamespace = $api.RootNamespace + ".Data"
-    $api.Version = $api.RootNamespace.Split(".")[-1]
-    $api.ReflectedObj = $Assembly
+    #Full name, eg Google.Apis.Gmail.v1, Version=1.32.2.1139, Culture=neutral, PublicKeyToken=4b01fa6e34db77ab
+    $Api.RootNamespace = $Assembly.FullName.Split(",")[0] -replace "\.Admin\.",".admin."
+    $Api.DataNamespace = $Api.RootNamespace + ".Data"
+    $Api.Version = $Api.RootNamespace.Split(".")[-1]
+    $Api.ReflectedObj = $Assembly
     if ($Assembly.Fullname -match "(?<=Version=)([.0-9])+") {
-        $api.AssemblyVersion = $Matches[0]
+        $Api.AssemblyVersion = $Matches[0]
+    }
+    $Api.Name = $Api.RootNamespace.Split(".")[-2]
+    $Api.NameLower = ConvertTo-FirstLower $Api.Name
+    $Api.NameAndVersion = $Api.RootNamespace -replace "^Google.Apis.",""
+    $Api.NameAndVersionLower = ConvertTo-FirstLower $Api.NameAndVersion
+    $Api.HasStandardQueryParams = Has-ObjProperty $RestJson "parameters"
+
+    $StdQueryParams = Get-ApiStandardQueryParams -Assembly $Assembly -RestJson $RestJson -Api $Api
+    $Api.StandardQueryparams.AddRange($StdQueryParams)
+
+    $Resources = Get-Resources $Api.ReflectedObj
+    $Api.Resources.AddRange($Resources)
+    $Resources | % {$Api.ResourcesDict[$_.name] = $_}
+
+    $Scopes = Get-ApiScopes -Api $Api.ReflectedObj -DiscoveryJson $Api.DiscoveryObj
+    $Api.Scopes.AddRange($Scopes)
+
+    $BaseTypes = Get-ApiGShellBaseTypes @{
+        RootNamespace = $Api.RootNamespace 
+        HasStandardQueryParams = $Api.HasStandardQueryParams
     }
 
-    $api.Name = $Api.RootNamespace.Split(".")[-2]
-    $api.NameLower = ConvertTo-FirstLower $Api.Name
-    $api.NameAndVersion = $Api.RootNamespace -replace "^Google.Apis.",""
-    $api.NameAndVersionLower = ConvertTo-FirstLower $Api.NameAndVersion
+    $Api.CanUseServiceAccount = $BaseTypes.CanUseServiceAccount
+    $Api.StandardQueryParamsBaseType = $BaseTypes.StandardQueryParamsBaseType
+    $Api.CmdletBaseType = $BaseTypes.CmdletBaseType
+    
+    return $Api
+}
 
-    $api.HasStandardQueryParams = Has-ObjProperty $api.DiscoveryObj "parameters"
+<# Retrieves the list of standard query parameters for the provided API
+ #>
+ function Get-ApiStandardQueryParams {
+    [CmdletBinding()]
+    param (
+        #The reflected assembly for the api
+        [Parameter(Mandatory=$true)]
+        [ValidateScript({Test-ObjectType "System.Reflection.Assembly" $_})]
+        $Assembly,
+
+        #The api's json information from the Google Discovery API
+        [Parameter(Mandatory=$true)]
+        $RestJson,
+
+        #The Api object to be referenced
+        [Parameter(Mandatory=$true)]
+        [Api]
+        $Api
+    )
+
+    $Results = New-Object System.Collections.ArrayList
 
     #TODO - throw error if more than one result?
-    foreach ($Param in ($Api.ReflectedObj.ExportedTypes | where {$_.Name -like "*BaseServiceRequest?1" `
+    #Note that this won't work unless all other dependent assemblies are also loaded, see: Import-GShellAssemblies
+    #Alt is described in most apis as 'Data format for the response.' which is already handled by the underlying .Net API Client
+    foreach ($Param in ($Assembly.ExportedTypes | where {$_.Name -like "*BaseServiceRequest?1" `
                 -and $_.BaseType.Name -eq "ClientServiceRequest``1"} | select -ExpandProperty DeclaredProperties) `
                 | where Name -notlike "alt")
     {
         $P = New-Object ApiMethodProperty
-        $P.Api = $api
+        $P.Api = $Api
         $P.ReflectedObj = $Param
         $P.Name = $Param.Name
         $P.NameLower = ConvertTo-FirstLower $Param.Name
         $P.Type = Get-ApiPropertyType -Property $P
         $DiscoveryName = $Param.CustomAttributes | where AttributeType -like "*RequestParameterAttribute" | `
             select -ExpandProperty ConstructorArguments | select -First 1 -ExpandProperty Value
-        $P.Description = $P.Api.DiscoveryObj.parameters.($DiscoveryName).Description
-        $Api.StandardQueryParams.Add($P) | Out-Null
+        $P.Description = $RestJson.parameters.($DiscoveryName).Description
+        $Results.Add($P) | Out-Null
     }
 
-    Get-Resources $api | % {$api.Resources.Add($_) | Out-Null}
-    $api.Resources | % {$api.ResourcesDict[$_.name] = $_}
+    return ,$Results
+ }
 
-    $Scopes = $api.ReflectedObj.ExportedTypes | where Name -eq Scope
+<#
+Determine the base types for the gShell C# code - where will it inherit from?
+This helps ensure the proper methods are available to the right APIs, for instance -
+Should this Api have service account support for admins?
+#>
+function Get-ApiGShellBaseTypes {
+    [CmdletBinding()]
+    param (
+        # The api's root namespace
+        [Parameter(Mandatory=$true)]
+        [string]
+        $RootNamespace,
+
+        # Does the API have standard query parameters
+        [Parameter(Mandatory=$true)]
+        [bool]
+        $HasStandardQueryParams
+    )
+
+    $CanUseServiceAccount = (-not $i.RootNamespace.StartsWith("Google.Apis.Discovery") -and `
+        -not $RootNamespace.StartsWith("Google.Apis.admin"))
+
+    if ($RootNamespace.StartsWith("Google.Apis.Discovery")) {
+        $StandardQueryParamsBaseType = "OAuth2CmdletBase" #Todo - double check this?
+        $CmdletBaseType = "StandardQueryParametersBase"
+    } elseif ($RootNamespace.StartsWith("Google.Apis.admin")) {
+        if ($HasStandardQueryParams -eq $true) {
+            $StandardQueryParamsBaseType = "AuthenticatedCmdletBase"
+            $CmdletBaseType = "StandardQueryParametersBase"
+        } else {
+            $CmdletBaseType = "AuthenticatedCmdletBase"
+        }
+    } else {
+        if ($HasStandardQueryParams -eq $true) {
+                
+            $CmdletBaseType = "StandardQueryParametersBase"
+
+            if ($CanUseServiceAccount -eq $true) {
+                $StandardQueryParamsBaseType = "ServiceAccountCmdletBase"
+            } else {
+                $StandardQueryParamsBaseType = "AuthenticatedCmdletBase"
+            }
+        } else {
+            if ($CanUseServiceAccount -eq $true) {
+                $CmdletBaseType = "ServiceAccountCmdletBase"
+            } else {
+                $CmdletBaseType = "AuthenticatedCmdletBase"
+            }
+        }
+    }
+
+    $Results = [PSCustomObject]@{
+        CmdletBaseType = $CmdletBaseType
+        StandardQueryParamsBaseType = $StandardQueryParamsBaseType
+        CanUseServiceAccount = $CanUseServiceAccount
+    }
+
+    return $Results
+}
+
+#Pull out the scopes from the Api and return objects in a collection
+function Get-ApiScopes {
+    [CmdletBinding()]
+    param (
+        #The reflected assembly for the api
+        [Parameter(Mandatory=$true)]
+        [ValidateScript({Test-ObjectType "System.Reflection.Assembly" $_})]
+        $Assembly,
+
+        #The api's json information from the Google Discovery API
+        [Parameter(Mandatory=$true)]
+        $RestJson
+    )
+
+    $Results = New-Object System.Collections.ArrayList
+
+    $Scopes = $Assembly.ExportedTypes | where Name -eq Scope
 
     #set the scopes
     if  ($Scopes -ne $null) {
@@ -216,47 +352,39 @@ function New-Api ([System.Reflection.Assembly]$Assembly, $RestJson) {
             $S = new-object ApiScope
             $S.Name = $D.Name
             $S.Uri = $D.GetValue($D)
-            $S.Description = $Api.DiscoveryObj.auth.oauth2.scopes.($S.Uri).description
-            $Api.Scopes.Add($S) | Out-Null
+            $S.Description = $RestJson.auth.oauth2.scopes.($S.Uri).description
+            $Results.Add($S) | Out-Null
         }
     } else {
+        #Todo - will this break the discovery API?
         throw "No scopes found in the assembly, cannot proceed."
     }
 
-    $api.CanUseServiceAccount = (-not $api.RootNamespace.StartsWith("Google.Apis.Discovery") -and `
-        -not $api.RootNamespace.StartsWith("Google.Apis.admin"))
+    return ,$Results
+}
 
-    
-    if ($api.RootNamespace.StartsWith("Google.Apis.Discovery")) {
-        $api.StandardQueryParamsBaseType = "OAuth2CmdletBase" #Todo - double check this?
-        $api.CmdletBaseType = "StandardQueryParametersBase"
-    } elseif ($api.RootNamespace.StartsWith("Google.Apis.admin")) {
-        if ($api.HasStandardQueryParams -eq $true) {
-            $api.StandardQueryParamsBaseType = "AuthenticatedCmdletBase"
-            $api.CmdletBaseType = "StandardQueryParametersBase"
-        } else {
-            $api.CmdletBaseType = "AuthenticatedCmdletBase"
-        }
-    } else {
-        if ($api.HasStandardQueryParams -eq $true) {
-                
-            $api.CmdletBaseType = "StandardQueryParametersBase"
+#Return *all* resources exported from this assembly
+function Get-Resources {
+    [CmdletBinding()]
+    param (
+        #The reflected assembly for the api
+        [Parameter(Mandatory=$true)]
+        [ValidateScript({Test-ObjectType "System.Reflection.Assembly" $_})]
+        $Assembly
+    )
 
-            if ($api.CanUseServiceAccount -eq $true) {
-                $api.StandardQueryParamsBaseType = "ServiceAccountCmdletBase"
-            } else {
-                $api.StandardQueryParamsBaseType = "AuthenticatedCmdletBase"
-            }
-        } else {
-            if ($api.CanUseServiceAccount -eq $true) {
-                $api.CmdletBaseType = "ServiceAccountCmdletBase"
-            } else {
-                $api.CmdletBaseType = "AuthenticatedCmdletBase"
-            }
-        }
+    $Service = $Assembly.ExportedTypes | where {$_.BaseType.ToString() -eq "Google.Apis.Services.BaseClientService"}
+    $Resources = $Service.DeclaredProperties | where {$_.GetMethod.ReturnType -like "Google.Apis*"}
+
+    $Results = New-Object System.Collections.ArrayList
+
+    foreach ($Resource in $Resources) {
+        $R = New-ApiResource $Api $Resource
+
+        $Results.Add($R) | Out-Null
     }
 
-    return $api
+    return ,$Results
 }
 
 class ApiResource {
@@ -862,22 +990,9 @@ function New-ApiClass {
 
 #region Data Aggregation
 
-#Return *all* resources exported from this assembly
-function Get-Resources([Api]$Api){
-    $Service = $Api.ReflectedObj.ExportedTypes | where {$_.BaseType.ToString() -eq "Google.Apis.Services.BaseClientService"}
-    $Resources = $Service.DeclaredProperties | where {$_.GetMethod.ReturnType -like "Google.Apis*"}
 
-    $Results = New-Object System.Collections.ArrayList
 
-    foreach ($Resource in $Resources) {
-        $R = New-ApiResource $Api $Resource
-
-        $Results.Add($R) | Out-Null
-    }
-
-    return $Results
-}
-
+<# NOT USED
 #instantiate an object with null params
 function New-ObjectOfType($Type) {
 
@@ -895,7 +1010,7 @@ function New-ObjectOfType($Type) {
     $obj = New-Object ($Type.FullName) -ArgumentList $NulledParams
 
     return $obj
-}
+} #>
 
 function Get-ApiResourceMethods($Resource, $ResourceType){
     $AllMethods = $ResourceType.DeclaredMethods | where {$_.IsVirtual -and -not $_.IsFinal}

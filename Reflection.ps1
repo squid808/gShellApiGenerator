@@ -145,7 +145,7 @@ class Api {
     $DiscoveryObj
 
     #A list of schema objects involved in the API calls - NOT USED?
-    $SchemaObjectsUsed = (New-Object System.Collections.ArrayList)
+    #$SchemaObjectsUsed = (New-Object System.Collections.ArrayList)
 
     #Does this have standard query params
     $HasStandardQueryParams
@@ -177,11 +177,13 @@ function New-Api {
     param(
         #The reflected assembly for the api
         [Parameter(Mandatory=$true)]
+        [ValidateNotNull()]
         [ValidateScript({Test-ObjectType "System.Reflection.Assembly" $_})]
         $Assembly,
 
         #The api's json information from the Google Discovery API
         [Parameter(Mandatory=$true)]
+        [ValidateNotNull()]
         $RestJson
     )
     $Api = New-Object Api
@@ -205,17 +207,16 @@ function New-Api {
     $StdQueryParams = Get-ApiStandardQueryParams -Assembly $Assembly -RestJson $RestJson -Api $Api
     $Api.StandardQueryparams.AddRange($StdQueryParams)
 
-    $Resources = Get-Resources $Api.ReflectedObj
+    $Resources = Get-Resources $Assembly
     $Api.Resources.AddRange($Resources)
     $Resources | % {$Api.ResourcesDict[$_.name] = $_}
 
-    $Scopes = Get-ApiScopes -Api $Api.ReflectedObj -DiscoveryJson $Api.DiscoveryObj
+    $Scopes = Get-ApiScopes -Assembly $Assembly -RestJson $RestJson
     $Api.Scopes.AddRange($Scopes)
 
-    $BaseTypes = Get-ApiGShellBaseTypes @{
-        RootNamespace = $Api.RootNamespace 
-        HasStandardQueryParams = $Api.HasStandardQueryParams
-    }
+    $BaseTypes = Get-ApiGShellBaseTypes `
+        -RootNamespace $Api.RootNamespace `
+        -HasStandardQueryParams $Api.HasStandardQueryParams
 
     $Api.CanUseServiceAccount = $BaseTypes.CanUseServiceAccount
     $Api.StandardQueryParamsBaseType = $BaseTypes.StandardQueryParamsBaseType
@@ -240,7 +241,7 @@ function New-Api {
 
         #The Api object to be referenced
         [Parameter(Mandatory=$true)]
-        [Api]
+        [ValidateScript({Test-ObjectType "Api" $_})]
         $Api
     )
 

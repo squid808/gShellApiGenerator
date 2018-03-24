@@ -54,6 +54,8 @@ function Test-ObjectType {
 
 #Sanitize comment strings to make sure \n is always \r\n
 function Clean-CommentString($String) {
+    if ($null -eq $String) {return}
+
     $string = $string -replace '"',"'"
 
     return $string
@@ -69,13 +71,17 @@ function Get-ObjProperties ($PSObject) {
 }
 
 function ConvertTo-FirstLower ($String) {
-    if (-not [string]::IsNullOrWhiteSpace($string)){
+    if ([string]::IsNullOrWhiteSpace($string)){
+        return $String
+    } else {
         return $String.ToLower()[0] + $String.Substring(1,$String.Length-1)
     }
 }
 
 function ConvertTo-FirstUpper ($String) {
-    if (-not [string]::IsNullOrWhiteSpace($string)){
+    if ([string]::IsNullOrWhiteSpace($string)){
+        return $String
+    } else {
         return $String.ToUpper()[0] + $String.Substring(1,$String.Length-1)
     }
 }
@@ -200,7 +206,7 @@ function New-Api {
     }
     $Api.Name = $Api.RootNamespace.Split(".")[-2]
     $Api.NameLower = ConvertTo-FirstLower $Api.Name
-    $Api.NameAndVersion = $Api.RootNamespace -replace "^Google.Apis.",""
+    $Api.NameAndVersion = $Api.RootNamespace -replace "^Google.Apis.","" -replace "admin\.",""
     $Api.NameAndVersionLower = ConvertTo-FirstLower $Api.NameAndVersion
     $Api.HasStandardQueryParams = Has-ObjProperty $RestJson "parameters"
 
@@ -232,15 +238,18 @@ function New-Api {
     param (
         #The reflected assembly for the api
         [Parameter(Mandatory=$true)]
+        [ValidateNotNull()]
         [ValidateScript({Test-ObjectType "System.Reflection.Assembly" $_})]
         $Assembly,
 
         #The api's json information from the Google Discovery API
         [Parameter(Mandatory=$true)]
+        [ValidateNotNull()]
         $RestJson,
 
         #The Api object to be referenced
         [Parameter(Mandatory=$true)]
+        [ValidateNotNull()]
         [ValidateScript({Test-ObjectType "Api" $_})]
         $Api
     )

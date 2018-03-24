@@ -32,7 +32,7 @@ Describe Test-ObjectType {
     }
 }
 
-Describe "Clean-CommentString" {
+Describe Clean-CommentString {
     It "handles null" {
         Clean-CommentString $null | Should be $null
     }
@@ -119,28 +119,75 @@ Describe Has-ObjProperty {
 
 #Create and return a known, false Assembly object for use in unit tests
 function Get-TestAssemblyObject {
+    $ExportedTypes = New-Object System.Collections.ArrayList
+
+    $ExportedTypes.Add([pscustomobject]@{
+        Name = "SomethingBaseServiceRequest?1"
+        BaseType = [pscustomobject]@{Name="ClientServiceRequest``1"}
+        DeclaredProperties = @(
+            [pscustomobject]@{
+                Name = "Foo"
+                CustomAttributes = @(
+                    [pscustomobject]@{
+                        AttributeType = "SomethingRequestParameterAttribute"
+                        ConstructorArguments = @(
+                            [pscustomobject]@{Value = "ConstructorName1"}
+                            [pscustomobject]@{Value = "ConstructorName2"}
+                        )
+                    }
+                    [pscustomobject]@{AttributeType = "SomethingElse"}
+                )
+            }
+            [pscustomobject]@{Name = "Alt"}
+        )
+    }) | Out-Null
+
+    #Wrong Name
+    $ExportedTypes.Add([pscustomobject]@{
+        Name = "SomethingOtherServiceRequest?1"
+        BaseType = [pscustomobject]@{Name="ClientServiceRequest``1"}
+        DeclaredProperties = @([pscustomobject]@{Name = "Bar"})
+    }) | Out-Null
+    
+    #Wrong BaseTypeName
+    $ExportedTypes.Add([pscustomobject]@{
+        Name = "SomethingBaseServiceRequest?1"
+        BaseType = [pscustomobject]@{Name="NotClientServiceRequest``1"}
+        DeclaredProperties = @([pscustomobject]@{Name = "Bar"})
+    }) | Out-Null
+
     $TestAssembly = [pscustomobject]@{
         PSTypeName = 'System.Reflection.Assembly'
         ImageRuntimeVersion = "v 1.2.3"
         FullName = "Google.Apis.Something.v1, Version=1.23.4.5678, Culture=neutral, PublicKeyToken=4b01fa6e34db77ab"
+        ExportedTypes = $ExportedTypes
     }
 
     return $TestAssembly
 }
 
+#Create and return a known, false Json object for use in unit tests
 function Get-TestRestJson {
     #TODO: Start here
     $TestJson = [pscustomobject]@{
-        parameters = [pscustomobject]@{}
+        parameters = [pscustomobject]@{
+            Something = [pscustomobject]@{
+                Description = "RestJsonDescription"
+            }
+        }
     }
     return $TestJson
 }
 
 Describe New-Api {
 
+    BeforeAll {
+        $MockResource = New-Object ApiResource -Property @{Name="MockResource"}
+        $MockAssembly = Get-TestAssemblyObject
+        $MockRestJson = Get-TestRestJson
+    }
+
     mock Get-ApiStandardQueryParams { return ,@("MockSQPs") }
-    
-    $MockResource = New-Object ApiResource -Property @{Name="MockResource"}
     mock Get-Resources { return ,@($MockResource) }
     mock Get-ApiScopes { return ,@("MockScopes") }
     mock Get-ApiGShellBaseTypes { return [PSCustomObject]@{
@@ -149,46 +196,97 @@ Describe New-Api {
         CanUseServiceAccount = $true
     }}
 
-    $FakeAssembly = Get-TestAssemblyObject
-    $FakeAssembly.FullName = $FakeAssembly.FullName -replace "Google.Apis.Something.v1","Google.Apis.Admin.Something.v1"
-    $FakeRestJson = Get-TestRestJson
-
     it "handles null input" {
-        {New-Api -Assembly $null -RestJson $FakeRestJson} | Should Throw
-        {New-Api -Assembly $FakeAssembly -RestJson $Null} | Should Throw
+        {New-Api -Assembly $null -RestJson $MockRestJson} | Should Throw
+        {New-Api -Assembly $MockAssembly -RestJson $Null} | Should Throw
     }
 
-    $Api = New-Api -Assembly $FakeAssembly -RestJson $FakeRestJson
+    it "handles wrong assembly input" {
+        {New-Api -Assembly "foo" -RestJson $MockRestJson} | Should Throw
+    }
+    
+    context "standard naming" {
+        $Api = New-Api -Assembly $MockAssembly -RestJson $MockRestJson
 
-    it "calls sub methods" {
-        Assert-MockCalled Get-ApiStandardQueryParams -Times 1
-        Assert-MockCalled Get-Resources -Times 1
-        Assert-MockCalled Get-ApiScopes -Times 1
-        Assert-MockCalled Get-ApiGShellBaseTypes -Times 1
+        it "calls sub methods" {
+            Assert-MockCalled Get-ApiStandardQueryParams -Times 1
+            Assert-MockCalled Get-Resources -Times 1
+            Assert-MockCalled Get-ApiScopes -Times 1
+            Assert-MockCalled Get-ApiGShellBaseTypes -Times 1
+        }
+
+        it "has expected information" {
+            $Api.Name | Should -BeExactly "Something"
+            $Api.NameLower | Should -BeExactly "something"
+            $Api.NameAndVersion | Should -BeExactly "Something.v1"
+            $Api.NameAndVersionLower | Should -BeExactly "something.v1"
+            $MockResource | Should -BeIn $Api.Resources
+            "MockResource" | Should -BeIn $Api.ResourcesDict.Keys
+            $Api.RootNamespace | Should -BeExactly "Google.Apis.Something.v1"
+            $Api.DataNamespace | Should -BeExactly "Google.Apis.Something.v1.Data"
+            $Api.Version | Should -BeExactly "v1"
+            $Api.AssemblyVersion | Should -BeExactly "1.23.4.5678"
+            $Api.ApiName | Should -BeNullOrEmpty
+            $Api.DiscoveryObj | Should -BeExactly $MockRestJson
+            $Api.HasStandardQueryParams | Should -Be $true
+            "MockSQPs" | Should -BeIn $Api.StandardQueryparams
+            $Api.StandardQueryParamsBaseType | Should -BeExactly "MockSQPBT"
+            $Api.CanUseServiceAccount | Should -Be $true
+            $Api.SchemaObjects.Count | Should -BeExactly 0
+            $Api.SchemaObjectsDict.Keys.Count | Should -BeExactly 0
+            $Api.CmdletBaseType | Should -BeExactly "MockCBT"
+            "MockScopes" | Should -BeIn $Api.Scopes
+        }
     }
 
-    it "has expected information" {
-        $Api.Name | Should -BeExactly "Something"
-        $Api.NameLower | Should -BeExactly "something"
-        $Api.NameAndVersion | Should -BeExactly "Something.v1"
-        $Api.NameAndVersionLower | Should -BeExactly "something.v1"
-        $MockResource | Should -BeIn $Api.Resources
-        "MockResource" | Should -BeIn $Api.ResourcesDict.Keys
-        $Api.RootNamespace | Should -BeExactly "Google.Apis.Something.v1"
-        $Api.DataNamespace | Should -BeExactly "Google.Apis.Something.v1.Data"
-        $Api.Version | Should -BeExactly "v1"
-        $Api.AssemblyVersion | Should -BeExactly "1.23.4.5678"
-        $Api.ApiName | Should -BeNullOrEmpty
-        $Api.DiscoveryObj | Should -BeExactly $FakeRestJson
-        $Api.HasStandardQueryParams | Should -Be $true
-        "MockSQPs" | Should -BeIn $Api.StandardQueryparams
-        $Api.StandardQueryParamsBaseType | Should -BeExactly "MockSQPBT"
-        $Api.CanUseServiceAccount | Should -Be $true
-        $Api.SchemaObjects.Count | Should -BeExactly 0
-        $Api.SchemaObjectsDict.Keys.Count | Should -BeExactly 0
-        $Api.CmdletBaseType | Should -BeExactly "MockCBT"
-        "MockScopes" | Should -BeIn $Api.Scopes
+    context "admin naming" {
+
+        $MockAssembly.FullName = $MockAssembly.FullName -replace "Google.Apis.Something.v1","Google.Apis.Admin.Something.v1"
+
+        $Api = New-Api -Assembly $MockAssembly -RestJson $MockRestJson
+
+        it "has expected information" {
+            $Api.Name | Should -BeExactly "Something"
+            $Api.NameLower | Should -BeExactly "something"
+            $Api.NameAndVersion | Should -BeExactly "Something.v1"
+            $Api.NameAndVersionLower | Should -BeExactly "something.v1"
+        }
+
+    }
+}
+
+Describe Get-ApiStandardQueryParams {
+
+    BeforeAll {
+        $MockAssembly = Get-TestAssemblyObject
+        $MockRestJson = Get-TestRestJson
+        $MockApi = New-Object Api
     }
 
+    mock Get-ApiPropertyType { return "MockType" }
 
+    it "handles null inputs" {
+        {Get-ApiStandardQueryParams -Assembly $Null -RestJson $MockRestJson -Api $MockApi} | Should throw
+        {Get-ApiStandardQueryParams -Assembly $MockAssembly -RestJson $Null -Api $MockApi} | Should throw
+        {Get-ApiStandardQueryParams -Assembly $MockAssembly -RestJson $MockRestJson -Api $Null} | Should throw
+    }
+
+    $Results = Get-ApiStandardQueryParams -Assembly $MockAssembly -RestJson $MockRestJson -Api $MockApi
+
+    it "finds appropriate properties" {
+        "Foo" | should bein $Results.Name
+        "Alt" | should not bein $Results.Name
+        "Bar" | should not bein $Results.Name
+    }
+
+    it "populates members correctly" {
+        $Results[0].Api | should be $MockApi
+        $Results[0].ReflectedObj | should BeExactly $MockAssembly.ExportedTypes[0].DeclaredProperties[0]
+        $Results[0].Name | should BeExactly "Foo"
+        $Results[0].NameLower | should BeExactly "foo"
+        $Results[0].Type | should BeExactly "MockType"
+        #TODO - how to test this since it's not part of the details? split it out to function?
+        #$DiscoveryName | should BeExactly "ConstructorName1"
+        #$Results[0].Description | should BeExactly "RestJsonDescription"
+    }
 }

@@ -281,29 +281,33 @@ function New-Api {
 <#
 Determine the base types for the gShell C# code - where will it inherit from?
 This helps ensure the proper methods are available to the right APIs, for instance -
-Should this Api have service account support for admins?
+Should this Api have service account support for admins? This assumes that any APIs
+that are not discovery or admin support a service account, until proven otherwise.
 #>
 function Get-ApiGShellBaseTypes {
     [CmdletBinding()]
     param (
         # The api's root namespace
         [Parameter(Mandatory=$true)]
+        [ValidateNotNullOrEmpty()]
+        [ValidateScript({$_ -like "Google.Apis.*"})]
         [string]
         $RootNamespace,
 
         # Does the API have standard query parameters
         [Parameter(Mandatory=$true)]
+        [ValidateNotNull()]
         [bool]
         $HasStandardQueryParams
     )
 
-    $CanUseServiceAccount = (-not $i.RootNamespace.StartsWith("Google.Apis.Discovery") -and `
-        -not $RootNamespace.StartsWith("Google.Apis.admin"))
-
-    if ($RootNamespace.StartsWith("Google.Apis.Discovery")) {
-        $StandardQueryParamsBaseType = "OAuth2CmdletBase" #Todo - double check this?
+    if ($RootNamespace -like "google.apis.discovery*") {
+        $StandardQueryParamsBaseType = "OAuth2CmdletBase"
         $CmdletBaseType = "StandardQueryParametersBase"
-    } elseif ($RootNamespace.StartsWith("Google.Apis.admin")) {
+        $CanUseServiceAccount = $false
+    } elseif ($RootNamespace -like "google.apis.admin*") {
+        $CanUseServiceAccount = $false
+
         if ($HasStandardQueryParams -eq $true) {
             $StandardQueryParamsBaseType = "AuthenticatedCmdletBase"
             $CmdletBaseType = "StandardQueryParametersBase"
@@ -311,21 +315,13 @@ function Get-ApiGShellBaseTypes {
             $CmdletBaseType = "AuthenticatedCmdletBase"
         }
     } else {
+        $CanUseServiceAccount = $true
+        
         if ($HasStandardQueryParams -eq $true) {
-                
             $CmdletBaseType = "StandardQueryParametersBase"
-
-            if ($CanUseServiceAccount -eq $true) {
-                $StandardQueryParamsBaseType = "ServiceAccountCmdletBase"
-            } else {
-                $StandardQueryParamsBaseType = "AuthenticatedCmdletBase"
-            }
+            $StandardQueryParamsBaseType = "ServiceAccountCmdletBase"
         } else {
-            if ($CanUseServiceAccount -eq $true) {
-                $CmdletBaseType = "ServiceAccountCmdletBase"
-            } else {
-                $CmdletBaseType = "AuthenticatedCmdletBase"
-            }
+            $CmdletBaseType = "ServiceAccountCmdletBase"
         }
     }
 

@@ -131,7 +131,7 @@ function Get-TestAssemblyObject {
                     [pscustomobject]@{
                         AttributeType = "SomethingRequestParameterAttribute"
                         ConstructorArguments = @(
-                            [pscustomobject]@{Value = "ConstructorName1"}
+                            [pscustomobject]@{Value = "Something"}
                             [pscustomobject]@{Value = "ConstructorName2"}
                         )
                     }
@@ -285,8 +285,55 @@ Describe Get-ApiStandardQueryParams {
         $Results[0].Name | should BeExactly "Foo"
         $Results[0].NameLower | should BeExactly "foo"
         $Results[0].Type | should BeExactly "MockType"
-        #TODO - how to test this since it's not part of the details? split it out to function?
-        #$DiscoveryName | should BeExactly "ConstructorName1"
-        #$Results[0].Description | should BeExactly "RestJsonDescription"
+        #$DiscoveryName is valid if the Description comes up appropriately
+        $Results[0].Description | should BeExactly "RestJsonDescription"
+    }
+}
+
+Describe Get-ApiGShellBaseTypes {
+
+    it "handles null or empty inputs" {
+        {Get-ApiGShellBaseTypes $null $false} | Should Throw
+        {Get-ApiGShellBaseTypes "" $false} | Should Throw
+        {Get-ApiGShellBaseTypes "something" $null} | Should Throw
+    }
+
+    it "handles incorrect input" {
+        {Get-ApiGShellBaseTypes "Not.A.Google.Namespace" $false} | Should Throw
+    }
+
+    it "handles Discovery API" {
+        $Result = Get-ApiGShellBaseTypes "Google.Apis.Discovery.v1" $true
+        $Result.CmdletBaseType | Should BeExactly "StandardQueryParametersBase"
+        $Result.StandardQueryParamsBaseType | Should BeExactly "OAuth2CmdletBase"
+        $Result.CanUseServiceAccount | Should Be $false
+    }
+
+    it "handles Admin APIs with Standard Query Params" {
+        $Result = Get-ApiGShellBaseTypes "Google.Apis.Admin.Something.v1" $true
+        $Result.CmdletBaseType | Should BeExactly "StandardQueryParametersBase"
+        $Result.StandardQueryParamsBaseType | Should BeExactly "AuthenticatedCmdletBase"
+        $Result.CanUseServiceAccount | Should Be $false
+    }
+
+    it "handles Admin APIs without Standard Query Params" {
+        $Result = Get-ApiGShellBaseTypes "Google.Apis.Admin.Something.v1" $false
+        $Result.CmdletBaseType | Should BeExactly "AuthenticatedCmdletBase"
+        $Result.StandardQueryParamsBaseType | Should BeNullOrEmpty
+        $Result.CanUseServiceAccount | Should Be $false
+    }
+
+    it "handles other APIs with Standard Query Params" {
+        $Result = Get-ApiGShellBaseTypes "Google.Apis.Something.v1" $true
+        $Result.CmdletBaseType | Should BeExactly "StandardQueryParametersBase"
+        $Result.StandardQueryParamsBaseType | Should BeExactly "ServiceAccountCmdletBase"
+        $Result.CanUseServiceAccount | Should Be $true
+    }
+
+    it "handles other APIs without Standard Query Params" {
+        $Result = Get-ApiGShellBaseTypes "Google.Apis.Something.v1" $false
+        $Result.CmdletBaseType | Should BeExactly "ServiceAccountCmdletBase"
+        $Result.StandardQueryParamsBaseType | Should BeNullOrEmpty
+        $Result.CanUseServiceAccount | Should Be $true
     }
 }

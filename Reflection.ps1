@@ -244,7 +244,7 @@ function New-Api {
 
         #The api's json information from the Google Discovery API
         [Parameter(Mandatory=$true)]
-        [ValidateNotNull()]
+        [ValidateNotNullOrEmpty()]
         $RestJson,
 
         #The Api object to be referenced
@@ -341,10 +341,12 @@ function Get-ApiScopes {
         #The reflected assembly for the api
         [Parameter(Mandatory=$true)]
         [ValidateScript({Test-ObjectType "System.Reflection.Assembly" $_})]
+        [ValidateNotNull()]
         $Assembly,
 
         #The api's json information from the Google Discovery API
         [Parameter(Mandatory=$true)]
+        [ValidateNotNullOrEmpty()]
         $RestJson
     )
 
@@ -357,7 +359,7 @@ function Get-ApiScopes {
         foreach ($D in ($Scopes | select -ExpandProperty DeclaredFields)){
             $S = new-object ApiScope
             $S.Name = $D.Name
-            $S.Uri = $D.GetValue($D)
+            $S.Uri = Get-DeclaredFieldValue $D
             $S.Description = $RestJson.auth.oauth2.scopes.($S.Uri).description
             $Results.Add($S) | Out-Null
         }
@@ -367,6 +369,21 @@ function Get-ApiScopes {
     }
 
     return ,$Results
+}
+
+#Wraps [System.Reflection.RtFieldInfo]::GetValue for mocking abilities since we can't
+#otherwise mock this class's .net method
+function Get-DeclaredFieldValue {
+    [CmdletBinding()]
+    param (
+        # A RuntimeFieldInfo object
+        #TODO - how to validate this type?
+        #[ValidateScript({Test-ObjectType "System.Reflection.RuntimeFieldInfo.RtFieldInfo" $_})]
+        [ValidateNotNullOrEmpty()]
+        $DeclaredField
+    )
+
+    return $DeclaredField.GetValue($DeclaredField)
 }
 
 #Return *all* resources exported from this assembly
@@ -755,10 +772,12 @@ function Get-ApiPropertyTypeBasic {
 function Get-ApiPropertyType {
     param (
         [Parameter(ParameterSetName="property")]
-        [ApiMethodProperty]$Property,
+        [ValidateScript({Test-ObjectType "ApiMethodProperty" $_})]
+        $Property,
 
         [Parameter(ParameterSetName="runtimetype")]
-        [System.Type]$RuntimeType,
+        [ValidateScript({Test-ObjectType "System.Type" $_})]
+        $RuntimeType,
 
         [Parameter(ParameterSetName="runtimetype")]
         $Api#,

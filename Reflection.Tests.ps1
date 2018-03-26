@@ -156,6 +156,21 @@ function Get-TestAssemblyObject {
         DeclaredProperties = @([pscustomobject]@{Name = "Bar"})
     }) | Out-Null
 
+    #Scopes
+    $ExportedTypes.Add([pscustomobject]@{
+        Name = "Scope"
+        DeclaredFields = @(
+            [pscustomobject]@{
+                Name = "Scope1Name"
+                Uri = "Scope1Uri"
+            },
+            [pscustomobject]@{
+                Name = "Scope2Name"
+                Uri = "Scope2Uri"
+            }
+        )
+    }) | Out-Null
+
     $TestAssembly = [pscustomobject]@{
         PSTypeName = 'System.Reflection.Assembly'
         ImageRuntimeVersion = "v 1.2.3"
@@ -173,6 +188,14 @@ function Get-TestRestJson {
         parameters = [pscustomobject]@{
             Something = [pscustomobject]@{
                 Description = "RestJsonDescription"
+            }
+        }
+        auth = [pscustomobject]@{
+            oauth2 = [pscustomobject]@{
+                scopes = [pscustomobject]@{
+                    Scope1Uri = "Scope1Description"
+                    Scope2Uri = "Scope2Description"
+                }
             }
         }
     }
@@ -265,9 +288,10 @@ Describe Get-ApiStandardQueryParams {
 
     mock Get-ApiPropertyType { return "MockType" }
 
-    it "handles null inputs" {
+    it "handles null or empty inputs" {
         {Get-ApiStandardQueryParams -Assembly $Null -RestJson $MockRestJson -Api $MockApi} | Should throw
         {Get-ApiStandardQueryParams -Assembly $MockAssembly -RestJson $Null -Api $MockApi} | Should throw
+        {Get-ApiStandardQueryParams -Assembly $MockAssembly -RestJson "" -Api $MockApi} | Should throw
         {Get-ApiStandardQueryParams -Assembly $MockAssembly -RestJson $MockRestJson -Api $Null} | Should throw
     }
 
@@ -335,5 +359,38 @@ Describe Get-ApiGShellBaseTypes {
         $Result.CmdletBaseType | Should BeExactly "ServiceAccountCmdletBase"
         $Result.StandardQueryParamsBaseType | Should BeNullOrEmpty
         $Result.CanUseServiceAccount | Should Be $true
+    }
+}
+
+Describe Get-ApiScopes {
+    BeforeAll {
+        $MockAssembly = Get-TestAssemblyObject
+        $MockNoScopes = Get-TestAssemblyObject
+        $MockRestJson = Get-TestRestJson
+        $ScopeToRemove = $MockNoScopes.ExportedTypes | where Name -eq Scope
+        $MockNoScopes.ExportedTypes.Remove($ScopeToRemove)
+    }
+
+    Mock Get-DeclaredFieldValue { return $_.Uri }
+
+    it "handles null or empty inputs" {
+        {Get-ApiScopes $null $MockRestJson} | Should Throw
+        {Get-ApiScopes $MockAssembly $Null} | Should Throw
+        {Get-ApiScopes $MockAssembly ""} | Should Throw
+    }
+
+    it "handles assembly with no scope results" {
+        {Get-ApiScopes $MockNoScopes $MockRestJson} | Should Throw
+    }
+
+    it "handles scope results" {
+        $Results = Get-ApiScopes $MockAssembly $MockRestJson
+        $Results.Count | Should Be 2
+        $Results[0].Name | Should BeExactly "Scope1Name"
+        $Results[0].Uri | Should BeExactly "Scope1Uri"
+        $Results[0].Description | Should BeExactly "Scope1Description"
+        $Results[1].Name | Should BeExactly "Scope2Name"
+        $Results[1].Uri | Should BeExactly "Scope2Uri"
+        $Results[1].Description | Should BeExactly "Scope2Description"
     }
 }

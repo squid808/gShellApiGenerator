@@ -377,8 +377,7 @@ function Get-DeclaredFieldValue {
     [CmdletBinding()]
     param (
         # A RuntimeFieldInfo object
-        #TODO - how to validate this type?
-        #[ValidateScript({Test-ObjectType "System.Reflection.RuntimeFieldInfo.RtFieldInfo" $_})]
+        [ValidateScript({Test-ObjectType "System.Reflection.FieldInfo" $_})]
         [ValidateNotNullOrEmpty()]
         $DeclaredField
     )

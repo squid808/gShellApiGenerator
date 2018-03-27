@@ -161,10 +161,12 @@ function Get-TestAssemblyObject {
         Name = "Scope"
         DeclaredFields = @(
             [pscustomobject]@{
+                PSTypeName = 'System.Reflection.FieldInfo'
                 Name = "Scope1Name"
                 Uri = "Scope1Uri"
             },
             [pscustomobject]@{
+                PSTypeName = 'System.Reflection.FieldInfo'
                 Name = "Scope2Name"
                 Uri = "Scope2Uri"
             }
@@ -193,8 +195,8 @@ function Get-TestRestJson {
         auth = [pscustomobject]@{
             oauth2 = [pscustomobject]@{
                 scopes = [pscustomobject]@{
-                    Scope1Uri = "Scope1Description"
-                    Scope2Uri = "Scope2Description"
+                    Scope1Uri = [pscustomobject]@{Description="Scope1Description"}
+                    Scope2Uri = [pscustomobject]@{Description="Scope2Description"}
                 }
             }
         }
@@ -371,7 +373,11 @@ Describe Get-ApiScopes {
         $MockNoScopes.ExportedTypes.Remove($ScopeToRemove)
     }
 
-    Mock Get-DeclaredFieldValue { return $_.Uri }
+    Mock Get-DeclaredFieldValue { return "Scope1Uri" } `
+        -ParameterFilter { $DeclaredField.Name -eq "Scope1Name" }
+
+    Mock Get-DeclaredFieldValue { return "Scope2Uri" } `
+        -ParameterFilter { $DeclaredField.Name -eq "Scope2Name" }
 
     it "handles null or empty inputs" {
         {Get-ApiScopes $null $MockRestJson} | Should Throw
@@ -392,5 +398,26 @@ Describe Get-ApiScopes {
         $Results[1].Name | Should BeExactly "Scope2Name"
         $Results[1].Uri | Should BeExactly "Scope2Uri"
         $Results[1].Description | Should BeExactly "Scope2Description"
+    }
+}
+
+Describe Get-DeclaredFieldValue {
+    
+    it "should handle null" {
+        {Get-DeclaredFieldValue $null} | Should Throw
+    }
+
+    #pull in from powershell assembly since it should be present
+    it "handles real value" {
+        $Assembly = [System.Reflection.Assembly]::LoadWithPartialName("System.Management.Automation")
+        $FieldInfo = $Assembly.ExportedTypes `
+            | Select-Object -ExpandProperty DeclaredFields `
+            | Where-Object {$_ -is [System.Reflection.FieldInfo]} `
+            | Where-Object name -eq "converter" `
+            | Select-Object -First 1
+        $Result = Get-DeclaredFieldValue $FieldInfo
+
+        "PSCredential" | Should BeIn $Result.Keys.Name
+
     }
 }

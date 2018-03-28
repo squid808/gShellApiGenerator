@@ -173,6 +173,15 @@ function Get-TestAssemblyObject {
         )
     }) | Out-Null
 
+    #Resources / Service Objects
+    $ExportedTypes.Add([pscustomobject]@{
+        Name = "SomethingService"
+        BaseType = [pscustomobject]@{
+            FullName="Google.Apis.Services.BaseClientService"
+        }
+        DeclaredProperties = (Get-TestResources)
+    }) | Out-Null
+
     $TestAssembly = [pscustomobject]@{
         PSTypeName = 'System.Reflection.Assembly'
         ImageRuntimeVersion = "v 1.2.3"
@@ -181,6 +190,58 @@ function Get-TestAssemblyObject {
     }
 
     return $TestAssembly
+}
+
+function Get-TestResources {
+    $Resources = @(
+        [pscustomobject]@{ #This is a resource
+            PSTypeName = 'System.Reflection.PropertyInfo'
+            Name = "First"
+            GetMethod = [pscustomobject]@{
+                PSTypeName = 'System.Reflection.PropertyInfo'
+                ReturnType = "Google.Apis.Something.v1.FirstResource"
+            }
+            PropertyType = [PSCustomObject]@{
+                PSTypeName = "System.Reflection.TypeInfo"
+                Name = "FirstResource"
+                FullName = "Google.Apis.Something.v1.FirstResource"
+                Namespace = "Google.Apis.Something.v1"
+                DeclaredProperties =  @(
+                    [pscustomobject]@{ #This is a child resource
+                        PSTypeName = 'System.Reflection.PropertyInfo'
+                        Name = "Sub"
+                        GetMethod = [pscustomobject]@{
+                            PSTypeName = 'System.Reflection.PropertyInfo'
+                            ReturnType = "Google.Apis.Something.v1.FirstResource.SubResource"
+                        }
+                        PropertyType = [PSCustomObject]@{
+                            PSTypeName = "System.Reflection.TypeInfo"
+                            Name = "SubResource"
+                            FullName = "Google.Apis.Something.v1.FirstResource+SubResource"
+                            Namespace = "Google.Apis.Something.v1"
+                        }
+                    }
+                )
+            }
+        },
+        [pscustomobject]@{ #This is a resource
+            PSTypeName = 'System.Reflection.PropertyInfo'
+            Name = "Second"
+            GetMethod = [pscustomobject]@{
+                PSTypeName = 'System.Reflection.PropertyInfo'
+                ReturnType = "Google.Apis.Something.v1.SecondResource"
+            }
+            PropertyType = [PSCustomObject]@{
+                PSTypeName = "System.Reflection.TypeInfo"
+                Name = "SecondResource"
+                FullName = "Google.Apis.Something.v1.SecondResource"
+                Namespace = "Google.Apis.Something.v1"
+                DeclaredProperties =  @()
+            }
+        }
+    ) 
+    
+    return $Resources
 }
 
 #Create and return a known, false Json object for use in unit tests
@@ -198,6 +259,16 @@ function Get-TestRestJson {
                     Scope1Uri = [pscustomobject]@{Description="Scope1Description"}
                     Scope2Uri = [pscustomobject]@{Description="Scope2Description"}
                 }
+            }
+        }
+        resources = [pscustomobject]@{
+            FirstResource = [pscustomobject]@{
+                resources = [pscustomobject]@{
+                    SubResource = [pscustomobject]@{}
+                }
+            }
+            SecondResource = [pscustomobject]@{
+
             }
         }
     }
@@ -420,4 +491,42 @@ Describe Get-DeclaredFieldValue {
         "PSCredential" | Should BeIn $Result.Keys.Name
 
     }
+}
+
+Describe Get-Resources {
+    $MockAssembly = Get-TestAssemblyObject
+    $MockApi = New-Object Api
+
+    mock New-ApiResource {return [PSCustomObject]@{}}
+
+    it "handles null or wrong input" {
+        {Get-Resources $null $MockApi} | Should Throw
+        {Get-Resources "Foo" $MockApi} | Should Throw
+        {Get-Resources $MockAssembly $null} | Should Throw
+        {Get-Resources $MockAssembly "Foo"} | Should Throw
+    }
+
+    it "handles input" {
+        $Results = Get-Resources -Assembly $MockAssembly -Api $MockApi
+        $Results.Count | Should Be 1
+    }
+}
+
+Describe New-ApiResource {
+    BeforeAll {
+        $MockResources = Get-TestResources
+        $MockRestJson = Get-TestRestJson
+        $MockApi = New-Object Api
+    }
+
+    it "handles null or incorrectly typed input" {
+        {New-ApiResource -Resource $null -Api $Api -RestJson $MockRestJson} | Should Throw
+        {New-ApiResource -Resource "" -Api $Api -RestJson $MockRestJson} | Should Throw
+        {New-ApiResource -Resource $MockResources[0] -Api $Null -RestJson $MockRestJson} | Should Throw
+        {New-ApiResource -Resource $MockResources[0] -Api "" -RestJson $MockRestJson} | Should Throw
+        {New-ApiResource -Resource $MockResources[0] -Api $Api -RestJson ""} | Should Throw
+    }
+
+    
+
 }

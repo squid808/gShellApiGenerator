@@ -110,6 +110,14 @@ class ApiScope {
     [string]$Uri
 }
 
+<#
+An object container to represent all facets of the Api necessary to generate the
+PoSh code on top of it. The Api contains Resources that contain Endpoints, as well
+as meta information about the Api itself.
+
+In C# terms, there are Service objects which interface with the Api, and subclasses
+that represent Resource containers and  methods for the endpoints.
+#>
 class Api {
     #The name of the API, eg Gmail
     $Name
@@ -178,6 +186,9 @@ class Api {
     $Scopes = (New-Object System.Collections.ArrayList)
 }
 
+<#
+Create a new Api object
+#>
 function New-Api {
 [CmdletBinding()]
     param(
@@ -231,7 +242,11 @@ function New-Api {
     return $Api
 }
 
-<# Retrieves the list of standard query parameters for the provided API
+<#
+Retrieves the list of standard query parameters for the provided Api. SQPs are parameters
+that are a given for all of the endpoints for this api, for example: detailing what fields
+to return in a result or an email address that should be used for a service account to 
+impersonate. These may or may not exist and differ between Apis.
  #>
  function Get-ApiStandardQueryParams {
     [CmdletBinding()]
@@ -334,7 +349,11 @@ function Get-ApiGShellBaseTypes {
     return $Results
 }
 
-#Pull out the scopes from the Api and return objects in a collection
+<#
+Pull out the scopes from the Api and return objects in a collection.  Scopes are URIs
+that tell the Api (and Api Clients) what permissions have been authorized for the service
+running the code.
+#>
 function Get-ApiScopes {
     [CmdletBinding()]
     param (
@@ -371,8 +390,10 @@ function Get-ApiScopes {
     return ,$Results
 }
 
-#Wraps [System.Reflection.RtFieldInfo]::GetValue for mocking abilities since we can't
-#otherwise mock this class's .net method
+<#
+Wraps [System.Reflection.RtFieldInfo]::GetValue for mocking abilities since we can't
+otherwise mock this class's .net method
+#>
 function Get-DeclaredFieldValue {
     [CmdletBinding()]
     param (
@@ -392,16 +413,21 @@ function Get-Resources {
         #The reflected assembly for the api
         [Parameter(Mandatory=$true)]
         [ValidateScript({Test-ObjectType "System.Reflection.Assembly" $_})]
-        $Assembly
+        $Assembly,
+
+        #The api object
+        [Parameter(Mandatory=$true)]
+        [ValidateScript({Test-ObjectType "Api" $_})]
+        $Api
     )
 
-    $Service = $Assembly.ExportedTypes | where {$_.BaseType.ToString() -eq "Google.Apis.Services.BaseClientService"}
+    $Service = $Assembly.ExportedTypes | where {$_.BaseType.FullName -eq "Google.Apis.Services.BaseClientService"}
     $Resources = $Service.DeclaredProperties | where {$_.GetMethod.ReturnType -like "Google.Apis*"}
 
     $Results = New-Object System.Collections.ArrayList
 
     foreach ($Resource in $Resources) {
-        $R = New-ApiResource $Api $Resource
+        $R = New-ApiResource -Resource $Resource -Api $Api -RestJson $Api.DiscoveryObj
 
         $Results.Add($R) | Out-Null
     }
@@ -409,23 +435,76 @@ function Get-Resources {
     return ,$Results
 }
 
+<#
+A class representing an Api Resource. This is a logical container
+for similar Api endpoints and other containers, which can be seen 
+on an Api's "API REFERENCE" webpage. For example, in the Gmail Api
+Users resource contains Users.Drafts and Users.Labels,  the latter
+of which contains Get, List, Update, Delete, etc.
+#>
 class ApiResource {
+    #A reference to the main Api object
     $Api
-    $ParentResource
-    $ChildResources = (New-Object System.Collections.ArrayList)
-    $ChildResourcesDict = @{}
+
+    #Reference to the Google Discovery Rest object
     $DiscoveryObj
 
-    $Name
-    $NameLower
-    $FullName
-    $Namespace
-    $Methods = (New-Object System.Collections.ArrayList)
-    $MethodsDict = @{}
+    #Reference to the reflected assembly object
     $ReflectedObj
+
+    #The resource name, eg Gmail's UserResource. 
+    $Name
+
+    #The resource name in first-lower, eg userResource
+    $NameLower
+
+    #The fully qualified C# name of the resource, eg Google.Apis.Gmail.v1.UsersResource
+    $FullName
+
+    #The resource's C# namespace, eg Google.Apis.Gmail.v1
+    $Namespace
+
+    #The parent resource to this one, if one exists. Null if not.
+    $ParentResource
+
+    #The child resource(s) to this one, if any. Empty list if not.
+    $ChildResources = (New-Object System.Collections.ArrayList)
+
+    #A dictionary collection for child resources, if any. Keyed by Resource name.
+    $ChildResourcesDict = @{}
+
+    #A collection of methods for this resource
+    $Methods = (New-Object System.Collections.ArrayList)
+
+    #A collection of methods for this resource keyed by method name
+    $MethodsDict = @{}
 }
 
-function New-ApiResource ([Api]$Api, [System.Reflection.PropertyInfo]$Resource, [ApiResource]$ParentResource=$null) {
+<#
+Given a reflected resource object, create and return a wrapped ApiResource 
+object.
+#>
+function New-ApiResource {
+    [CmdletBinding()]
+    param (        
+        #The reflected resource object
+        [Parameter(Mandatory=$true)]
+        [ValidateScript({Test-ObjectType "System.Reflection.PropertyInfo" $_})]
+        $Resource,
+
+        #The api object
+        [Parameter(Mandatory=$true)]
+        [ValidateScript({Test-ObjectType "Api" $_})]
+        $Api,
+
+        #The api's json information from the Google Discovery API
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNullOrEmpty()]
+        $RestJson,
+        
+        [ValidateScript({Test-ObjectType "ApiResource" $_})]
+        $ParentResource=$null
+    )
 
     $t = $Resource.PropertyType
 
@@ -440,15 +519,13 @@ function New-ApiResource ([Api]$Api, [System.Reflection.PropertyInfo]$Resource, 
 
     if ($ParentResource -ne $null) {
         $R.ParentResource = $ParentResource
-        $R.DiscoveryObj = $R.ParentResource.DiscoveryObj.resources.($R.Name)
-    } else {
-        $R.DiscoveryObj = $Api.DiscoveryObj.resources.($R.Name)
     }
+    $R.DiscoveryObj = $RestJson.resources.($R.Name)
     
     #Handle Children Resources
     if ($t.DeclaredProperties -ne $null -and $t.DeclaredProperties.Count -gt 0) {
         foreach ($CR in $t.DeclaredProperties) {
-            $ChildR = New-ApiResource $Api $CR $R
+            $ChildR = New-ApiResource -Resource $CR -Api $Api -RestJson $R.DiscoveryObj -ParentResource $R
             $R.ChildResources.Add($ChildR) | Out-Null
             $R.ChildResourcesDict[$ChildR.Name] = $ChildR
         }
@@ -456,8 +533,8 @@ function New-ApiResource ([Api]$Api, [System.Reflection.PropertyInfo]$Resource, 
 
     $Methods = Get-ApiResourceMethods $R $T
 
-    $Methods | % {$R.Methods.Add($_) | Out-Null }
-    $Methods | % {$R.MethodsDict[$_.Name] = $_}
+    $Methods | ForEach-Object {$R.Methods.Add($_) | Out-Null }
+    $Methods | ForEach-Object {$R.MethodsDict[$_.Name] = $_}
 
     return $R
 }
@@ -1074,7 +1151,7 @@ function Get-ApiResourceMethods($Resource, $ResourceType){
         }
     }
 
-    return $Results
+    return ,$Results
 }
 
 function Get-ApiMethodReturnType($Method, $UseReturnTypeGenericInt=0){

@@ -262,12 +262,12 @@ function Get-TestRestJson {
             }
         }
         resources = [pscustomobject]@{
-            FirstResource = [pscustomobject]@{
+            First = [pscustomobject]@{
                 resources = [pscustomobject]@{
-                    SubResource = [pscustomobject]@{}
+                    Sub = [pscustomobject]@{}
                 }
             }
-            SecondResource = [pscustomobject]@{
+            Second = [pscustomobject]@{
 
             }
         }
@@ -496,6 +496,7 @@ Describe Get-DeclaredFieldValue {
 Describe Get-Resources {
     $MockAssembly = Get-TestAssemblyObject
     $MockApi = New-Object Api
+    $MockApi.DiscoveryObj = "Json"
 
     mock New-ApiResource {return [PSCustomObject]@{}}
 
@@ -508,7 +509,7 @@ Describe Get-Resources {
 
     it "handles input" {
         $Results = Get-Resources -Assembly $MockAssembly -Api $MockApi
-        $Results.Count | Should Be 1
+        $Results.Count | Should Be 2
     }
 }
 
@@ -519,6 +520,8 @@ Describe New-ApiResource {
         $MockApi = New-Object Api
     }
 
+    mock Get-ApiResourceMethods {return ,@([PSCustomObject]@{Name="MockMethod"})}
+
     it "handles null or incorrectly typed input" {
         {New-ApiResource -Resource $null -Api $Api -RestJson $MockRestJson} | Should Throw
         {New-ApiResource -Resource "" -Api $Api -RestJson $MockRestJson} | Should Throw
@@ -527,6 +530,66 @@ Describe New-ApiResource {
         {New-ApiResource -Resource $MockResources[0] -Api $Api -RestJson ""} | Should Throw
     }
 
-    
+    it "handles input" {
+        $Result1 = New-ApiResource -Resource $MockResources[0] -Api $MockApi -RestJson $MockRestJson
+        $Result1.Api | Should Be $MockApi
+        $Result1.ReflectedObj | Should Be $MockResources[0].PropertyType
+        $Result1.Name | Should BeExactly "First"
+        $Result1.NameLower | Should BeExactly "first"
+        $Result1.FullName | Should BeExactly "Google.Apis.Something.v1.FirstResource"
+        $Result1.Namespace | Should BeExactly "Google.Apis.Something.v1"
+        $Result1.ParentResource | Should BeNullOrEmpty
+        $Result1.DiscoveryObj | Should Be $MockRestJson.resources.First
+        $Result1.ChildResources.Count | Should Be 1
+        "Sub" | Should BeIn $Result1.ChildResourcesDict.Keys
+        $Result1.Methods.Count | Should Be 1
+        "MockMethod" | Should BeIn $Result1.MethodsDict.Keys
 
+        Assert-MockCalled Get-ApiResourceMethods -Exactly -Times 2
+
+        $Result1.ChildResourcesDict["Sub"].ParentResource | Should Be $Result1
+        $Result1.ChildResourcesDict["Sub"].FullName | Should Be "Google.Apis.Something.v1.FirstResource+SubResource"
+        $Result1.ChildResourcesDict["Sub"].Namespace | Should Be "Google.Apis.Something.v1"
+
+        $Result2 = New-ApiResource -Resource $MockResources[1] -Api $MockApi -RestJson $MockRestJson
+        $Result2.ChildResources.Count | Should Be 0
+    }
+
+}
+
+Describe New-ApiMethod {
+    mock New-ApiMethod {}
+}
+
+function Get-TestMethods {
+    #looking for IsVirtual and -not IsFinal
+    #Also where ReturnType.ImplementedInterfaces.Name -contains "IClientServiceRequest"
+    $Methods = @(
+        #Good Result
+        [PSCustomObject]@{
+            IsVirtual = $true
+            IsFinal = $false
+            ReturnType = [PSCustomObject]@{
+                ImplementedInterfaces = [PSCustomObject]@{
+                    Name = @(
+                        "IClientServiceRequest``1"
+                        "IClientServiceRequest"
+                    )
+                }
+                BaseType = "Google.Apis.Something.ClientServiceRequest`1[Google.Apis.Something.v1.Data.SomeOtherThingA]"
+            }
+        },
+
+        #UploadMethod
+        [PSCustomObject]@{
+            IsVirtual = $true
+            IsFinal = $false
+            ReturnType = [PSCustomObject]@{
+                ImplementedInterfaces = [PSCustomObject]@{}
+                BaseType = "Google.Apis.Upload.ResumableUpload`1[Google.Apis.Something.v1.Data.SomeOtherThingB]"
+            }
+        }
+    )
+
+    return $Methods
 }

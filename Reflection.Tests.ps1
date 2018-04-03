@@ -222,6 +222,7 @@ function Get-TestResources {
                         }
                     }
                 )
+                DeclaredMethods = (Get-TestMethods)
             }
         },
         [pscustomobject]@{ #This is a resource
@@ -242,6 +243,113 @@ function Get-TestResources {
     ) 
     
     return $Resources
+}
+
+function Get-TestMethods {
+    #looking for IsVirtual and -not IsFinal
+    #Also where ReturnType.ImplementedInterfaces.Name -contains "IClientServiceRequest"
+    $Methods = @(
+        #Good Results
+        [PSCustomObject]@{
+            PSTypeName = 'System.Reflection.MethodInfo'
+            Name = "Get"
+            IsVirtual = $true
+            IsFinal = $false
+            ReturnType = [PSCustomObject]@{
+                ImplementedInterfaces = [PSCustomObject]@{
+                    Name = @(
+                        "IClientServiceRequest``1"
+                        "IClientServiceRequest"
+                    )
+                }
+                BaseType = "Google.Apis.Something.ClientServiceRequest`1[Google.Apis.Something.v1.Data.SomeOtherThingA]"
+                DeclaredProperties = [PSCustomObject]@{
+                    Name = @(
+                        #PageToken ?
+                    )
+                }
+            }
+        },
+
+        #Good Result
+        [PSCustomObject]@{
+            PSTypeName = 'System.Reflection.MethodInfo'
+            Name = "Create"
+            IsVirtual = $true
+            IsFinal = $false
+            ReturnType = [PSCustomObject]@{
+                ImplementedInterfaces = [PSCustomObject]@{
+                    Name = @(
+                        "IClientServiceRequest``1"
+                        "IClientServiceRequest"
+                    )
+                }
+                BaseType = "Google.Apis.Something.ClientServiceRequest`1[Google.Apis.Something.v1.Data.SomeOtherThingA]"
+            }
+        },
+
+        #UploadMethod
+        [PSCustomObject]@{
+            PSTypeName = 'System.Reflection.MethodInfo'
+            Name = "Create"
+            IsVirtual = $true
+            IsFinal = $false
+            ReturnType = [PSCustomObject]@{
+                ImplementedInterfaces = [PSCustomObject]@{}
+                BaseType = "Google.Apis.Upload.ResumableUpload`1[Google.Apis.Something.v1.Data.SomeOtherThingB]"
+            }
+        },
+
+        #Bad Methods
+        [PSCustomObject]@{
+            PSTypeName = 'System.Reflection.MethodInfo'
+            Name = "Foo"
+            IsVirtual = $true
+            IsFinal = $true
+            ReturnType = [PSCustomObject]@{
+                ImplementedInterfaces = [PSCustomObject]@{
+                    Name = @(
+                        "IClientServiceRequest``1"
+                        "IClientServiceRequest"
+                    )
+                }
+                BaseType = "Google.Apis.Something.ClientServiceRequest`1[Google.Apis.Something.v1.Data.SomeOtherThingA]"
+            }
+        },
+
+        [PSCustomObject]@{
+            PSTypeName = 'System.Reflection.MethodInfo'
+            Name = "Bar"
+            IsVirtual = $false
+            IsFinal = $false
+            ReturnType = [PSCustomObject]@{
+                ImplementedInterfaces = [PSCustomObject]@{
+                    Name = @(
+                        "IClientServiceRequest``1"
+                        "IClientServiceRequest"
+                    )
+                }
+                BaseType = "Google.Apis.Something.ClientServiceRequest`1[Google.Apis.Something.v1.Data.SomeOtherThingA]"
+            }
+        },
+
+        [PSCustomObject]@{
+            PSTypeName = 'System.Reflection.MethodInfo'
+            Name = "Fizz"
+            IsVirtual = $true
+            IsFinal = $false
+            ReturnType = [PSCustomObject]@{
+                ImplementedInterfaces = [PSCustomObject]@{
+                    Name = @(
+                        "nope"
+                    )
+                }
+                BaseType = "Google.Apis.Something.ClientServiceRequest`1[Google.Apis.Something.v1.Data.SomeOtherThingA]"
+            }
+        }
+    )
+
+    return $Methods
 }
 
 #Create and return a known, false Json object for use in unit tests
@@ -558,38 +666,115 @@ Describe New-ApiResource {
 }
 
 Describe New-ApiMethod {
-    mock New-ApiMethod {}
-}
+    
+    mock New-ApiMethod {
+        $M = New-Object ApiMethod 
+        $M.Name = $Method.Name
+        return $M
+    }
 
-function Get-TestMethods {
-    #looking for IsVirtual and -not IsFinal
-    #Also where ReturnType.ImplementedInterfaces.Name -contains "IClientServiceRequest"
-    $Methods = @(
-        #Good Result
-        [PSCustomObject]@{
-            IsVirtual = $true
-            IsFinal = $false
-            ReturnType = [PSCustomObject]@{
-                ImplementedInterfaces = [PSCustomObject]@{
-                    Name = @(
-                        "IClientServiceRequest``1"
-                        "IClientServiceRequest"
-                    )
-                }
-                BaseType = "Google.Apis.Something.ClientServiceRequest`1[Google.Apis.Something.v1.Data.SomeOtherThingA]"
-            }
-        },
+    $MockMethodProperty1 = New-Object ApiMethodProperty
+    $MockMethodProperty1.Name = "StreamObj"
+    $MockMethodProperty1.Type = [PSCustomObject]@{Type = "System.IO.Stream"}
+    $MockMethodProperty1.Required = $true
 
-        #UploadMethod
+    $MockMethodProperty2 = New-Object ApiMethodProperty
+    $MockMethodProperty2.Name = "ContentType"
+    $MockMethodProperty2.Type = [PSCustomObject]@{Type = "string"}
+    $MockMethodProperty2.Required = $true
+
+    $MockMethodProperty3 = New-Object ApiMethodProperty
+    $MockMethodProperty3.Name = "ContentType"
+    $MockMethodProperty3.Type = [PSCustomObject]@{Type = "Foo"}
+    $MockMethodProperty3.Required = $true
+
+    $MockMethodProperty4 = New-Object ApiMethodProperty
+    $MockMethodProperty4.Name = "bar"
+    $MockMethodProperty4.Type = [PSCustomObject]@{Type = "string"}
+    $MockMethodProperty4.Required = $true
+
+    mock New-ApiMethod { 
+        $M = New-Object ApiMethod 
+        $M.Name = $Method.Name
+        $M.Parameters.AddRange(@(
+            $MockMethodProperty1,
+            $MockMethodProperty2,
+            $MockMethodProperty3,
+            $MockMethodProperty4
+        ))
+        return $M
+    } -ParameterFilter {$UseReturnTypeGenericInt -eq 1}
+
+    mock Get-MethodInfoParameters {return ,@(
         [PSCustomObject]@{
-            IsVirtual = $true
-            IsFinal = $false
-            ReturnType = [PSCustomObject]@{
-                ImplementedInterfaces = [PSCustomObject]@{}
-                BaseType = "Google.Apis.Upload.ResumableUpload`1[Google.Apis.Something.v1.Data.SomeOtherThingB]"
+            ParameterType = [PSCustomObject]@{
+                FullName = @("Foo","System.IO.Stream","Bar")
             }
         }
-    )
+    )}
 
-    return $Methods
+    $MockResources = Get-TestResources
+    $MockApiResource = New-Object ApiResource
+
+    it "handles null or incorrect input" {
+        $TypeObject = [PSCustomObject]@{PSTypeName = 'System.Reflection.TypeInfo'}
+        {Get-ApiResourceMethods $Null $TypeObject } | should Throw
+        {Get-ApiResourceMethods "Foo" $TypeObject } | should Throw
+        {Get-ApiResourceMethods $MockApiResource $Null } | should Throw
+        {Get-ApiResourceMethods $MockApiResource "Bar" } | should Throw
+    }
+
+    $Results = Get-ApiResourceMethods -Resource $MockApiResource -ResourceType $MockResources[0].PropertyType
+
+    it "gets proper method results" {
+        $Results.Count | Should Be 2
+
+        "Get" | Should BeIn $Results.Name
+        "Create" | Should BeIn $Results.Name
+        "Foo" | Should Not BeIn $Results.Name
+        "Bar" | Should Not BeIn $Results.Name
+        "Fizz" | Should Not BeIn $Results.Name
+    }
+
+    it "properly assigns upload methods" {
+
+        $Get = $Results | Where-Object Name -eq "Get"
+        $Get.SupportsMediaUpload | Should Be $false
+        $Get.UploadMethod | Should BeNullOrEmpty
+
+        $Create = $Results | Where-Object Name -eq "Create"
+        $Create.SupportsMediaUpload | Should Be $false
+        $Create.UploadMethod | Should Not BeNullOrEmpty
+        $Create.UploadMethod.SupportsMediaUpload | Should Be $true
+    }
+
+    it "properly adjusts upload method parameters" {
+
+        $Create = $Results | Where-Object Name -eq "Create"
+        
+        $Create.UploadMethod.Parameters.Count | Should Be 4
+
+        $Create.UploadMethod.Parameters[0].Name | Should Be "StreamObj"
+        $Create.UploadMethod.Parameters[0].ShouldIncludeInTemplates | Should Be $false
+        $Create.UploadMethod.Parameters[0].Required | Should Be $false
+
+        $Create.UploadMethod.Parameters[1].Name | Should Be "ContentType"
+        $Create.UploadMethod.Parameters[1].Type.Type | Should Be "string"
+        $Create.UploadMethod.Parameters[1].ShouldIncludeInTemplates | Should Be $false
+        $Create.UploadMethod.Parameters[1].Required | Should Be $false
+
+        $Create.UploadMethod.Parameters[2].Name | Should Be "ContentType"
+        $Create.UploadMethod.Parameters[2].Type.Type | Should Be "foo"
+        $Create.UploadMethod.Parameters[2].ShouldIncludeInTemplates | Should Be $true
+        $Create.UploadMethod.Parameters[2].Required | Should Be $true
+
+        $Create.UploadMethod.Parameters[3].Name | Should Be "bar"
+        $Create.UploadMethod.Parameters[3].Type.Type | Should Be "string"
+        $Create.UploadMethod.Parameters[3].ShouldIncludeInTemplates | Should Be $true
+        $Create.UploadMethod.Parameters[3].Required | Should Be $true
+    }
+}
+
+Describe Get-MethodInfoParameters {
+    #TODO
 }

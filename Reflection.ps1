@@ -572,7 +572,7 @@ function Get-ApiResourceMethods {
     
     #now process methods that have a file upload option
     foreach ($Method in ($AllMethods | Where-Object {$_.ReturnType.BaseType -like "Google.Apis.Upload.ResumableUpload*"})) {
-        $Parameters = $Method.GetParameters()
+        $Parameters = Get-MethodInfoParameters $Method
         if ($Parameters.Count -gt 0 -and $Parameters.ParameterType.FullName -contains "System.IO.Stream") {
         
             $M = New-ApiMethod $resource $method -UseReturnTypeGenericInt 1
@@ -594,6 +594,23 @@ function Get-ApiResourceMethods {
     }
 
     return ,$Results
+}
+
+<#
+Wraps [System.Reflection.MethodInfo]::GetParameters for mocking abilities since we can't
+otherwise mock this class's .net method
+#>
+function Get-MethodInfoParameters {
+    [CmdletBinding()]
+    param (
+        #A reflected Method Info Object
+        [Parameter(Mandatory=$true)]
+        [ValidateScript({Test-ObjectType "System.Reflection.MethodInfo" $_})]
+        $Method
+    )
+
+    #System.Reflection.ParameterInfo[]
+    return ,$Method.GetParameters()
 }
 
 <#

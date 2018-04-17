@@ -1,4 +1,5 @@
 . ($MyInvocation.MyCommand.Path -replace "Tests.","")
+. ([System.IO.Path]::Combine([System.IO.Path]::GetDirectoryName($MyInvocation.MyCommand.Path),"TemplatingMain.ps1"))
 
 #region General Functions
 Describe Test-ObjectType {
@@ -264,9 +265,8 @@ function Get-TestMethods {
                 }
                 BaseType = "Google.Apis.Something.ClientServiceRequest`1[Google.Apis.Something.v1.Data.SomeOtherThingA]"
                 DeclaredProperties = [PSCustomObject]@{
-                    Name = @(
-                        #PageToken ?
-                    )
+                    SetMethod = "NotNull"
+                    Name = "NotAPageTokenOrStandardQueryParam"
                 }
             }
         },
@@ -378,6 +378,10 @@ function Get-TestRestJson {
             Second = [pscustomobject]@{
 
             }
+        }
+        methods = [pscustomobject]@{
+            get = [pscustomobject]@{description = "MethodGetDescription"}
+            create = [pscustomobject]@{description = "MethodCreateDescription"}
         }
     }
     return $TestJson
@@ -582,8 +586,9 @@ Describe Get-ApiScopes {
 
 Describe Get-DeclaredFieldValue {
     
-    it "should handle null" {
+    it "handles null or incorrect input" {
         {Get-DeclaredFieldValue $null} | Should Throw
+        {Get-DeclaredFieldValue "Foo"} | Should Throw
     }
 
     #pull in from powershell assembly since it should be present
@@ -665,7 +670,7 @@ Describe New-ApiResource {
 
 }
 
-Describe New-ApiMethod {
+Describe Get-ApiResourceMethods {
     
     mock New-ApiMethod {
         $M = New-Object ApiMethod 
@@ -776,5 +781,167 @@ Describe New-ApiMethod {
 }
 
 Describe Get-MethodInfoParameters {
-    #TODO
+    it "handles null or incorrect input" {
+        {Get-MethodInfoParameters -Method $null}
+    }
+
+    it "handles real value" {
+        $Assembly = [System.Reflection.Assembly]::LoadWithPartialName("System.Management.Automation")
+        $MethodInfo = $Assembly.ExportedTypes `
+            | Select-Object -ExpandProperty DeclaredMethods `
+            | Where-Object {$_ -is [System.Reflection.MethodInfo]} `
+            | Where-Object Name -eq "AddGenericArguments" `
+            | Select-Object -First 1
+
+        $Results = Get-MethodInfoParameters -Method $MethodInfo
+
+        "genericArguments" | Should BeIn $Results.Name
+        "dropNamespaces" | Should BeIn $Results.Name
+
+    }
+}
+
+Describe Get-ApiMethodNoun {
+    $MockApiMethod = New-Object ApiMethod
+    $MockApiName = "Fizz"
+    $MockApiVersion = "v1"
+
+    #TODO - figure out how to mock this when it's not in a module
+    mock Get-ParentResourceChain { return $null }
+
+    it "handles null or incorrect input" {
+        {Get-ApiMethodNoun -ApiMethod $null -ApiName $MockApiName -ApiVersion $MockApiVersion} | Should Throw
+        {Get-ApiMethodNoun -ApiMethod "Foo" -ApiName $MockApiName -ApiVersion $MockApiVersion} | Should Throw
+        {Get-ApiMethodNoun -ApiMethod $MockApiMethod -ApiName $null -ApiVersion $MockApiVersion} | Should Throw
+        {Get-ApiMethodNoun -ApiMethod $MockApiMethod -ApiName 1 -ApiVersion $MockApiVersion} | Should Throw
+        {Get-ApiMethodNoun -ApiMethod $MockApiMethod -ApiName $MockApiName -ApiVersion $null} | Should Throw
+        {Get-ApiMethodNoun -ApiMethod $MockApiMethod -ApiName $MockApiName -ApiVersion 1} | Should Throw
+    }
+
+    it "gets appropriate result" {
+        $Result = Get-ApiMethodNoun -ApiMethod $MockApiMethod -ApiName $MockApiName -ApiVersion 1
+
+        $Result | Should BeExactly "GFizzV1"
+
+    }
+}
+
+Describe New-ApiMethod {
+
+    #region Setup
+    $MockMethods = Get-TestMethods
+    $MockApi = New-Object Api
+    $MockRestJson = Get-TestRestJson
+    $MockApiResource = New-Object ApiResource
+    $MockApiResource.Api = $MockApi
+    $MockApiResource.DiscoveryObj = $MockRestJson
+
+    $MockMethodInfoParam = [PSCustomObject]@{Name = "FooMethodInfoParam"}
+
+    #Passed to New-ApiMethodProperty to determine the return type
+    mock Get-ApiMethodReturnType {return "FooReturnType"}
+    $ApiMethodPropertyMockReturnReturn = [PSCustomObject]@{Name="ReturnTypeProperty";Type=$null}
+    mock New-ApiMethodProperty {return $ApiMethodPropertyMockReturnReturn} -ParameterFilter {$Property -eq "FooReturnType"}
+
+    #Works out the type of the return type - if it needs to be string or void
+    mock Get-ApiMethodReturnTypeType {return "ReturnTypePropertyType"} -ParameterFilter {$MethodReturnTypeName -eq "ReturnTypeProperty"}
+    
+    #Used in getting properties of the virtual method
+    $ApiMethodPropertyMockInfoReturn = [PSCustomObject]@{Name="FooMethodProperty1";Type=$null}
+    mock Get-MethodInfoParameters { return $MockMethodInfoParam } -ParameterFilter {$Method -eq $MockMethods[0]}
+    mock New-ApiMethodProperty {return $ApiMethodPropertyMockInfoReturn} -ParameterFilter {$Property -eq $MockMethodInfoParam}
+    #endregion
+
+    it "handles null or incorrect input" {
+        {New-ApiMethod -Resource $null -Method $MockMethods[0]} | Should Throw
+        {New-ApiMethod -Resource "Foo" -Method $MockMethods[0]} | Should Throw
+        {New-ApiMethod -Resource $MockApiResource -Method $null} | Should Throw
+        {New-ApiMethod -Resource $MockApiResource -Method "Bar"} | Should Throw
+    }
+
+    it "sets up the api method properly" {
+        $Result = New-ApiMethod -Resource $MockApiResource -Method $MockMethods[0]
+
+        $Result.Resource | Should Be $MockApiResource
+        $Result.Api | Should Be $MockApi
+        $Result.ParentResource | Should Be $MockApiResource
+        $Result.ReflectedObj | Should Be $MockMethods[0]
+        $Result.DiscoveryObj | Should Be $MockRestJson.methods.Get
+
+        $Result.Name | Should Be "Get"
+        $Result.Description | Should Be "MethodGetDescription"
+
+        $Result.ReturnType.Name | Should Be "ReturnTypeProperty"
+        $Result.ReturnType.Type | Should Be "ReturnTypePropertyType"
+
+        #Properties from the virtual method
+        $ApiMethodPropertyMockInfoReturn | Should BeIn $Result.Parameters
+        $ApiMethodPropertyMockInfoReturn | Should BeIn $Result.VirtualParameters
+
+        #Params from the request class
+        $Result.Parameters | Where-Object {$_.Name -eq "NotAPageTokenOrStandardQueryParam"} | Should Be $true
+        $Result.VirtualParameters | Where-Object {$_.Name -eq "NotAPageTokenOrStandardQueryParam"} | Should Be $true
+    }
+}
+
+Describe Test-ApiMethodHasPagedResults {
+    BeforeEach {
+        $MockApiMethod = New-Object ApiMethod
+        $MockApiMethod.ReturnType = [PSCustomObject]@{
+            ReflectedObject = [PSCustomObject]@{
+                DeclaredProperties = [PSCustomObject]@{
+                    Name = @("Foo","NextPageToken","Bar")
+                }
+            }
+        }
+        
+        $MockMethod = [PSCustomObject]@{
+            PSTypeName = 'System.Reflection.MethodInfo'
+            ReturnType = [PSCustomObject]@{
+                DeclaredProperties = [PSCustomObject]@{
+                    Name = @("Fizz","PageToken","Buzz")
+                }
+            }
+        }
+    }
+    
+    It "handles null or incorrect input" {
+        {Test-ApiMethodHasPagedResults -ApiMethod $null -Method $MockMethod} | Should Throw
+        {Test-ApiMethodHasPagedResults -ApiMethod "" -Method $MockMethod} | Should Throw
+        {Test-ApiMethodHasPagedResults -ApiMethod $MockApiMethod -Method $null} | Should Throw
+        {Test-ApiMethodHasPagedResults -ApiMethod $MockApiMethod -Method ""} | Should Throw
+    }
+
+    It "finds paged results" {
+        Test-ApiMethodHasPagedResults -ApiMethod $MockApiMethod -Method $MockMethod | Should Be $true
+    }
+
+    It "finds no NextPageToken in ApiMethod" {
+        $MockApiMethod.ReturnType.ReflectedObject.DeclaredProperties.Name = @("Foo","Bar")
+
+        Test-ApiMethodHasPagedResults -ApiMethod $MockApiMethod -Method $MockMethod | Should Be $false
+    }
+
+    It "finds no PageToken in Method" {
+        $MockMethod.ReturnType.DeclaredProperties.Name = @("Fizz","Buzz")
+        
+        Test-ApiMethodHasPagedResults -ApiMethod $MockApiMethod -Method $MockMethod | Should Be $false
+    }
+}
+
+Describe Get-ApiMethodReturnTypeType {
+    Mock New-BasicTypeStruct {return "StringResult"} -ParameterFilter {$Type -like "string"}
+    Mock New-BasicTypeStruct {return "VoidResult"}
+
+    it "handles null or incorrect input" {
+        {Get-ApiMethodReturnTypeType -MethodReturnTypeName $null} | Should Throw
+        {Get-ApiMethodReturnTypeType -MethodReturnTypeName ""} | Should Throw
+        {Get-ApiMethodReturnTypeType -MethodReturnTypeName [PSCustomObject]@{}} | Should Throw
+    }
+
+    it "provides expected response" {
+        Get-ApiMethodReturnTypeType -MethodReturnTypeName "String" | Should Be "StringResult"
+        Get-ApiMethodReturnTypeType -MethodReturnTypeName "string" | Should Be "StringResult"
+        Get-ApiMethodReturnTypeType -MethodReturnTypeName "Foo" | Should Be "VoidResult"
+    }
 }

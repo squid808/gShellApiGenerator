@@ -540,7 +540,8 @@ function New-ApiResource {
 }
 
 <#
-
+Pulls out methods from the resource that represent the Api endpoints.
+Additionally links up upload methods to their generic methods.
 #>
 function Get-ApiResourceMethods {
     [CmdletBinding()]
@@ -639,13 +640,13 @@ class ApiMethod {
     $Name
 
     #The name of the method derived from the Virtual method in first-lower case
-    $NameLower
+    #$NameLower
 
     #The type ultimately returned by the api call itself, not the method that returns a request type
     $ReturnType
 
     #Are the results paged
-    [bool]$HasPagedResults
+    #[bool]$HasPagedResults
 
     #All parameters related to this API call - pulled out of both the virtual method and the request class
     $Parameters = (New-Object system.collections.arraylist)
@@ -684,9 +685,59 @@ class ApiMethod {
     #A link to a version of this method that supports Media Upload
     $UploadMethod
 
-    [string]$MethodVerb
+    #[string]$MethodVerb
 
-    [string]$MethodNoun
+    #[string]$MethodNoun
+
+    #Constructor - use this to add getters for some properties via scriptmethods
+    ApiMethod  () {
+
+        #The name of the method derived from the Virtual method in first-lower case
+        $this | Add-Member -Name "NameLower" -MemberType ScriptProperty -Value {
+            return ConvertTo-FirstLower $this.Name
+        }
+
+        $this | Add-Member -Name "MethodVerb" -MemberType ScriptProperty -Value {
+            return Get-MCVerb $this.Name
+        }
+
+        $this | Add-Member -Name "MethodNoun" -MemberType ScriptProperty -Value {
+            return Get-ApiMethodNoun -ApiMethod $this.Api.Version -ApiName $this.Api.Name -ApiVersion $this.Api.Version
+        }
+
+        $this | Add-Member -Name "HasPagedResults" -MemberType ScriptProperty -Value {
+            return Test-ApiMethodHasPagedResults -ApiMethod $this -Method $this.ReflectedObj
+        }
+
+    }
+}
+
+<#
+Returns a cmdlet noun as determined by the Api
+#>
+function Get-ApiMethodNoun {
+[CmdletBinding()]
+param (
+    [Parameter(Mandatory=$true)]
+    [ValidateScript({Test-ObjectType "ApiMethod" $_})]
+    $ApiMethod,
+
+    [Parameter(Mandatory=$true)]
+    [ValidateNotNullOrEmpty()]
+    [string]
+    $ApiName,
+
+    [Parameter(Mandatory=$true)]
+    [ValidateNotNullOrEmpty()]
+    [string]
+    $ApiVersion
+)
+
+    $Noun = "G" + $ApiName + (ConvertTo-FirstUpper $ApiVersion) + `
+        (Get-ParentResourceChain -MethodOrResource $ApiMethod -JoinChar "")
+
+    return $Noun
+
 }
 
 function New-ApiMethod {
@@ -702,6 +753,7 @@ function New-ApiMethod {
         [ValidateScript({Test-ObjectType "System.Reflection.MethodInfo" $_})]
         $Method,
         
+        [Parameter(Mandatory=$false)]
         $UseReturnTypeGenericInt=0
     )
 
@@ -713,28 +765,15 @@ function New-ApiMethod {
     $M.DiscoveryObj = $Resource.DiscoveryObj.methods.($Method.name)
 
     $M.Name = ConvertTo-FirstUpper $Method.Name
-    $M.NameLower = ConvertTo-FirstLower $Method.Name
     $M.Description = Clean-CommentString $M.DiscoveryObj.description
     $M.ReturnType =  New-ApiMethodProperty $M (Get-ApiMethodReturnType $Method -UseReturnTypeGenericInt $UseReturnTypeGenericInt)
-    
-    $M.MethodVerb = Get-MCVerb $M.Name
-    $M.MethodNoun = $Noun = "G" + $M.Api.Name + (ConvertTo-FirstUpper $M.Api.Version) + `
-        (Get-ParentResourceChain -MethodOrResource $M -JoinChar "")
 
-    #TODO - adjust this, where and when is it called?
-    if (Has-ObjProperty $M.DiscoveryObj "response") {
-        #$M.ReturnType.Type = Get-ApiPropertyTypeShortName $M.ReturnType.ReflectedObj.FullName $M.Api
-    } elseif ($M.ReturnType.Name -eq "String") {
-        #Found in media downloads
-        $M.ReturnType.Type = New-BasicTypeStruct string
-    } else {
-        $M.ReturnType.Type = New-BasicTypeStruct void
-    }
+    $M.ReturnType.Type = Get-ApiMethodReturnTypeType -MethodReturnTypeName $M.ReturnType.Name
     
     $ParameterNames = New-Object "System.Collections.Generic.HashSet[string]"
 
-    #get the properties of the virtual method. This may include a body?
-    foreach ($P in ($Method.GetParameters() | where {$Api.StandardQueryparams.Name -notcontains $_.Name})) {
+    #get the properties of the virtual method. This may include a body
+    foreach ($P in (Get-MethodInfoParameters -Method $Method | Where-Object {$Api.StandardQueryparams.Name -notcontains $_.Name})) {
         $ParameterNames.Add($P.Name.ToLower()) | Out-Null
         $Param = New-ApiMethodProperty $M $P -ForceRequired $true
 
@@ -745,7 +784,7 @@ function New-ApiMethod {
     #get the properties of the request class - those missing set methods are generally properties not associated with
     # the api -MethodName, HttpMethod and RestPath. Properties with setters are likely to be those we want to update
     # and send along with the API request
-    foreach ($P in ($M.ReflectedObj.ReturnType.DeclaredProperties | where {`
+    foreach ($P in ($M.ReflectedObj.ReturnType.DeclaredProperties | Where-Object {`
         $_.SetMethod -ne $null `
         -and $_.Name.ToLower() -ne "pagetoken" `
         -and $Api.StandardQueryparams.Name -notcontains $_.Name}))
@@ -759,12 +798,59 @@ function New-ApiMethod {
         }
     }
 
-    $M.Parameters | % {$M.ParametersDict[$_.Name] = $_ }
+    $M.Parameters | ForEach-Object {$M.ParametersDict[$_.Name] = $_ }
 
-    $M.HasPagedResults = $Method.ReturnType.DeclaredProperties.name -contains "PageToken" -and `
-                            $M.ReturnType.ReflectedObject.DeclaredProperties.name -contains "NextPageToken"
+    #$M.HasPagedResults = $Method.ReturnType.DeclaredProperties.name -contains "PageToken" -and `
+    #                        $M.ReturnType.ReflectedObject.DeclaredProperties.name -contains "NextPageToken"
 
     return $M
+}
+
+function Test-ApiMethodHasPagedResults {
+    [CmdletBinding()]
+    param (
+        #The Api Method object
+        [Parameter(Mandatory=$true)]
+        [ValidateScript({Test-ObjectType "ApiMethod" $_})]
+        $ApiMethod,
+
+        #The Reflected Method object
+        [Parameter(Mandatory=$true)]
+        [ValidateScript({Test-ObjectType "System.Reflection.MethodInfo" $_})]
+        $Method
+    )
+
+    $HasPagedResults = $Method.ReturnType.DeclaredProperties.name -contains "PageToken" -and `
+        $ApiMethod.ReturnType.ReflectedObject.DeclaredProperties.name -contains "NextPageToken"
+
+    return $HasPagedResults
+}
+
+<#
+Determines the type of the return type, under unusual circumstances
+#>
+function Get-ApiMethodReturnTypeType {
+    [CmdletBinding()]
+    param  (
+        #The ApiMethod object
+        [Parameter(Mandatory=$true)]
+        [string]
+        $MethodReturnTypeName
+    )
+
+    <#
+    if (Has-ObjProperty $M.DiscoveryObj "response") {
+        #$M.ReturnType.Type = Get-ApiPropertyTypeShortName $M.ReturnType.ReflectedObj.FullName $M.Api
+    } else
+    #>
+    if ($MethodReturnTypeName -like "String") {
+        #Found in media downloads
+        $Result = New-BasicTypeStruct string
+    } else {
+        $Result = New-BasicTypeStruct void
+    }
+
+    return $Result
 }
 
 class ApiMethodProperty {
@@ -1050,14 +1136,17 @@ function Get-ApiPropertyType {
 
 function New-ApiMethodProperty {
 #[CmdletBinding(DefaultParameterSetName = 'FromMethod')]
+[CmdletBinding()]
 
     Param (
         #[Parameter(ParameterSetName = 'FromMethod')]
-        [ApiMethod]$Method,
+        [ValidateScript({Test-ObjectType "ApiMethod" $_})]
+        $Method,
         
         $Property,
         
-        [bool]$ForceRequired = $false
+        [bool]
+        $ForceRequired = $false
     )
     $P = New-Object ApiMethodProperty
     $P.Method = $Method

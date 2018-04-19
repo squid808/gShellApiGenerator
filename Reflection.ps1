@@ -927,8 +927,23 @@ class ApiPropertyTypeStruct {
     }
 }
 
-function Get-ApiPropertyTypeShortName($Name, $Api) {
+<#
+Returns a short name for a type, 
+#>
+function Get-ApiPropertyTypeShortName {
+[CmdletBinding()]
     
+    param (
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNullOrEmpty()]
+        [string]
+        $Name,
+        
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNullOrEmpty()]
+        [string]
+        $ApiRootNameSpace
+    )
 
     switch ($Name) {
         "System.String" {return "string"}
@@ -941,7 +956,7 @@ function Get-ApiPropertyTypeShortName($Name, $Api) {
         "int64" {return "long"}
     }
 
-    $Replaced = $Name -replace ($Api.RootNamespace + ".")
+    $Replaced = $Name -replace ($ApiRootNamespace + ".")
 
     $Replaced = $Replaced -replace "[+]","."
 

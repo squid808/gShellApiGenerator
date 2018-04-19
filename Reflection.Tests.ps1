@@ -945,3 +945,41 @@ Describe Get-ApiMethodReturnTypeType {
         Get-ApiMethodReturnTypeType -MethodReturnTypeName "Foo" | Should Be "VoidResult"
     }
 }
+
+Describe Get-ApiPropertyTypeShortName {
+
+    it "handles null or incorrect input" {
+        {Get-ApiPropertyTypeShortName -Name $null -ApiRootNameSpace "NotNull"} | Should Throw
+        {Get-ApiPropertyTypeShortName -Name [pscustomobject]@{} -ApiRootNameSpace "NotNull"} | Should Throw
+        {Get-ApiPropertyTypeShortName -Name "NotNull" -ApiRootNameSpace $null} | Should Throw
+        {Get-ApiPropertyTypeShortName -Name "NotNull"@{} -ApiRootNameSpace [pscustomobject]@{}} | Should Throw
+
+    }
+
+    it "handles system types" {
+
+        $TypeResults = @{
+            "System.String" = "string" 
+            "String" = "string"
+            "System.Int32" = "int"
+            "Int32" = "int"
+            "System.Boolean" = "bool"
+            "Boolean" = "bool"
+            "System.Int64" = "long"
+            "Int64" = "long"
+        }
+
+        foreach ($Key in $TypeResults.Keys) {
+            Get-ApiPropertyTypeShortName -Name $Key -ApiRootNameSpace "anything" | Should BeExactly $TypeResults[$Key]
+        }
+    }
+
+    it "handles root namespaces" {
+        Get-ApiPropertyTypeShortName -Name "Google.Apis.Something.v1.SomeType" -ApiRootNameSpace "Google.Apis.Something.v1" | Should BeExactly "SomeType"
+
+        Get-ApiPropertyTypeShortName -Name "Google.Apis.Something.v1.SomeNamespace.SomeType" -ApiRootNameSpace "Google.Apis.Something.v1" | Should BeExactly "SomeNamespace.SomeType"
+
+        Get-ApiPropertyTypeShortName -Name "Google.Apis.Something.v1.SomeType+SomeInnerType" -ApiRootNameSpace "Google.Apis.Something.v1" | Should BeExactly "SomeType.SomeInnerType"
+    }
+
+}

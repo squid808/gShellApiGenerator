@@ -928,7 +928,10 @@ class ApiPropertyTypeStruct {
 }
 
 <#
-Returns a short name for a type, 
+Returns a shortened name for a type, as might be used in code.
+Eg, System.String -> string
+If the type comes from some other namespace, it will attempt to 
+reconcile shortening the type by removing the root namespace
 #>
 function Get-ApiPropertyTypeShortName {
 [CmdletBinding()]
@@ -963,8 +966,13 @@ function Get-ApiPropertyTypeShortName {
     return $Replaced
 }
 
+<#
+Provided a short type name, eg String, create a new ApiPropertyTypeStruct result object for that type
+#>
 function New-BasicTypeStruct{
+[CmdletBinding()]
     param (
+        [Parameter(Mandatory=$true)]
         [ValidateSet("string","bool","int32","int64","uint64","void")]
         $Type
     )
@@ -996,12 +1004,22 @@ function New-BasicTypeStruct{
     }
 }
 
+<#
+Provided a ref type and root name space returns an ApiPropertyTypeStruct object.
+#>
 function Get-ApiPropertyTypeBasic {
-
+[CmdletBinding()]
     param
     (
+        #TODO - figure out what types this requires and work in to unit tests?
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNull()]
         $RefType,
-        $Api
+
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNullOrEmpty()]
+        [string]
+        $ApiRootNameSpace
     )
 
     #TODO - provide overload to provide just a string and create it from there for basic types
@@ -1029,7 +1047,7 @@ function Get-ApiPropertyTypeBasic {
     #otherwise...
 
     $TypeStruct = New-Object ApiPropertyTypeStruct
-    $TypeStruct.Type = $RefType.FullName -replace ($Api.RootNamespace + ".") -replace "[+]","."
+    $TypeStruct.Type = $RefType.FullName -replace ($ApiRootNamespace + ".") -replace "[+]","."
     $TypeStruct.FullyQualifiedType = $RefType.FullName -replace "[+]","."
     $TypeStruct.HelpDocShortType = $TypeStruct.Type.Split(".")[-1]
     $TypeStruct.HelpDocLongType = $TypeStruct.FullyQualifiedType
@@ -1037,46 +1055,52 @@ function Get-ApiPropertyTypeBasic {
     return $TypeStruct
 }
 
+<#
+
+#>
 function Get-ApiPropertyType {
     param (
-        [Parameter(ParameterSetName="property")]
+        [Parameter(ParameterSetName="property", Mandatory=$true)]
         [ValidateScript({Test-ObjectType "ApiMethodProperty" $_})]
         $Property,
 
-        [Parameter(ParameterSetName="runtimetype")]
+        #The type for this actually shows up as System.RuntimeType but who's counting
+        [Parameter(ParameterSetName="runtimetype", Mandatory=$true)]
         [ValidateScript({Test-ObjectType "System.Type" $_})]
         $RuntimeType,
 
-        [Parameter(ParameterSetName="runtimetype")]
-        $Api#,
-
-        #$GenericInners = $null
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNullOrEmpty()]
+        $ApiRootNameSpace
     )
     if ($PSCmdlet.ParameterSetName -eq "property") {
-        if ($Property.ReflectedObj.GetType().Name -eq "RuntimeParameterInfo") {
+        #Pull out the runtime type
+        #TODO - why aren't we doing this before the method is called?
+        if ("ParameterType" -in $Property.ReflectedObj.PsObject.Properties.Name) {
+            #if of type RuntimeParameterInfo
             $RefType = $Property.ReflectedObj.ParameterType
-        } else {
+        } elseif ("PropertyType" -in $Property.ReflectedObj.PsObject.Properties.Name) {
+            #Might also be RuntimePropertyInfo
             $RefType = $Property.ReflectedObj.PropertyType
+        } else {
+            throw "No Sub RefType found on Property"
         }
-
-        $Api = $Property.Api
     } else {
         $RefType = $RuntimeType
     }
 
     #Make sure we're not making a property that is declared as a subclass or object (struct, enum) within a generic class without providing the
     #generic type for said parent class.
-    if ($RefType.UnderlyingSystemType -ne $Null -and $RefType.DeclaringType -ne $Null) {
-        if ($RefType.UnderlyingSystemType.ToString().Contains("+") -and $RefType.DeclaringType.IsGenericType){
-            #$parentType = Get-ApiPropertyType -RuntimeType $RefType.DeclaringType -Api $Api -GenericInners "object"
-            #$Type = $parentType + "." + $Type
+    #also in cases where reftype's name / fullname are empty, return it right here and now
+    if (($Null -ne $RefType.UnderlyingSystemType `
+            -and $RefType.UnderlyingSystemType.FullName.Contains("+") `
+            -and $null -ne $RefType.DeclaringType `
+            -and $RefType.DeclaringType.IsGenericType) `
+        -or ([string]::IsNullOrWhiteSpace($RefType.Name) `
+            -and [string]::IsNullOrWhiteSpace($RefType.FullName))) {
             return $null
-        }
     }
 
-    #if null, return it right here and now
-    if ([string]::IsNullOrWhiteSpace($RefType.Name) -and [string]::IsNullOrWhiteSpace($RefType.FullName)) { return $null }
-    
     #is this a generic type? nullable, list, etc
     if (-not [string]::IsNullOrWhiteSpace($RefType.Name) -and $RefType.Name.Contains("``")) {
         
@@ -1087,30 +1111,22 @@ function Get-ApiPropertyType {
 
         foreach ($I in $RefType.GenericTypeArguments) {
             if ($I.GetType().Name -eq "RuntimeType") {
-                $InnerTypeStruct = Get-ApiPropertyType -RuntimeType $I -Api $Api
+                $InnerTypeStruct = Get-ApiPropertyType -RuntimeType $I -ApiRootNameSpace $ApiRootNameSpace
                 $inners.Add
             } else {
                 $InnerTypeStruct = Get-ApiPropertyTypeBasic $I $Api
             }
 
-            #if (-not [string]::IsNullOrWhiteSpace($InnerType)) {
             if ($InnerTypeStruct -ne $null) {
                 $TypeStruct.InnerTypes.Add($InnerTypeStruct) | Out-Null
             }
         }
 
-        #if ($GenericInners -ne $Null) {
-        #    $GenericInners | % {$inners.Add($_) | Out-Null}
-        #}
-
         #don't return any generics that don't have anything inside
         if ($TypeStruct.InnerTypes.Count -eq 0) { return $null }
         
-        #$InnerString = $inners -join ", "
-        
         if ($TypeStruct.InnerTypes.Count -eq 1) {
             if ($RefType.Name -eq "Repeatable``1") {
-                $GenericInnerTypes = $TypeStruct.InnerTypes
                 $TypeStruct.Type = "Google.Apis.Util.Repeatable<{0}>" -f $TypeStruct.InnerTypes[0].Type
                 $TypeStruct.FullyQualifiedType = "Google.Apis.Util.Repeatable<{0}>" -f $TypeStruct.InnerTypes[0].FullyQualifiedType
                 $TypeStruct.HelpDocShortType = "{0}[]" -f $TypeStruct.InnerTypes[0].HelpDocShortType
@@ -1138,10 +1154,10 @@ function Get-ApiPropertyType {
     } else  {
         if (-not [string]::IsNullOrWhiteSpace($RefType.FullName)) {
             
-            $TypeStruct = Get-ApiPropertyTypeBasic $RefType $Api
+            $TypeStruct = Get-ApiPropertyTypeBasic -RefType $RefType -ApiRootNameSpace $ApiRootNameSpace
         } else {
             #TODO: when does this happen?
-            $TypeStruct.Type = (Get-ApiPropertyTypeBasic $RefType $Api)
+            $TypeStruct.Type = (Get-ApiPropertyTypeBasic -RefType $RefType -ApiRootNameSpace $ApiRootNameSpace)
             throw "ReflectionTest: RefType FullName is null, please revise"
         }
     }

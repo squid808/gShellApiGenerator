@@ -982,4 +982,167 @@ Describe Get-ApiPropertyTypeShortName {
         Get-ApiPropertyTypeShortName -Name "Google.Apis.Something.v1.SomeType+SomeInnerType" -ApiRootNameSpace "Google.Apis.Something.v1" | Should BeExactly "SomeType.SomeInnerType"
     }
 
+    it "handles incorrect root namespaces" {
+        Get-ApiPropertyTypeShortName -Name "Google.Apis.Something.v1.SomeType" -ApiRootNameSpace 
+            "Google.Apis.Something.v2" | Should BeExactly "Google.Apis.Something.v1.SomeType"
+    }
+}
+
+Describe New-BasicTypeStruct {
+    it "handles null or incorrect input" {
+        {New-BasicTypeStruct $null} | Should Throw
+        {New-BasicTypeStruct "not in the type set"} | Should Throw
+        {New-BasicTypeStruct 1} | Should Throw
+    }
+
+    it "creates expected results" {
+        $TypeResults = @{
+            "string" = "System.String"
+            "bool" = "System.Boolean"
+            "int32" = "System.Int32"
+            "int64" = "System.Int64"
+            "uint64" = "System.UInt64"
+            "void" = "void"
+        }
+
+        foreach ($Key in $TypeResults.Keys) {
+            $Result = New-BasicTypeStruct $Key
+            $Result.FullyQualifiedType | Should BeExactly $TypeResults[$Key]
+            $Result -is "ApiPropertyTypeStruct" | Should Be $True
+        }
+    }
+}
+
+Describe Get-ApiPropertyTypeBasic {
+    Mock New-BasicTypeStruct {return $Type}
+
+    it "handles null or incorrect type" {
+        #TODO: what types are expected by RefType?
+        {Get-ApiPropertyTypeBasic -RefType $null -ApiRootNameSpace "NotNull"} | Should Throw
+        {Get-ApiPropertyTypeBasic -RefType "NotNull" -ApiRootNameSpace $null} | Should Throw
+        {Get-ApiPropertyTypeBasic -RefType "NotNull" -ApiRootNameSpace ""} | Should Throw
+        {Get-ApiPropertyTypeBasic -RefType "NotNull" -ApiRootNameSpace [PsCustomObject]@{}} | Should Throw
+    }
+
+    it "returns basic types" {
+        $TypeResults = @{
+            "System.String" = "string" 
+            "String" = "string"
+            "System.Int32" = "int32"
+            "Int32" = "int32"
+            "System.Boolean" = "bool"
+            "Boolean" = "bool"
+            "System.Int64" = "int64"
+            "Int64" = "int64"
+            "System.UInt64" = "uint64"
+            "UInt64" = "uint64"
+        }
+
+        foreach ($Key in $TypeResults.Keys) {
+            $RefType = [PsCustomObject]@{FullName = $Key}
+            $Result = Get-ApiPropertyTypeBasic -RefType $RefType -ApiRootNameSpace "Something"
+            $Result | Should BeExactly $TypeResults[$Key]
+        }
+    }
+
+    it "returns standard types" {
+        $ApiNamespace = "Google.Apis.v1"
+        $Type = "SomeType"
+        $FullType = $ApiNamespace + "." + $Type
+
+        $RefType = [PsCustomObject]@{ FullName = $FullType }
+
+        $Result = Get-ApiPropertyTypeBasic -RefType $RefType -ApiRootNameSpace $ApiNameSpace
+
+        $Result.Type | Should BeExactly $Type
+        $Result.FullyQualifiedType | Should BeExactly $FullType
+        $Result.HelpDocShortType | Should BeExactly $Type
+        $Result.HelpDocLongType | Should BeExactly $FullType
+    }
+
+    it "returns standard inner types" {
+        $ApiNamespace = "Google.Apis.v1"
+        $MainType = "SomeType"
+        $InnerType = "InnerType"
+        $FullTypePlus = $ApiNamespace + "." + $MainType + "+" + $InnerType
+        $FullTypeDot = $ApiNamespace + "." + $MainType + "." + $InnerType
+
+        $RefType = [PsCustomObject]@{ FullName = $FullTypePlus }
+
+        $Result = Get-ApiPropertyTypeBasic -RefType $RefType -ApiRootNameSpace $ApiNameSpace
+
+        $Result -is "ApiPropertyTypeStruct" | Should Be $true
+        $Result.Type | Should BeExactly ($MainType + "." + $InnerType)
+        $Result.FullyQualifiedType | Should BeExactly $FullTypeDot
+        $Result.HelpDocShortType | Should BeExactly $InnerType
+        $Result.HelpDocLongType | Should BeExactly $FullTypeDot
+    }
+}
+
+Describe Get-ApiPropertyType {
+    mock Get-ApiPropertyTypeBasic { } #TODO
+
+    BeforeEach {
+        $MockProperty = New-Object ApiMethodProperty
+        $MockRuntimeType = [PsCustomObject]@{
+            PSTypeName = 'System.Type'
+            Name = "SomeType"
+            FullName = "Google.Apis.Something.v1.SomeType"
+            DeclaringType = [PsCustomObject]@{
+                IsGenericType = $false
+            }
+            UnderlyingSystemType = [PsCustomObject]@{
+                FullName = "Google.Apis.Something.v1.SomeUnderlyingType"
+            }
+        }
+        $MockApiNamespace = "Google.Apis.Something.v1"
+    }
+
+    it "handles null or incorrect input" {
+        
+        #parameter set 1
+        {Get-ApiPropertyType -Property $null -ApiRootNameSpace $MockApiNamespace} | Should Throw
+        {Get-ApiPropertyType -Property "Foo" -ApiRootNameSpace $MockApiNamespace} | Should Throw
+        {Get-ApiPropertyType -Property $MockProperty -ApiRootNameSpace $Null} | Should Throw
+        {Get-ApiPropertyType -Property $MockProperty -ApiRootNameSpace ""} | Should Throw
+        {Get-ApiPropertyType -Property $MockProperty -ApiRootNameSpace [PsCustomObject]@{}} | Should Throw
+
+        #parameter set 2
+        {Get-ApiPropertyType -RuntimeType $null -ApiRootNameSpace $MockApiNamespace} | Should Throw
+        {Get-ApiPropertyType -RuntimeType "Bar" -ApiRootNameSpace $MockApiNamespace} | Should Throw
+        {Get-ApiPropertyType -RuntimeType $MockRuntimeType -ApiRootNameSpace $null} | Should Throw
+        {Get-ApiPropertyType -RuntimeType $MockRuntimeType -ApiRootNameSpace ""} | Should Throw
+        {Get-ApiPropertyType -RuntimeType $MockRuntimeType -ApiRootNameSpace [PsCustomObject]@{}} | Should Throw
+    }
+
+    it "throws on unexpected property set ref type" {
+        {Get-ApiPropertyType -Property $MockProperty -ApiRootNameSpace $MockApiNamespace} | Should Throw "No Sub RefType found on Property"
+    }
+
+    it "returns null for subclass or generic without generic type, or empty reftype name" {
+        $MockRuntimeType.UnderlyingSystemType.FullName += "+SomeInnerType"
+        $MockRuntimeType.DeclaringType.IsGenericType = $true
+        $Results = Get-ApiPropertyType -RuntimeType $MockRuntimeType -ApiRootNameSpace $MockApiNamespace
+        $Results | Should BeNullOrEmpty
+    }
+
+    it "returns null for reftype with empty name and fullname" {
+        $MockRuntimeType.Name = ""
+        $MockRuntimeType.FullName = ""
+        $Results1 = Get-ApiPropertyType -RuntimeType $MockRuntimeType -ApiRootNameSpace $MockApiNamespace
+        $Results1 | Should BeNullOrEmpty
+
+        $MockRuntimeType.Name = $null
+        $MockRuntimeType.FullName = $null
+        $Results2 = Get-ApiPropertyType -RuntimeType $MockRuntimeType -ApiRootNameSpace $MockApiNamespace
+        $Results2 | Should BeNullOrEmpty
+    }
+
+    it "handles generic types" {
+        #TODO line 1105
+    }
+
+    it "handles non-generic types" {
+        #TODO line 1154
+    }
 }

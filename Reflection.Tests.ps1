@@ -1084,6 +1084,11 @@ Describe Get-ApiPropertyType {
 
     BeforeEach {
         $MockProperty = New-Object ApiMethodProperty
+        $MockGenericTypeArgument = [PsCustomObject]@{
+            PSTypeName = 'System.RuntimeType'
+            Name = "Boolean"
+        }
+        $MockGenericTypeArgument.PsObject.TypeNames.Insert(1,"System.Type")
         $MockRuntimeType = [PsCustomObject]@{
             PSTypeName = 'System.Type'
             Name = "SomeType"
@@ -1094,8 +1099,15 @@ Describe Get-ApiPropertyType {
             UnderlyingSystemType = [PsCustomObject]@{
                 FullName = "Google.Apis.Something.v1.SomeUnderlyingType"
             }
+            GenericTypeArguments = @(
+                $MockGenericTypeArgument
+            )
         }
         $MockApiNamespace = "Google.Apis.Something.v1"
+        $ReturnedInnerType = New-Object ApiPropertyTypeStruct -Property @{
+            Type = "bool"
+            FullyQualifiedType = "System.Boolean"
+        }
     }
 
     it "handles null or incorrect input" {
@@ -1138,8 +1150,32 @@ Describe Get-ApiPropertyType {
         $Results2 | Should BeNullOrEmpty
     }
 
-    it "handles generic types" {
-        #TODO line 1105
+    context "mock recursive call for generic types"{
+        
+        mock Get-ApiPropertyType {return $ReturnedInnerType} -ParameterFilter {$RuntimeType -eq $MockGenericTypeArgument}
+
+        it "handles generic repeatable`1 types" {
+            $MockRuntimeType.Name = "Repeatable``1"
+            $Result = Get-ApiPropertyType -RuntimeType $MockRuntimeType -ApiRootNameSpace $MockApiNamespace
+            
+            Assert-MockCalled "Get-ApiPropertyType" -Times 1
+
+            $Result.Type | Should BeLike "Google.Apis.Util.Repeatable<*>"
+            $Result.FullyQualifiedType | Should BeLike "Google.Apis.Util.Repeatable<*>"
+
+            $Result.InnerTypes.Count | Should Be 1
+            $ReturnedInnerType | Should BeIn $Result.InnerTypes
+        }
+
+        it "handles generic nullable`1 types" {
+            #TODO line 1105
+            $MockRuntimeType.Name = "Nullable``1"
+            $Result = Get-ApiPropertyType -RuntimeType $MockRuntimeType -ApiRootNameSpace $MockApiNamespace
+            
+            Assert-MockCalled "Get-ApiPropertyType" -Times 1
+            $Result.InnerTypes.Count | Should Be 1
+            $ReturnedInnerType | Should BeIn $Result.InnerTypes
+        }
     }
 
     it "handles non-generic types" {

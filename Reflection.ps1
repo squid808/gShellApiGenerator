@@ -32,6 +32,8 @@ function Test-ObjectType {
     if ($MatchAll) {
         foreach ($Type in $Types) {
 
+            #This may actually error out, eg when checking if something is System.RuntimeType which isn't
+            # a valid primary type to convert to but is in the inheritance chain. Thanks reflection!
             if ($Object -isnot $Type -and $Object.PSObject.TypeNames -notcontains $Type) {
                 return $false
             }
@@ -41,7 +43,13 @@ function Test-ObjectType {
     } else {
         foreach ($Type in $Types) {
 
-            if ($Object -is $Type -or $Object.PSObject.TypeNames -contains $Type) {
+            try {
+                if ($Object -is $Type) {
+                    return $true
+                }
+            } catch {}
+
+            if ($Object.PSObject.TypeNames -contains $Type) {
                 return $true
             }
         }
@@ -1106,13 +1114,11 @@ function Get-ApiPropertyType {
         
         $TypeStruct = New-Object ApiPropertyTypeStruct
 
-        $inners = New-Object System.Collections.ArrayList
         $InnerTypeStruct = New-Object ApiPropertyTypeStruct
 
         foreach ($I in $RefType.GenericTypeArguments) {
-            if ($I.GetType().Name -eq "RuntimeType") {
+            if (Test-ObjectType "System.RuntimeType" $I) {
                 $InnerTypeStruct = Get-ApiPropertyType -RuntimeType $I -ApiRootNameSpace $ApiRootNameSpace
-                $inners.Add
             } else {
                 $InnerTypeStruct = Get-ApiPropertyTypeBasic $I $Api
             }

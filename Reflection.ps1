@@ -1064,7 +1064,7 @@ function Get-ApiPropertyTypeBasic {
 }
 
 <#
-
+Returns a type struct for the given property or runtime type
 #>
 function Get-ApiPropertyType {
     param (
@@ -1163,7 +1163,7 @@ function Get-ApiPropertyType {
             $TypeStruct = Get-ApiPropertyTypeBasic -RefType $RefType -ApiRootNameSpace $ApiRootNameSpace
         } else {
             #TODO: when does this happen?
-            $TypeStruct.Type = (Get-ApiPropertyTypeBasic -RefType $RefType -ApiRootNameSpace $ApiRootNameSpace)
+            #$TypeStruct.Type = (Get-ApiPropertyTypeBasic -RefType $RefType -ApiRootNameSpace $ApiRootNameSpace)
             throw "ReflectionTest: RefType FullName is null, please revise"
         }
     }

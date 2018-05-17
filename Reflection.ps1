@@ -1257,13 +1257,18 @@ class ApiClass {
 
 #The complex class representation for the object behind a property, documented as a 'schema object' in Google's json
 function New-ApiClass {
+[CmdletBinding()]
 
     Param (
+        [Parameter(Mandatory=$true)]
+        [ValidateScript({Test-ObjectType "System.Type","System.RuntimeType" $_})]
         $ReflectedObj,
+
+        [Parameter(Mandatory=$true)]
+        [ValidateScript({Test-ObjectType "Api" $_})]
         $Api
     )
 
-    #$TypeData = Get-ApiPropertyTypeShortName $ReflectedObj.FullName $Api
     $TypeStruct = Get-ApiPropertyType -RuntimeType $ReflectedObj -Api $Api
 
     if ($Api.SchemaObjectsDict.ContainsKey($TypeStruct.Type)) {
@@ -1278,37 +1283,52 @@ function New-ApiClass {
         $C.Name = $ReflectedObj.Name
         $C.DiscoveryObj = $C.Api.DiscoveryObj.schemas.($C.Name)
         $C.Type = $TypeStruct
-        #$C.TypeData = $TypeData
         $C.Description = Clean-CommentString $C.DiscoveryObj.description
         $C.Api.SchemaObjects.Add($C) | Out-Null
         $C.Api.SchemaObjectsDict[$TypeStruct.Type] = $C
 
-        foreach ($Property in ($ReflectedObj.DeclaredProperties | where Name -ne "ETag")) {
-            $P = New-Object ApiMethodProperty #which can then in turn make their own API classes!
-            $P.Name = $Property.Name
-            $P.Api = $Api
-            $P.DiscoveryObj = $C.DiscoveryObj.properties.($P.Name)
-            $P.ReflectedObj = $Property
-            #$P.Method = $Parameter.Method
-            $P.Type = Get-ApiPropertyType -Property $P
-            $P.Description = Clean-CommentString $P.DiscoveryObj.Description
-
-            if ($P.ReflectedObj.PropertyType.ImplementedInterfaces.Name -contains "IDirectResponseSchema") {
-                $P.IsSchemaObject = $true
-                $P.SchemaObject = New-ApiClass -ReflectedObj $P.ReflectedObj.PropertyType -Api $Api
-            }
-
-            foreach ($I in $P.ReflectedObj.PropertyType.GenericTypeArguments) {
-                if  ($I.ImplementedInterfaces.Name -contains "IDirectResponseSchema") {
-                    New-ApiClass $I $Api | Out-Null
-                }
-            }
-
+        foreach ($Property in ($ReflectedObj.DeclaredProperties | Where-Object Name -ne "ETag")) {
+            $P = Get-SchemaObjectProperty -Property $Property -Api $Api -ApiClass $C
             $C.Properties.Add($P) | Out-Null
         }
 
         return $C
     }
+}
+
+function Get-SchemaObjectProperty {
+    [CmdletBinding()]
+    param (
+        [ValidateScript({Test-ObjectType "System.PropertyType" $_})]
+        $Property,
+
+        [ValidateScript({Test-ObjectType "Api" $_})]
+        $Api,
+
+        [ValidateScript({Test-ObjectType "ApiClass" $_})]
+        $ApiClass
+    )
+
+    $P = New-Object ApiMethodProperty #which can then in turn make their own API classes!
+    $P.Name = $Property.Name
+    $P.Api = $Api
+    $P.DiscoveryObj = $ApiClass.DiscoveryObj.properties.($P.Name)
+    $P.ReflectedObj = $Property
+    $P.Type = Get-ApiPropertyType -Property $P
+    $P.Description = Clean-CommentString $P.DiscoveryObj.Description
+
+    if ($P.ReflectedObj.PropertyType.ImplementedInterfaces.Name -contains "IDirectResponseSchema") {
+        $P.IsSchemaObject = $true
+        $P.SchemaObject = New-ApiClass -ReflectedObj $P.ReflectedObj.PropertyType -Api $Api
+    }
+
+    foreach ($I in $P.ReflectedObj.PropertyType.GenericTypeArguments) {
+        if  ($I.ImplementedInterfaces.Name -contains "IDirectResponseSchema") {
+            New-ApiClass $I $Api | Out-Null
+        }
+    }
+
+    return $P
 }
 
 #endregion

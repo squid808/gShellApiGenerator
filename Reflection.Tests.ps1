@@ -1421,3 +1421,71 @@ Describe New-ApiMethodProperty {
         $Result.Method.BodyParameter | Should Be $Result
     }
 }
+
+Describe New-ApiClass {
+    $MockReflectedObject = [PsCustomObject]@{
+        PSTypeName = "System.Type"
+        Name = "ReflectedName"
+        DeclaredProperties = @(
+            [PSCustomObject]@{
+                PSTypeName = "System.PropertyType"
+                Name = "ETag"
+            },
+            [PSCustomObject]@{
+                PSTypeName = "System.PropertyType"
+                Name = "Fizz"
+            }
+        )
+    }
+
+    $TypeStructReturnObj = New-Object ApiPropertyTypeStruct -Property @{
+        Type = "ReturnType"
+    }
+
+    $SchemaDictObj = "SomeObj"
+
+    $MockDiscoveryObj = [PSCustomObject]@{
+        Description = "Discovery Description"
+    }
+
+    $MockApi = New-Object Api -Property @{
+        SchemaObjectsDict = @{
+            #$TypeStructReturnObj.Type = $SchemaDictObj
+        }
+        DiscoveryObj = [PSCustomObject]@{
+            schemas = @{
+                $MockReflectedObject.Name = $MockDiscoveryObj
+            }
+        }
+    }
+
+    Mock Get-ApiPropertyType {return $TypeStructReturnObj}
+    Mock Clean-CommentString {return $String}
+    Mock Get-SchemaObjectProperty {return New-Object ApiMethodProperty}
+    
+    it "handles null or incorrect input" {
+        {New-ApiClass -ReflectedObj $null -Api $MockApi} | Should Throw
+        {New-ApiClass -ReflectedObj "" -Api $MockApi} | Should Throw
+        {New-ApiClass -ReflectedObj $MockReflectedObject -Api $null} | Should Throw
+        {New-ApiClass -ReflectedObj $MockReflectedObject -Api ""} | Should Throw
+    }
+
+    it "returns expected" {
+        $Result = New-ApiClass -ReflectedObj $MockReflectedObject -Api $MockApi
+        $Result.Api | Should BeExactly $MockApi
+        $Result.ReflectedObj | Should BeExactly $MockReflectedObject
+        $Result.Name | Should BeExactly $MockReflectedObject.Name
+        $Result.DiscoveryObj | Should BeExactly $MockDiscoveryObj
+        $Result.Type | Should BeExactly $TypeStructReturnObj
+        $Result.Description | Should BeExactly $MockDiscoveryObj.Description
+        $Result | Should BeIn $Result.Api.SchemaObjects
+        $TypeStructReturnObj.Type | Should BeIn $Result.Api.SchemaObjectsDict.Keys
+        $Result.Api.SchemaObjectsDict[$TypeStructReturnObj.Type] | Should BeExactly $Result
+
+        Assert-MockCalled -CommandName "Get-SchemaObjectProperty" -Times 1
+        $Result.Properties.Count | Should BeExactly 1
+        "ETag" | Should Not BeIn $Result.Properties.Name
+    }
+
+    
+}

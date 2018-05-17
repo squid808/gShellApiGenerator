@@ -1067,6 +1067,7 @@ function Get-ApiPropertyTypeBasic {
 Returns a type struct for the given property or runtime type
 #>
 function Get-ApiPropertyType {
+[CmdletBinding()]
     param (
         [Parameter(ParameterSetName="property", Mandatory=$true)]
         [ValidateScript({Test-ObjectType "ApiMethodProperty" $_})]
@@ -1074,13 +1075,14 @@ function Get-ApiPropertyType {
 
         #The type for this actually shows up as System.RuntimeType but who's counting
         [Parameter(ParameterSetName="runtimetype", Mandatory=$true)]
-        [ValidateScript({Test-ObjectType "System.Type" $_})]
+        [ValidateScript({Test-ObjectType "System.Type","System.RuntimeType" $_})]
         $RuntimeType,
 
         [Parameter(Mandatory=$true)]
         [ValidateNotNullOrEmpty()]
         $ApiRootNameSpace
     )
+
     if ($PSCmdlet.ParameterSetName -eq "property") {
         #Pull out the runtime type
         #TODO - why aren't we doing this before the method is called?
@@ -1171,17 +1173,22 @@ function Get-ApiPropertyType {
     return $TypeStruct
 }
 
+<#
+Creates a new object of type ApiMethodProperty given a method and its property
+#>
 function New-ApiMethodProperty {
-#[CmdletBinding(DefaultParameterSetName = 'FromMethod')]
 [CmdletBinding()]
 
     Param (
-        #[Parameter(ParameterSetName = 'FromMethod')]
+        [Parameter(Mandatory=$true)]
         [ValidateScript({Test-ObjectType "ApiMethod" $_})]
         $Method,
         
+        [Parameter(Mandatory=$true)]
+        [ValidateScript({Test-ObjectType "System.Type","System.RuntimeType" $_})]
         $Property,
-        
+
+        [Parameter(Mandatory=$false)]
         [bool]
         $ForceRequired = $false
     )
@@ -1192,31 +1199,31 @@ function New-ApiMethodProperty {
     $P.NameLower = ConvertTo-FirstLower $Property.Name
     $P.ReflectedObj = $Property
     $P.DiscoveryObj = $Method.DiscoveryObj.parameters.($Property.Name)
-    if ($P.ReflectedObj.GetType().Name -eq "RuntimeType") {
-        $P.Type = Get-ApiPropertyType -RuntimeType $P.ReflectedObj -Api $Api
+    if (Test-ObjectType "System.RuntimeType" $P.ReflectedObj) {
+        $P.Type = Get-ApiPropertyType -RuntimeType $P.ReflectedObj -ApiRootNameSpace $P.Api.RootNamespace
     } else {
-        $P.Type = Get-ApiPropertyType -Property $P
+        $P.Type = Get-ApiPropertyType -Property $P -ApiRootNameSpace $P.Api.RootNamespace
     }
 
     if ($P.Type.FullyQualifiedType -like "*Download.IMediaDownloader"){
-        #if ($Method.ReturnType.Type -eq "void") {
-            $P.Method.SupportsMediaDownload = $true
-        #}
+        $P.Method.SupportsMediaDownload = $true
         $P.ShouldIncludeInTemplates = $false
     } elseif ($P.Type -eq $Null) {
         $P.ShouldIncludeInTemplates = $false
     }
     
     $P.Description = Clean-CommentString $P.DiscoveryObj.Description
+
     if ([string]::IsNullOrWhiteSpace($P.Description)){
         $P.Description = "Description for object of type {0} is unavailable." -f $P.Type.HelpDocLongType
     }
 
-    $P.Required = if ($ForceRequired -eq $true) {$true} else {[bool]($P.DiscoveryObj.required)}
     #TODO - is force required really needed?
-
+    $DiscoveryRequiredOutVar = ConvertTo-Bool $P.DiscoveryObj.required
+    $P.Required = $ForceRequired -or $DiscoveryRequiredOutVar
+    
     #If this is one of the schema objects
-    if ($P.ReflectedObj.ParameterType.ImplementedInterfaces.Name -contains "IDirectResponseSchema") {
+    if ($Property.ParameterType.ImplementedInterfaces.Name -contains "IDirectResponseSchema") {
         
         $P.IsSchemaObject = $true
         $P.SchemaObject = New-ApiClass -ReflectedObj $P.ReflectedObj.ParameterType -Api $Method.Api
@@ -1392,4 +1399,22 @@ function Invoke-GShellReflection {
     $Api.ApiName = $ApiName
 
     return $api
+}
+
+<#
+A simple wrapper for the boolean try parse method
+#>
+function ConvertTo-Bool {
+[CmdletBinding()]
+    param (
+        [string]
+        $BoolString
+    )
+
+    if ($null -eq $BoolString) {return $null}
+
+    $Out = $null
+    if ([bool]::TryParse($BoolString,[ref]$Out)){
+        return $Out
+    }
 }

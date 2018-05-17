@@ -1270,5 +1270,154 @@ Describe Get-ApiPropertyType {
 
             $Results | Should Be $BasicTypeReturn
         }
+
+        it "handles `$RuntimeType type of System.RuntimeType" {
+            $MockRuntimeType.PsObject.TypeNames[0] = "System.RuntimeType"
+            $Results = Get-ApiPropertyType -RuntimeType $MockRuntimeType -ApiRootNameSpace $MockApiNamespace
+
+            $Results | Should Be $BasicTypeReturn
+        }
+    }
+}
+
+Describe New-ApiMethodProperty {
+    BeforeEach {
+        $MockPropertyTypeResultFromRuntime = New-Object ApiPropertyTypeStruct -Property @{
+            HelpDocLongType = "FromRuntime"
+        }
+        $MockPropertyTypeResultFromProperty = New-Object ApiPropertyTypeStruct -Property @{
+            HelpDocLongType = "FromProperty"
+        }
+        mock Get-ApiPropertyType {return $MockPropertyTypeResultFromRuntime} -ParameterFilter {$RuntimeType -ne $null}
+        mock Get-ApiPropertyType {return $MockPropertyTypeResultFromProperty} -ParameterFilter {$Property -ne $null}
+        mock Clean-CommentString {return $String}
+        mock New-ApiClass {return "NewApiClass"}
+
+        $MockMethodDiscoveryObj = [PsCustomObject]@{
+            Name = "Paramname"
+            Description = "Some Description"
+            Required = "false"
+        }
+        $WrongMethodDiscoveryObj = [PsCustomObject]@{Name="Wrong"}
+        $MockMethod = New-Object ApiMethod -Property @{
+            Api = New-Object Api -Property @{
+                RootNamespace = "SomeRootNamespace"
+            }
+            DiscoveryObj = [PsCustomObject]@{
+                parameters = @{
+                    $MockMethodDiscoveryObj.Name = $MockMethodDiscoveryObj
+                    "Wrong" = $WrongMethodDiscoveryObj
+                }
+            }
+        }
+        $MockProperty = [PsCustomObject]@{
+            PSTypeName = 'System.Type'
+            Name = $MockMethodDiscoveryObj.Name
+            ParameterType = [PsCustomObject]@{
+                ImplementedInterfaces = [PsCustomObject]@{
+                    Name = @("Foo","Bar")
+                }
+            }
+        }
+    }
+
+    it "handles null or incorrect input" {
+        {New-ApiMethodProperty -Method $null -Property $MockProperty} | Should Throw
+        {New-ApiMethodProperty -Method "" -Property $MockProperty} | Should Throw
+        {New-ApiMethodProperty -Method $MockMethod -Property $null} | Should Throw
+        {New-ApiMethodProperty -Method $MockMethod -Property ""} | Should Throw
+    }
+
+    it "handles null Discovery Description" {
+        $MockMethodDiscoveryObj.Description = $null
+        {New-ApiMethodProperty -Method $MockMethod -Property $MockProperty} | Should Not Throw
+    }
+
+    it "handles null Discovery Object" {
+        $MockMethod.DiscoveryObj = $null
+        {New-ApiMethodProperty -Method $MockMethod -Property $MockProperty} | Should Not Throw
+    }
+
+    it "returns standard result" {
+        $Result = New-ApiMethodProperty -Method $MockMethod -Property $MockProperty
+        $Result.Method | Should BeExactly $MockMethod
+        $Result.Api | Should BeExactly $MockMethod.Api
+        $Result.Name | Should BeExactly $MockMethodDiscoveryObj.Name
+        $Result.NameLower | Should BeExactly $MockMethodDiscoveryObj.Name.ToLower()
+        $Result.ReflectedObj | Should BeExactly $MockProperty
+        $Result.DiscoveryObj | Should BeExactly $MockMethodDiscoveryObj
+        $Result.DiscoveryObj | Should Not Be $WrongMethodDiscoveryObj
+        $Result.Type | Should BeExactly $MockPropertyTypeResultFromProperty
+        $Result.Type | Should Not Be $MockPropertyTypeResultFromRuntime
+        $Result.Description | Should BeExactly $MockMethodDiscoveryObj.Description
+        $Result.Required | Should Be $false
+        $Result.Method.SupportsMediaUpload | Should Be $false
+        $Result.Method.HasBodyParameter | Should Be $false
+        $Result.Method.BodyParameter | Should BeNullOrEmpty
+        $Result.ShouldIncludeInTemplates | Should Be $True
+        $Result.IsSchemaObject | Should Be $false
+        $Result.SchemaObject | Should BeNullOrEmpty
+    }
+
+    it "adjusts for RuntimeType property objects" {
+        $MockProperty.PsObject.TypeNames[0] = "System.RuntimeType"
+
+        $Result = New-ApiMethodProperty -Method $MockMethod -Property $MockProperty
+        $Result.Type | Should BeExactly $MockPropertyTypeResultFromRuntime
+        $Result.Type | Should Not Be $MockPropertyTypeResultFromProperty
+    }
+
+    it "adjusts for IMediaDownloader" {
+        $MockPropertyTypeResultFromProperty.FullyQualifiedType = "Something.Download.IMediaDownloader"
+        
+        $Result = New-ApiMethodProperty -Method $MockMethod -Property $MockProperty
+        $Result.Method.SupportsMediaDownload | Should Be $true
+        $Result.ShouldIncludeInTemplates | Should Be $false
+    }
+
+    it "adjusts for null types" {
+        $MockPropertyTypeResultFromProperty = $null
+        
+        $Result = New-ApiMethodProperty -Method $MockMethod -Property $MockProperty
+        $Result.Method.SupportsMediaDownload | Should Be $false
+        $Result.ShouldIncludeInTemplates | Should Be $false
+    }
+
+    it "adjusts for null descriptions" {
+        $MockMethodDiscoveryObj.Description = $null
+        
+        $Result = New-ApiMethodProperty -Method $MockMethod -Property $MockProperty
+        $Result.Description | Should BeLike ("Description*{0}*unavailable." -f $MockPropertyTypeResultFromProperty.HelpDocLongType)
+
+
+        $MockMethodDiscoveryObj.Description = " "
+        
+        $Result = New-ApiMethodProperty -Method $MockMethod -Property $MockProperty
+        $Result.Description | Should BeLike ("Description*{0}*unavailable." -f $MockPropertyTypeResultFromProperty.HelpDocLongType)
+    }
+
+    it "adjusts for schema objects" {
+        $MockProperty.ParameterType.ImplementedInterfaces.Name += "IDirectResponseSchema"
+        
+        $Result = New-ApiMethodProperty -Method $MockMethod -Property $MockProperty
+        $Result.IsSchemaObject | Should Be $true
+        $Result.SchemaObject | Should Be "NewApiClass"
+        $Result.Description | Should BeExactly $MockMethodDiscoveryObj.Description
+        $Result.Method.HasBodyParameter | Should Be $false
+        $Result.Method.BodyParameter | Should BeNullOrEmpty
+    }
+
+    it "adjusts for schema objects when Body" {
+        $MockProperty.Name = "Body"
+        $MockMethodDiscoveryObj.Name = "Body"
+        $MockMethod.DiscoveryObj.parameters["Body"] = $MockMethodDiscoveryObj
+        $MockProperty.ParameterType.ImplementedInterfaces.Name += "IDirectResponseSchema"
+        
+        $Result = New-ApiMethodProperty -Method $MockMethod -Property $MockProperty
+        $Result.IsSchemaObject | Should Be $true
+        $Result.SchemaObject | Should Be "NewApiClass"
+        $Result.Description | Should BeLike "An object of type*"
+        $Result.Method.HasBodyParameter | Should Be $true
+        $Result.Method.BodyParameter | Should Be $Result
     }
 }

@@ -1299,12 +1299,15 @@ function New-ApiClass {
 function Get-SchemaObjectProperty {
     [CmdletBinding()]
     param (
+        [Parameter(Mandatory=$true)]
         [ValidateScript({Test-ObjectType "System.PropertyType" $_})]
         $Property,
 
+        [Parameter(Mandatory=$true)]
         [ValidateScript({Test-ObjectType "Api" $_})]
         $Api,
 
+        [Parameter(Mandatory=$true)]
         [ValidateScript({Test-ObjectType "ApiClass" $_})]
         $ApiClass
     )
@@ -1314,18 +1317,12 @@ function Get-SchemaObjectProperty {
     $P.Api = $Api
     $P.DiscoveryObj = $ApiClass.DiscoveryObj.properties.($P.Name)
     $P.ReflectedObj = $Property
-    $P.Type = Get-ApiPropertyType -Property $P
+    $P.Type = Get-ApiPropertyType -Property $P -ApiRootNameSpace $Api.RootNamespace
     $P.Description = Clean-CommentString $P.DiscoveryObj.Description
 
     if ($P.ReflectedObj.PropertyType.ImplementedInterfaces.Name -contains "IDirectResponseSchema") {
         $P.IsSchemaObject = $true
         $P.SchemaObject = New-ApiClass -ReflectedObj $P.ReflectedObj.PropertyType -Api $Api
-    }
-
-    foreach ($I in $P.ReflectedObj.PropertyType.GenericTypeArguments) {
-        if  ($I.ImplementedInterfaces.Name -contains "IDirectResponseSchema") {
-            New-ApiClass $I $Api | Out-Null
-        }
     }
 
     return $P

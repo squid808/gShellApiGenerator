@@ -1486,6 +1486,71 @@ Describe New-ApiClass {
         $Result.Properties.Count | Should BeExactly 1
         "ETag" | Should Not BeIn $Result.Properties.Name
     }
+}
 
-    
+Describe "Get-SchemaObjectProperty"  {
+
+    $MockProperty = [PSCustomObject]@{
+        PSTypeName = "System.PropertyType"
+        Name = "PropertyName"
+        PropertyType = [PSCustomObject]@{
+            PSTypeName = "System.Type"
+            ImplementedInterfaces = @(
+                [PSCustomObject]@{
+                    Name = "Foo"
+                }
+            )
+        }
+    }
+
+    $MockApi = New-Object Api -Property @{RootNamespace = "SomeNamespace"}
+
+    $MockApiClassDiscoveryObj = [PSCustomObject]@{
+        Description = "DiscoveryDescription"
+    }
+    $MockApiClass = New-Object ApiClass -Property @{
+        DiscoveryObj = [PSCustomObject]@{
+            properties = @{
+                $MockProperty.Name = $MockApiClassDiscoveryObj
+            }
+        }
+    }
+
+    $MockPropertyTypeReturn = "SomePropertyTypeReturn"
+    $MockNewApiClassReturn = "SomeApiClassReturn"
+
+    mock  Get-ApiPropertyType {return $MockPropertyTypeReturn}
+    mock Clean-CommentString {return $String}
+    mock New-ApiClass {return $MockNewApiClassReturn}
+
+    it "handles null or incorrect input" {
+        {Get-SchemaObjectProperty -Property $null -Api $MockApi -ApiClass $MockApiClass} | Should Throw
+        {Get-SchemaObjectProperty -Property "" -Api $MockApi -ApiClass $MockApiClass} | Should Throw
+        {Get-SchemaObjectProperty -Property $MockProperty -Api $null -ApiClass $MockApiClass} | Should Throw
+        {Get-SchemaObjectProperty -Property $MockProperty -Api "" -ApiClass $MockApiClass} | Should Throw
+        {Get-SchemaObjectProperty -Property $MockProperty -Api $MockApi -ApiClass $null} | Should Throw
+        {Get-SchemaObjectProperty -Property $MockProperty -Api $MockApi -ApiClass ""} | Should Throw
+    }
+
+    it "returns expected" {
+        $Result = Get-SchemaObjectProperty -Property $MockProperty -Api $MockApi -ApiClass $MockApiClass
+        $Result.Name | Should BeExactly $MockProperty.Name
+        $Result.Api | Should BeExactly $MockApi
+        $Result.DiscoveryObj | Should BeExactly $MockApiClassDiscoveryObj
+        $Result.ReflectedObj | Should BeExactly $MockProperty
+        $Result.Type | Should BeExactly $MockPropertyTypeReturn
+        $Result.Description | Should BeExactly $MockApiClassDiscoveryObj.Description
+
+        $Result.IsSchemaObject | Should Be $false
+        $Result.SchemaObject | Should BeNullOrEmpty
+
+        $Result.ImplementedInterfaces
+    }
+
+    it "handles IDirectResponseSchema" {
+        $MockProperty.PropertyType.ImplementedInterfaces += [PSCustomObject]@{ Name = "IDirectResponseSchema" }
+        $Result = Get-SchemaObjectProperty -Property $MockProperty -Api $MockApi -ApiClass $MockApiClass
+        $Result.IsSchemaObject | Should Be $true
+        $Result.SchemaObject | Should BeExactly $MockNewApiClassReturn
+    }
 }

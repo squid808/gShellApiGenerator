@@ -1296,6 +1296,9 @@ function New-ApiClass {
     }
 }
 
+<#
+A specific method to extract and format properties when creating schema objects.
+#>
 function Get-SchemaObjectProperty {
     [CmdletBinding()]
     param (
@@ -1355,8 +1358,20 @@ function New-ObjectOfType($Type) {
 } #>
 
 
-
-function Get-ApiMethodReturnType($Method, $UseReturnTypeGenericInt=0){
+<#
+Wrapper of  [MethodInfo].ReturnType.BaseType.GenericTypeArguments[int]
+#>
+function Get-ApiMethodReturnType {
+[CmdletBinding()]
+    param (
+        [Parameter(Mandatory=$true)]
+        [ValidateScript({Test-ObjectType "System.Reflection.MethodInfo" $_})]
+        $Method,
+        
+        [Parameter(Mandatory=$false)]
+        [int]
+        $UseReturnTypeGenericInt=0
+    )
     return $Method.ReturnType.BaseType.GenericTypeArguments[$UseReturnTypeGenericInt]
 }
 

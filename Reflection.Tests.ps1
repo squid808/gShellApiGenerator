@@ -1554,3 +1554,34 @@ Describe "Get-SchemaObjectProperty"  {
         $Result.SchemaObject | Should BeExactly $MockNewApiClassReturn
     }
 }
+
+Describe Get-ApiMethodReturnType {
+    $Assembly = [System.Reflection.Assembly]::LoadWithPartialName("System.Management.Automation")
+    $Method = $Assembly.ExportedTypes `
+        | Select-Object -ExpandProperty DeclaredMethods `
+        | Where-Object {$_ -is [System.Reflection.MethodInfo]} `
+        | Where-Object Name -eq "get_RuntimeDefinedParameters" `
+        | Select-Object -First 1
+
+    it "handles null or incorrect input" {
+        {Get-ApiMethodReturnType -Method $null} | Should Throw
+        {Get-ApiMethodReturnType -Method ""} | Should Throw
+        {Get-ApiMethodReturnType -Method $Method -UseReturnTypeGenericInt "Foo"} | Should Throw
+    }
+
+    it "returns null with out of bounds" {
+        Get-ApiMethodReturnType -Method $Method -UseReturnTypeGenericInt 2 | Should BeNullOrEmpty
+    }
+
+    it "returns expected" {
+        $Result1 = Get-ApiMethodReturnType -Method $Method
+        $Result1.FullName | Should BeExactly "System.String"
+        Test-ObjectType "System.RuntimeType" $Result1 | Should Be $true
+
+        $Result2 = Get-ApiMethodReturnType -Method $Method -UseReturnTypeGenericInt 0
+        $Result1 | Should BeExactly $Result2
+
+        $Result3 = Get-ApiMethodReturnType -Method $Method -UseReturnTypeGenericInt 1
+        $Result3.FullName | Should BeExactly "System.Management.Automation.RuntimeDefinedParameter"
+    }
+}

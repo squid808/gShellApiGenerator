@@ -1,5 +1,7 @@
 . ($MyInvocation.MyCommand.Path -replace "Tests.","")
 . ([System.IO.Path]::Combine([System.IO.Path]::GetDirectoryName($MyInvocation.MyCommand.Path),"TemplatingMain.ps1"))
+. ([System.IO.Path]::Combine([System.IO.Path]::GetDirectoryName($MyInvocation.MyCommand.Path),"LibraryIndex.ps1"))
+. ([System.IO.Path]::Combine([System.IO.Path]::GetDirectoryName($MyInvocation.MyCommand.Path),"Nuget.ps1"))
 
 #region General Functions
 Describe Test-ObjectType {
@@ -1488,7 +1490,7 @@ Describe New-ApiClass {
     }
 }
 
-Describe "Get-SchemaObjectProperty"  {
+Describe Get-SchemaObjectProperty  {
 
     $MockProperty = [PSCustomObject]@{
         PSTypeName = "System.PropertyType"
@@ -1583,5 +1585,73 @@ Describe Get-ApiMethodReturnType {
 
         $Result3 = Get-ApiMethodReturnType -Method $Method -UseReturnTypeGenericInt 1
         $Result3.FullName | Should BeExactly "System.Management.Automation.RuntimeDefinedParameter"
+    }
+}
+
+Describe Import-GShellAssemblies {
+    BeforeAll {
+        $TestPath = "TestDrive:\someFile.dll"
+        New-Item -Path $TestPath -ItemType File
+    }
+
+    BeforeEach {
+
+        $MockLibraryIndex = [PSCustomObject]@{
+            Name = "SomeName"
+            PSTypeName = "LibraryIndex"
+        }
+
+        $Dependency1 = [PSCustomObject]@{
+            Name = "Some.Library.v1"
+            Versions = "1.30.0"
+        }
+
+        $Dependency2 = [PSCustomObject]@{
+            Name = "Some.Other.Library.v1"
+            Versions = -1
+        }
+
+        $MockLibraryIndexVersion = [PSCustomObject]@{
+            dllPath = $TestPath
+            Dependencies = @($Dependency1,$Dependency2)
+        }
+
+        $MockLibraryIndexVersionReturn = [PSCustomObject]@{
+            dllPath = $TestPath
+            Dependencies = @()
+        }
+    }
+
+    mock Get-LatestVersionFromRange {return $VersionRange}
+    mock Get-LibraryIndexLibVersionLatest {return $MockLibraryIndexVersionReturn}
+    mock Get-LibraryIndexLibVersion {return $MockLibraryIndexVersionReturn}
+    mock Import-GShellAssemblies {return $null} -ParameterFilter {$LibraryIndexVersionInfo -eq $MockLibraryIndexVersionReturn}
+    
+    $MockImportAssemblyReturn = "MockAssembly"
+    mock Import-Assembly {return $MockImportAssemblyReturn }
+
+    it "handles null or incorrect input" {
+        {Import-GShellAssemblies -LibraryIndex $null -LibraryIndexVersionInfo $MockLibraryIndexVersion}
+        {Import-GShellAssemblies -LibraryIndex "" -LibraryIndexVersionInfo $MockLibraryIndexVersion}
+        {Import-GShellAssemblies -LibraryIndex $MockLibraryIndex -LibraryIndexVersionInfo $null}
+        {Import-GShellAssemblies -LibraryIndex $MockLibraryIndex -LibraryIndexVersionInfo ""}
+    }
+
+    it "handles correct input and recursion" {
+        $Result = Import-GShellAssemblies -LibraryIndex $MockLibraryIndex -LibraryIndexVersionInfo $MockLibraryIndexVersion
+        $Result | Should BeExactly $MockImportAssemblyReturn
+        Assert-MockCalled -CommandName Get-LatestVersionFromRange -Times 2
+        Assert-MockCalled -CommandName Get-LibraryIndexLibVersionLatest -Times 1
+        Assert-MockCalled -CommandName Get-LibraryIndexLibVersion -Times 1
+        Assert-MockCalled -CommandName Import-GShellAssemblies -Times 1
+    }
+
+    it "handles malformed dllPath" {
+        $MalformedDlls = @($null, "", "missing", "something_._")
+        foreach ($M in $MalformedDlls) {
+            $MockLibraryIndexVersion.dllPath = $M
+            $Result = Import-GShellAssemblies -LibraryIndex $MockLibraryIndex -LibraryIndexVersionInfo $MockLibraryIndexVersion
+            $Result | Should BeNullOrEmpty
+        }
     }
 }

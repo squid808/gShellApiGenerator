@@ -1378,27 +1378,56 @@ function Get-ApiMethodReturnType {
 #endregion
 
 #Todo: Load from nuget json file
-function Import-GShellAssemblies($LibraryIndex, $LibraryIndexVersionInfo){
-    
+<#
+Function to import assemblies, including dependencies, for a provided library and version
+#>
+function Import-GShellAssemblies {
+[CmdletBinding()]
+    param (
+        [Parameter(Mandatory=$true)]
+        [ValidateScript({Test-ObjectType "LibraryIndex" $_})]
+        $LibraryIndex,
+
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNull()]
+        [ValidateScript({'dllPath' -in $_.PSObject.Properties.Name -and 'Dependencies' -in $_.PSObject.Properties.Name})]
+        $LibraryIndexVersionInfo
+    )
+
     if (-not [string]::IsNullOrWhiteSpace($LibraryIndexVersionInfo.dllPath) -and `
         $LibraryIndexVersionInfo.dllPath -ne "missing" -and `
         $LibraryIndexVersionInfo.dllPath -notlike "*_._") {
 
-        $Assembly = [System.Reflection.Assembly]::LoadFrom($LibraryIndexVersionInfo.dllPath)
+        $Assembly = Import-Assembly $LibraryIndexVersionInfo.dllPath
 
         foreach ($D in $LibraryIndexVersionInfo.Dependencies) {
 
             $VersionNumber = Get-LatestVersionFromRange -VersionRange $D.Versions
 
             if ($VersionNumber -eq -1) {
-                $VersionInfo = $LibraryIndex.GetLibVersionLatest($D.Name)
+                $VersionInfo = Get-LibraryIndexLibVersionLatest -LibraryIndex $LibraryIndex -LibName $D.Name
             } else {
-                $VersionInfo = $LibraryIndex.GetLibVersion($D.Name, $VersionNumber)
+                $VersionInfo = Get-LibraryIndexLibVersion -LibraryIndex $LibraryIndex -LibName $D.Name -Version $VersionNumber
             }
 
             Import-GShellAssemblies $LibraryIndex $VersionInfo | Out-Null
         }
     }
+
+    return $Assembly
+}
+
+function Import-Assembly {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNullOrEmpty()]
+        [ValidateScript({Test-Path $_})]
+        [string]
+        $Path
+    )
+
+    $Assembly = [System.Reflection.Assembly]::LoadFrom($Path)
 
     return $Assembly
 }

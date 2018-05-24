@@ -1417,6 +1417,9 @@ function Import-GShellAssemblies {
     return $Assembly
 }
 
+<#
+A wrapper around Reflection's LoadFrom to allow for mocking
+#>
 function Import-Assembly {
     [CmdletBinding()]
     param (
@@ -1434,27 +1437,37 @@ function Import-Assembly {
 
 #to be called after loading from discovery and nuget happens. should have a handle on the files at this point
 function Invoke-GShellReflection {
-
+[CmdletBinding()]
     param (
         #The rest json obj, eg a result of Load-RestJsonFile gmail v1
-        [PSCustomObject]$RestJson,
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNull()]
+        [PSCustomObject]
+        $RestJson,
 
         #The full google name of the API, eg Google.Apis.Gmail.v1
-        [string]$ApiName,
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNullOrEmpty()]
+        [string]
+        $ApiName,
 
         #The nuget version of the file, eg 1.30.0.1034
-        [string]$ApiFileVersion,
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNullOrEmpty()]
+        [string]
+        $ApiFileVersion,
 
         #Library index, eg Get-LibraryIndex $LibraryIndexRoot -Log $False
+        [Parameter(Mandatory=$true)]
+        [ValidateScript({Test-ObjectType "LibraryIndex" $_})]
         $LibraryIndex
     )
-    $AssemblyName = Get-NugetPackageIdFromJson $RestJson
 
-    $LatestVersionInfo = $LibraryIndex.GetLibVersion($ApiName, $ApiFileVersion)
+    $LatestVersionInfo = Get-LibraryIndexLibVersion -LibraryIndex $LibraryIndex -LibName $ApiName -Version $ApiFileVersion
 
-    $Assembly = Import-GShellAssemblies $LibraryIndex $LatestVersionInfo
+    $Assembly = Import-GShellAssemblies -LibraryIndex $LibraryIndex -LibraryIndexVersionInfo $LatestVersionInfo
 
-    $Api = New-Api $Assembly $RestJson
+    $Api = New-Api -Assembly  $Assembly -RestJson $RestJson 
 
     #TODO - can this just be the root namespace? What about for APIs that are named differently
     $Api.ApiName = $ApiName
@@ -1463,7 +1476,7 @@ function Invoke-GShellReflection {
 }
 
 <#
-A simple wrapper for the boolean try parse method
+A simple wrapper for the boolean try parse method. Return null unless you get a success.
 #>
 function ConvertTo-Bool {
 [CmdletBinding()]

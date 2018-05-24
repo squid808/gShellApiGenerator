@@ -1655,3 +1655,90 @@ Describe Import-GShellAssemblies {
         }
     }
 }
+
+Describe Import-Assembly {
+    $AssemblyName = "System.Management.Automation"
+    $MockLocation = [System.Reflection.Assembly]::LoadWithPartialName($AssemblyName).Location
+
+    it "handles null or incorrect input" {
+        {Import-Assembly -Path $null} | Should Throw
+        {Import-Assembly -Path ""} | Should Throw
+        {Import-Assembly -Path $AssemblyName} | Should Throw
+        {Import-Assembly -Path [PsCustomObject]@{}} | Should Throw
+    }
+
+    it "finds and imports dll" {
+        $Result = Import-Assembly -Path $MockLocation
+        $Result.FullName | Should BeLike "$AssemblyName*"
+    }
+}
+
+Describe Invoke-GShellReflection {
+
+    BeforeAll {
+        $MockRestJson = '{}' | ConvertFrom-Json
+        $MockApiName = "SomeApiName"
+        $MockApiFileVersion = "1.2.30"
+        $MockLibraryIndex = [PSCustomObject]@{
+            Name = "SomeName"
+            PSTypeName = "LibraryIndex"
+        }
+        
+        $MockLibraryIndexVersionReturn = [PSCustomObject]@{
+            dllPath = $TestPath
+            Dependencies = @()
+        }
+        $MockAssemblyReturn = [PSCustomObject]@{
+            Name = "SomeAssembly"
+            PSTypeName = "System.Reflection.Assembly"
+        }
+        $MockApiReturn = New-Object Api
+        
+        mock Get-LibraryIndexLibVersion {return $MockLibraryIndexVersionReturn} -ParameterFilter {$LibraryIndex -eq $MockLibraryIndex -and $LibName -eq $MockApiName -and $Version -eq $MockApiFileVersion}
+
+        mock Import-GShellAssemblies {return $MockAssemblyReturn} -ParameterFilter {$LibraryIndex -eq $MockLibraryIndex -and $LibraryIndexVersionInfo -eq $MockLibraryIndexVersionReturn}
+        
+        mock New-Api {return $MockApiReturn} -ParameterFilter {$Assembly -eq $MockAssemblyReturn -and $RestJson -eq $MockRestJson}
+    }
+
+    it "handles null or incorrect input" {
+        {Invoke-GShellReflection -RestJson $null -ApiName $MockApiName -ApiFileVersion $MockApiFileVersion -LibraryIndex $MockLibraryIndex} | Should Throw
+
+        {Invoke-GShellReflection -RestJson $MockRestJson -ApiName $null -ApiFileVersion $MockApiFileVersion -LibraryIndex $MockLibraryIndex} | Should Throw
+        {Invoke-GShellReflection -RestJson $MockRestJson -ApiName "" -ApiFileVersion $MockApiFileVersion -LibraryIndex $MockLibraryIndex} | Should Throw
+        {Invoke-GShellReflection -RestJson $MockRestJson -ApiName [PSCustomObject]@{} -ApiFileVersion $MockApiFileVersion -LibraryIndex $MockLibraryIndex} | Should Throw
+
+        {Invoke-GShellReflection -RestJson $MockRestJson -ApiName $MockApiName -ApiFileVersion $null -LibraryIndex $MockLibraryIndex} | Should Throw
+        {Invoke-GShellReflection -RestJson $MockRestJson -ApiName $MockApiName -ApiFileVersion "" -LibraryIndex $MockLibraryIndex} | Should Throw
+        {Invoke-GShellReflection -RestJson $MockRestJson -ApiName $MockApiName -ApiFileVersion $[PSCustomObject]@{} -LibraryIndex $MockLibraryIndex} | Should Throw
+
+        {Invoke-GShellReflection -RestJson $MockRestJson -ApiName $MockApiName -ApiFileVersion $MockApiFileVersion -LibraryIndex $null} | Should Throw
+        {Invoke-GShellReflection -RestJson $MockRestJson -ApiName $MockApiName -ApiFileVersion $MockApiFileVersion -LibraryIndex ""} | Should Throw
+    }
+
+    it "returns expected result" {
+        $Result = Invoke-GShellReflection -RestJson $MockRestJson -ApiName $MockApiName -ApiFileVersion $MockApiFileVersion -LibraryIndex $MockLibraryIndex
+
+        $Result | Should BeExactly $MockApiReturn
+        $Result.ApiName | Should BeExactly $MockApiName
+
+        Assert-MockCalled Get-LibraryIndexLibVersion -Times 1
+        Assert-MockCalled Import-GShellAssemblies -Times 1
+        Assert-MockCalled New-Api -Times 1
+    }
+}
+
+Describe ConvertTo-Bool {
+    it "handles null or incorrect input" {
+        {ConvertTo-Bool -Boolstring [PSCustomObject]@{}} | Should Throw
+    }
+
+    it "returns null when null or non-boolable input" {
+        @($null, 1234, "f", "null") | ForEach-Object {ConvertTo-Bool -Boolstring $_ | Should BeNullOrEmpty}
+    }
+
+    it "returns bool from boolable input" {
+        @("true","True",$true) | ForEach-Object {ConvertTo-Bool -Boolstring $_ | Should Be $true}
+        @("false","False",$false) | ForEach-Object {ConvertTo-Bool -Boolstring $_ | Should Be $false}
+    }
+}

@@ -232,7 +232,7 @@ function New-Api {
     $StdQueryParams = Get-ApiStandardQueryParams -Assembly $Assembly -RestJson $RestJson -Api $Api
     $Api.StandardQueryparams.AddRange($StdQueryParams)
 
-    $Resources = Get-Resources $Assembly
+    $Resources = Get-Resources -Assembly $Assembly -Api $Api
     $Api.Resources.AddRange($Resources)
     $Resources | % {$Api.ResourcesDict[$_.name] = $_}
 
@@ -291,7 +291,7 @@ impersonate. These may or may not exist and differ between Apis.
         $P.ReflectedObj = $Param
         $P.Name = $Param.Name
         $P.NameLower = ConvertTo-FirstLower $Param.Name
-        $P.Type = Get-ApiPropertyType -Property $P
+        $P.Type = Get-ApiPropertyType -Property $P -ApiRootNameSpace $Api.RootNamespace
         $DiscoveryName = $Param.CustomAttributes | where AttributeType -like "*RequestParameterAttribute" | `
             select -ExpandProperty ConstructorArguments | select -First 1 -ExpandProperty Value
         $P.Description = $RestJson.parameters.($DiscoveryName).Description
@@ -774,7 +774,8 @@ function New-ApiMethod {
 
     $M.Name = ConvertTo-FirstUpper $Method.Name
     $M.Description = Clean-CommentString $M.DiscoveryObj.description
-    $M.ReturnType =  New-ApiMethodProperty $M (Get-ApiMethodReturnType $Method -UseReturnTypeGenericInt $UseReturnTypeGenericInt)
+    $MethodProperty = Get-ApiMethodReturnType $Method -UseReturnTypeGenericInt $UseReturnTypeGenericInt
+    $M.ReturnType =  New-ApiMethodProperty -Method $M -Property $MethodProperty
 
     $M.ReturnType.Type = Get-ApiMethodReturnTypeType -MethodReturnTypeName $M.ReturnType.Name
     
@@ -799,7 +800,7 @@ function New-ApiMethod {
     {
     
         if (-not $ParameterNames.Contains($P.Name.ToLower())) {
-            $Param = New-ApiMethodProperty $M $P
+            $Param = New-ApiMethodProperty -Method $M -Property $P
         
             $M.Parameters.Add($Param) | Out-Null
             $M.RequestParameters.Add($Param) | Out-Null

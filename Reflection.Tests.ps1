@@ -266,10 +266,13 @@ function Get-TestMethods {
                     )
                 }
                 BaseType = "Google.Apis.Something.ClientServiceRequest`1[Google.Apis.Something.v1.Data.SomeOtherThingA]"
-                DeclaredProperties = [PSCustomObject]@{
-                    SetMethod = "NotNull"
-                    Name = "NotAPageTokenOrStandardQueryParam"
-                }
+                DeclaredProperties = @(
+                    [PSCustomObject]@{
+                        PsTypeName = "System.Type"
+                        SetMethod = "NotNull"
+                        Name = "NotAPageTokenOrStandardQueryParam"
+                    }
+                )
             }
         },
 
@@ -470,7 +473,9 @@ Describe Get-ApiStandardQueryParams {
     BeforeAll {
         $MockAssembly = Get-TestAssemblyObject
         $MockRestJson = Get-TestRestJson
-        $MockApi = New-Object Api
+        $MockApi = New-Object Api -Property @{
+            RootNamespace = "SomeNamespace"
+        }
     }
 
     mock Get-ApiPropertyType { return "MockType" }
@@ -808,21 +813,21 @@ Describe Get-ApiMethodNoun {
     $MockApiName = "Fizz"
     $MockApiVersion = "v1"
 
-    #TODO - figure out how to mock this when it's not in a module
     mock Get-ParentResourceChain { return $null }
 
     it "handles null or incorrect input" {
         {Get-ApiMethodNoun -ApiMethod $null -ApiName $MockApiName -ApiVersion $MockApiVersion} | Should Throw
         {Get-ApiMethodNoun -ApiMethod "Foo" -ApiName $MockApiName -ApiVersion $MockApiVersion} | Should Throw
         {Get-ApiMethodNoun -ApiMethod $MockApiMethod -ApiName $null -ApiVersion $MockApiVersion} | Should Throw
-        {Get-ApiMethodNoun -ApiMethod $MockApiMethod -ApiName 1 -ApiVersion $MockApiVersion} | Should Throw
+        {Get-ApiMethodNoun -ApiMethod $MockApiMethod -ApiName [PsCustomObject]@{} -ApiVersion $MockApiVersion} | Should Throw
         {Get-ApiMethodNoun -ApiMethod $MockApiMethod -ApiName $MockApiName -ApiVersion $null} | Should Throw
-        {Get-ApiMethodNoun -ApiMethod $MockApiMethod -ApiName $MockApiName -ApiVersion 1} | Should Throw
+        {Get-ApiMethodNoun -ApiMethod $MockApiMethod -ApiName $MockApiName -ApiVersion [PsCustomObject]@{}} | Should Throw
     }
 
     it "gets appropriate result" {
-        $Result = Get-ApiMethodNoun -ApiMethod $MockApiMethod -ApiName $MockApiName -ApiVersion 1
+        $Result = Get-ApiMethodNoun -ApiMethod $MockApiMethod -ApiName $MockApiName -ApiVersion $MockApiVersion    
 
+        Assert-MockCalled Get-ParentResourceChain -Times 1
         $Result | Should BeExactly "GFizzV1"
 
     }
@@ -832,26 +837,41 @@ Describe New-ApiMethod {
 
     #region Setup
     $MockMethods = Get-TestMethods
-    $MockApi = New-Object Api
+    $MockApi = New-Object Api -Property @{
+        RootNamespace = "SomeNamespace"
+    }
     $MockRestJson = Get-TestRestJson
     $MockApiResource = New-Object ApiResource
     $MockApiResource.Api = $MockApi
     $MockApiResource.DiscoveryObj = $MockRestJson
 
-    $MockMethodInfoParam = [PSCustomObject]@{Name = "FooMethodInfoParam"}
+    $MockMethodInfoParam = [PSCustomObject]@{
+        Name = "FooMethodInfoParam"
+        PsTypeName = "System.Type"
+    }
+
+    $MockApiMethodReturn = [PSCustomObject]@{
+        Name = "FooReturnType"
+        PsTypeName = "System.Type"
+    }
 
     #Passed to New-ApiMethodProperty to determine the return type
-    mock Get-ApiMethodReturnType {return "FooReturnType"}
+    mock Get-ApiMethodReturnType {return $MockApiMethodReturn}
     $ApiMethodPropertyMockReturnReturn = [PSCustomObject]@{Name="ReturnTypeProperty";Type=$null}
-    mock New-ApiMethodProperty {return $ApiMethodPropertyMockReturnReturn} -ParameterFilter {$Property -eq "FooReturnType"}
+
+    mock New-ApiMethodProperty {return $ApiMethodPropertyMockReturnReturn} -ParameterFilter {$Property -eq $MockApiMethodReturn}
 
     #Works out the type of the return type - if it needs to be string or void
     mock Get-ApiMethodReturnTypeType {return "ReturnTypePropertyType"} -ParameterFilter {$MethodReturnTypeName -eq "ReturnTypeProperty"}
     
     #Used in getting properties of the virtual method
     $ApiMethodPropertyMockInfoReturn = [PSCustomObject]@{Name="FooMethodProperty1";Type=$null}
+
     mock Get-MethodInfoParameters { return $MockMethodInfoParam } -ParameterFilter {$Method -eq $MockMethods[0]}
+
     mock New-ApiMethodProperty {return $ApiMethodPropertyMockInfoReturn} -ParameterFilter {$Property -eq $MockMethodInfoParam}
+
+    mock New-ApiMethodProperty {return $ApiMethodPropertyMockInfoReturn} -ParameterFilter {$Property -eq $MockMethods[0].ReturnType.DeclaredProperties[0]}
     #endregion
 
     it "handles null or incorrect input" {
@@ -881,8 +901,8 @@ Describe New-ApiMethod {
         $ApiMethodPropertyMockInfoReturn | Should BeIn $Result.VirtualParameters
 
         #Params from the request class
-        $Result.Parameters | Where-Object {$_.Name -eq "NotAPageTokenOrStandardQueryParam"} | Should Be $true
-        $Result.VirtualParameters | Where-Object {$_.Name -eq "NotAPageTokenOrStandardQueryParam"} | Should Be $true
+        $ApiMethodPropertyMockInfoReturn.Name | Should BeIn $Result.Parameters.Name
+        $ApiMethodPropertyMockInfoReturn.Name | Should BeIn $Result.VirtualParameters.Name
     }
 }
 
@@ -985,8 +1005,7 @@ Describe Get-ApiPropertyTypeShortName {
     }
 
     it "handles incorrect root namespaces" {
-        Get-ApiPropertyTypeShortName -Name "Google.Apis.Something.v1.SomeType" -ApiRootNameSpace 
-            "Google.Apis.Something.v2" | Should BeExactly "Google.Apis.Something.v1.SomeType"
+        Get-ApiPropertyTypeShortName -Name "Google.Apis.Something.v1.SomeType" -ApiRootNameSpace "Google.Apis.Something.v2" | Should BeExactly "Google.Apis.Something.v1.SomeType"
     }
 }
 
@@ -1316,6 +1335,7 @@ Describe New-ApiMethodProperty {
             PSTypeName = 'System.Type'
             Name = $MockMethodDiscoveryObj.Name
             ParameterType = [PsCustomObject]@{
+                PSTypeName = "System.Type"
                 ImplementedInterfaces = [PsCustomObject]@{
                     Name = @("Foo","Bar")
                 }

@@ -105,8 +105,8 @@ function Invoke-GshellGeneratorMain {
                         $WikiFiles = Write-wiki -Api $Api -ModulePath ([System.IO.Path]::Combine($BuildResult.CompiledDirPath, ($BuildResult.LibName + ".psd1"))) -ModuleVersion $BuildResult.LibVersion -HelpOutDirPath $WikiRepoPath
 
                         #Use WikiFiles.Count to get the Cmdlets count!
-                        $LibraryIndex.SetLibraryVersionCmdletCount($BuildResult.LibName, $BuildResult.LibVersion, $WikiFiles.Count)
-                        $LibraryIndex.Save()
+                        (Set-LibraryVersionCmdletCount $LibraryIndex $BuildResult.LibName, $BuildResult.LibVersion, $WikiFiles.Count)
+                        Save-LibraryIndex $LibraryIndex
 
                         #TODO: Make this stateless - store in local db?
                         #$BuildUpdates[$GShellApiName] = @{$GShellApiVersion=[System.IO.Path]::GetDirectoryName($CompiledPath)}

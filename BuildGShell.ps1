@@ -9,17 +9,17 @@
 function New-GShellPackagesXml ($LibraryIndex, $OutPath) {
     $Packages = New-Object system.collections.arraylist
 
-    $latestGoogleAuthVersion = $LibraryIndex.GetLibVersionLatestName("Google.Apis.Auth")
+    $latestGoogleAuthVersion = (Get-LibraryIndexLibVersionLatestName $LibraryIndex "Google.Apis.Auth")
     $packageFormatString = '  <package id="{0}" version="{1}" targetFramework="net451" />'
 
-    foreach ($D in $LibraryIndex.GetLibVersionDependencyChain("Google.Apis.Auth",$latestGoogleAuthVersion).GetEnumerator()) {
+    foreach ($D in (Get-LibraryIndexLibVersionDependencyChain $LibraryIndex "Google.Apis.Auth",$latestGoogleAuthVersion).GetEnumerator()) {
         if ($D.Name -ne "System.Net.Http") {
             Add-String $Packages ($packageFormatString -f $D.Name, $D.Value)
         }
     }
 
-    Add-String $Packages ($packageFormatString -f "Google.Apis.Discovery.v1", $LibraryIndex.GetLibVersionLatestName("Google.Apis.Discovery.v1"))
-    Add-String $Packages ($packageFormatString -f "Google.Apis.Oauth2.v2", $LibraryIndex.GetLibVersionLatestName("Google.Apis.Oauth2.v2"))
+    Add-String $Packages ($packageFormatString -f "Google.Apis.Discovery.v1", (Get-LibraryIndexLibVersionLatestName $LibraryIndex "Google.Apis.Discovery.v1"))
+    Add-String $Packages ($packageFormatString -f "Google.Apis.Oauth2.v2", (Get-LibraryIndexLibVersionLatestName $LibraryIndex "Google.Apis.Oauth2.v2"))
     Add-String $Packages ($packageFormatString -f "System.Management.Automation.dll", "10.0.10586.0")
 
     $PackagesXml = $Packages -join "`r`n"
@@ -38,13 +38,13 @@ function Get-GShellProjReferences ($RootProjPath, $LibraryIndex) {
     
     $Dependencies = New-Object system.collections.arraylist
 
-    $latestGoogleAuthVersion = $LibraryIndex.GetLibVersionLatestName("Google.Apis.Auth")
+    $latestGoogleAuthVersion = (Get-LibraryIndexLibVersionLatestName $LibraryIndex "Google.Apis.Auth")
 
     $DebugPath = ([System.IO.Path]::Combine($RootProjPath,"bin\Debug"))
 
-    foreach ($D in $LibraryIndex.GetLibVersionDependencyChain("Google.Apis.Auth",$latestGoogleAuthVersion).GetEnumerator()) {
+    foreach ($D in (Get-LibraryIndexLibVersionDependencyChain $LibraryIndex "Google.Apis.Auth",$latestGoogleAuthVersion).GetEnumerator()) {
         if ($D.Name -ne "System.Net.Http") {
-            $Version = [System.Reflection.Assembly]::LoadFrom($LibraryIndex.GetLibVersion($D.Name, $D.Value).dllPath).GetName().Version.ToString()
+            $Version = [System.Reflection.Assembly]::LoadFrom((Get-LibraryIndexLibVersion $LibraryIndex $D.Name, $D.Value).dllPath).GetName().Version.ToString()
             
             $HintPath1 = Write-CSPReferenceHintPath -Name $D.Name -Version $D.Value -IsConditional $true
             $HintPath2 = Write-CSPReferenceHintPath -HintPath ("..\..\Libraries\{0}\{1}\{0}.dll" -f $D.Name, $D.Value) -IsConditional $true
@@ -55,10 +55,10 @@ function Get-GShellProjReferences ($RootProjPath, $LibraryIndex) {
     }
 
     foreach ($Library in @("Google.Apis.Discovery.v1", "Google.Apis.Oauth2.v2")) {
-        $Version = $LibraryIndex.GetLibVersionLatestName($Library)
+        $Version = (Get-LibraryIndexLibVersionLatestName $LibraryIndex $Library)
         $HintPath1 = Write-CSPReferenceHintPath -Name $Library -Version $Version -IsConditional $true
         $HintPath2 = Write-CSPReferenceHintPath -HintPath ("..\..\Libraries\{0}\{1}\{0}.dll" -f $Library, $Version) -IsConditional $true
-        $AssemblyVersion = [System.Reflection.Assembly]::LoadFrom($LibraryIndex.GetLibVersion($Library, $Version).dllPath).GetName().Version.ToString()
+        $AssemblyVersion = [System.Reflection.Assembly]::LoadFrom((Get-LibraryIndexLibVersion $LibraryIndex $Library $Version).dllPath).GetName().Version.ToString()
         Add-String $Dependencies (Write-CSPReference $Library $AssemblyVersion -HintPath1 $HintPath1 -HintPath2 $HintPath2)
     }
 
@@ -173,8 +173,8 @@ function CheckAndBuildGshell ($RootProjPath, $LibraryIndex, [bool]$Log = $false,
     $GAuth = "Google.Apis.Auth"
     $GOAuth = "Google.Apis.Oauth2.v2"
 
-    $LatestGoogleOAuthVersion = $LibraryIndex.GetLibVersionLatestName($GOAuth)
-    $OauthDependencyChain = $LibraryIndex.GetLibVersionDependencyChain($GOAuth,$LatestGoogleOAuthVersion)
+    $LatestGoogleOAuthVersion = (Get-LibraryIndexLibVersionLatestName $LibraryIndex $GOAuth)
+    $OauthDependencyChain = (Get-LibraryIndexLibVersionDependencyChain $LibraryIndex $GOAuth $LatestGoogleOAuthVersion)
     $LatestGoogleAuthVersion = $OauthDependencyChain[$GAuth]
 
     foreach ($D in $OauthDependencyChain.GetEnumerator()) {
@@ -192,10 +192,10 @@ function CheckAndBuildGshell ($RootProjPath, $LibraryIndex, [bool]$Log = $false,
     $AuthVersionObj = [System.Version]$AuthVersion
 
     $gShellMain = "gShell.Main"
-    $gShellVersion = $LibraryIndex.GetLibVersionLatestName($gShellMain)
+    $gShellVersion = (Get-LibraryIndexLibVersionLatestName $LibraryIndex $gShellMain)
     $gShellVersionObj = [System.Version]$gShellVersion
 
-    if (-not $LibraryIndex.HasLib($gShellMain) -or ($gShellVersionObj -lt $AuthVersionObj) -or $Force) {
+    if (-not (Test-LibraryIndexLib $LibraryIndex $gShellMain) -or ($gShellVersionObj -lt $AuthVersionObj) -or $Force) {
 
         Log ("$gShellMain $gShellVersion either doesn't exist or needs to be updated to $AuthVersion.") $Log
         $gShellNewVersion = $AuthVersion + ".0"
@@ -215,7 +215,7 @@ function CheckAndBuildGshell ($RootProjPath, $LibraryIndex, [bool]$Log = $false,
             Copy-Item -Path $CompiledPath -Destination $NewGShellPath | Out-Null
 
             #update the library
-            $LibraryIndex.SetLibLastVersionBuilt($GAuth, $AuthVersion)
+            (Set-LibraryIndexLibLastVersionBuilt $LibraryIndex $GAuth $AuthVersion)
             SaveCompiledToLibraryIndex -ApiName "gShell.Main" -Version $gShellNewVersion -DllLocation $NewGShellPath `
                 -LibraryIndex $LibraryIndex -Dependencies $Dependencies -Log $Log
             
@@ -223,7 +223,7 @@ function CheckAndBuildGshell ($RootProjPath, $LibraryIndex, [bool]$Log = $false,
             #throw some error right?
         }
 
-        $gShellVersion = $LibraryIndex.GetLibVersionLatestName($gShellMain)
+        $gShellVersion = (Get-LibraryIndexLibVersionLatestName $LibraryIndex $gShellMain)
     } else {
         Log ("$gShellMain $gShellVersion appears to be up to date") $Log
     }

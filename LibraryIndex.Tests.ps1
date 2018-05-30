@@ -1,6 +1,6 @@
-﻿. ($MyInvocation.InvocationName -replace "Tests.ps1","ps1")
+﻿. ($MyInvocation.MyCommand.Path -replace "Tests.","")
 
-Describe "Format-Json" {
+Describe Format-Json {
 
     It 'errors on null input' {
         {$null | Format-Json -ErrorAction Stop} | Should Throw "Cannot bind argument to parameter 'json' because it is an empty string."
@@ -41,7 +41,36 @@ Describe "Format-Json" {
     }
 }
 
-Describe "Save-LibraryIndex" {
+Describe Load-LibraryIndexFile {
+    #mock Get-Content {return "{}"}
+
+    $TestDir = "TestDrive:\"
+    $TestPath = $TestDir + "LibPaths.json"
+
+    it "handles null or incorrect input" {
+        {Load-LibraryIndexFile $null | Should Throw}
+        {Load-LibraryIndexFile "" | Should Throw}
+        {Load-LibraryIndexFile ($TestDir + "SomeInvalidPath\") | Should Throw}
+    }
+
+    it "handles no file" {
+        $Result = Load-LibraryIndexFile -Path $TestDir
+        Test-Path $TestPath | Should Be $true
+        "RootPath" | Should BeIn $Result.PsObject.Properties.Name
+        "LibraryIndex" | Should BeIn $Result.PsObject.TypeNames
+        $Result.RootPath | Should BeExactly $TestPath
+    }
+
+    it "handles preexisting file" {
+        Test-Path $TestPath | Should Be $true
+        $Result = Load-LibraryIndexFile -Path $TestDir
+        "RootPath" | Should BeIn $Result.PsObject.Properties.Name
+        "LibraryIndex" | Should BeIn $Result.PsObject.TypeNames
+        $Result.RootPath | Should BeExactly $TestPath
+    }
+}
+
+Describe Save-LibraryIndex {
 
     $TestPath = "TestDrive:\library.json"
     $MockIndex = New-Object -Type PSObject
@@ -78,3 +107,4 @@ Describe "Save-LibraryIndex" {
         }
     }
 }
+

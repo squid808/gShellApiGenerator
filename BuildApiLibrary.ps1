@@ -49,13 +49,13 @@ function Get-CsProjReferences ($LibraryIndex, $DependenciesChain) {
     
     $Dependencies = New-Object system.collections.arraylist
 
-    $latestGoogleAuthVersion = $LibraryIndex.GetLibVersionLatestName("Google.Apis.Auth")
+    $latestGoogleAuthVersion = (Get-LibraryIndexLibVersionLatestName $LibraryIndex "Google.Apis.Auth")
 
     $Exclusions = @("System.Net.Http", "System.Management.Automation.dll")
 
     foreach ($D in $DependenciesChain.GetEnumerator()) {
         if ($Exclusions -notcontains $D.Name) {
-            $Version = [System.Reflection.Assembly]::LoadFrom($LibraryIndex.GetLibVersion($D.Name, $D.Value).dllPath).GetName().Version.ToString()
+            $Version = [System.Reflection.Assembly]::LoadFrom((Get-LibraryIndexLibVersion $LibraryIndex $D.Name, $D.Value).dllPath).GetName().Version.ToString()
             
             $HintPath1 = Write-CSPReferenceHintPath -Name $D.Name -Version $D.Value -IsConditional $true
             $HintPath2 = Write-CSPReferenceHintPath -HintPath ("..\..\Libraries\{0}\{1}\{0}.dll" -f $D.Name, $D.Value) -IsConditional $true
@@ -191,7 +191,7 @@ function Build-ApiLibrary ($LibraryIndex, [ref]$BuildResultObj, [bool]$Log=$fals
 
     $LatestAuthVersion = $BuildResult.DependencyChain.'Google.Apis.Auth'
 
-    $gShellVersionToUse = $LibraryIndex.GetLibVersionAll("gShell.Main") | % {`
+    $gShellVersionToUse = (Get-LibraryIndexLibVersionAll $LibraryIndex "gShell.Main") | % {`
         if (($_.Value.Dependencies | where {$_.Name -eq "Google.Apis.Auth" -and $_.Versions -like "*1.*"}) -ne $null) { `
             $_.Name `
         }} `
@@ -201,7 +201,7 @@ function Build-ApiLibrary ($LibraryIndex, [ref]$BuildResultObj, [bool]$Log=$fals
         throw ("gShell version $LatestAuthVersion not found for {0}" -f $BuildResult.Api.RootNameSpace)
     }
 
-    $gShellDependencyChain = $LibraryIndex.GetLibVersionDependencyChain("gShell.Main", $gShellVersionToUse)
+    $gShellDependencyChain = (Get-LibraryIndexLibVersionDependencyChain $LibraryIndex "gShell.Main", $gShellVersionToUse)
 
     #sync the dependencies for this gshell version with this api
     foreach ($pair in $gShellDependencyChain.GetEnumerator()) {
@@ -209,7 +209,7 @@ function Build-ApiLibrary ($LibraryIndex, [ref]$BuildResultObj, [bool]$Log=$fals
     }
 
     #Now we need to generate the files and get the csproj location
-    #$dllPath = $LibraryIndex.GetLibVersion($BuildResult.Api.RootNameSpace, $BuildResult.Api.AssemblyVersion).dllPath
+    #$dllPath = (Get-LibraryIndexLibVersion $LibraryIndex $BuildResult.Api.RootNameSpace, $BuildResult.Api.AssemblyVersion).dllPath
 
     #TODO - move this in to the templating and generation method
     #Now create the meta files
@@ -245,34 +245,34 @@ function Build-ApiLibrary ($LibraryIndex, [ref]$BuildResultObj, [bool]$Log=$fals
 function SaveCompiledToLibraryIndex ($ApiName, $Version, $DllLocation, $SourceVersion, $BuildSucceeded, $LibraryIndex, $Dependencies, [bool]$Log = $false) {
     
     #add library
-    if (-not $LibraryIndex.HasLib($ApiName)) {
+    if (-not (Test-LibraryIndexLib $LibraryIndex $ApiName)) {
         Log ("$ApiName doesn't exist in the Library Index - adding entry") $Log
-        $LibraryIndex.AddLib($ApiName)
+        (Add-LibraryIndexLib $LibraryIndex $ApiName)
     }
 
     #add version to library
-    if (-not $LibraryIndex.HasLibVersion($ApiName, $Version)) {
+    if (-not (Test-LibraryIndexLibVersion $LibraryIndex $ApiName $Version)) {
         Log ("$ApiName doesn't have an entry for version $Version - adding with dependencies") $Log
-        $LibraryIndex.AddLibVersion($ApiName, $Version)
+        (Add-LibraryIndexLibVersion $LibraryIndex $ApiName $Version)
 
     }
 
     foreach ($Dependency in $Dependencies.GetEnumerator()) {
-        if (-not $LibraryIndex.HasLibVersionDependency($ApiName, $Version, $Dependency.Name, $Dependency.Value)) {
-            $LibraryIndex.AddLibVersionDependency($ApiName, $Version, $Dependency.Name, $Dependency.Value)
+        if (-not (Test-LibraryIndexLibVersionDependency $LibraryIndex $ApiName $Version, $Dependency.Name, $Dependency.Value)) {
+            (Add-LibraryIndexLibVersionDependency $LibraryIndex $ApiName $Version, $Dependency.Name, $Dependency.Value)
         }
     }
 
-    $LibraryIndex.SetLibSource($ApiName, "Local")
+    (Set-LibraryIndexLibSource $LibraryIndex $ApiName "Local")
 
-    $LibraryIndex.GetLibVersion($ApiName, $Version)."dllPath" = $DllLocation
-    $LibraryIndex.SetLibLastVersionBuilt($ApiName, $Version)
+    (Get-LibraryIndexLibVersion $LibraryIndex $ApiName $Version)."dllPath" = $DllLocation
+    (Set-LibraryIndexLibLastVersionBuilt $LibraryIndex $ApiName $Version)
     if ($BuildSucceeded -eq $true) {
-        $LibraryIndex.SetLibLastSuccessfulVersionBuilt($ApiName, $Version)
+        (Set-LibraryIndexLibLastSuccessfulVersionBuilt $LibraryIndex $ApiName $Version)
     }
-    $LibraryIndex.SetLibraryVersionSourceVersion($ApiName, $Version, $SourceVersion)
-    $LibraryIndex.SetLibraryVersionSuccessfulGeneration($ApiName, $Version, $BuildSucceeded)
-    $LibraryIndex.Save()
+    (Set-LibraryVersionSourceVersion $LibraryIndex $ApiName $Version, $SourceVersion)
+    (Set-LibraryVersionSuccessfulGeneration $LibraryIndex $ApiName $Version, $BuildSucceeded)
+    Save-LibraryIndex $LibraryIndex
 }
 
 function DetermineNextBuildVersion ($GoogleSourceVersion, $LastGshellVersionBuilt, [switch]$AsAlpha) {
@@ -382,20 +382,20 @@ class BuildResult {
 function CheckAndBuildGShellApi ($Api, $RootProjPath, $LibraryIndex, [bool]$Log = $false, [bool]$Force = $false) {
     
     #This is the latest dll version of the google api library that is available
-    #$LatestDllVersion = $LibraryIndex.GetLibVersionLatestName($ApiName)
+    #$LatestDllVersion = (Get-LibraryIndexLibVersionLatestName $LibraryIndex $ApiName)
     
     #This is the last version of the google api library that was used to build something
-    $LastVersionBuilt = $LibraryIndex.GetLibLastVersionBuilt($Api.ApiName)
+    $LastVersionBuilt = (Get-LibraryIndexLibLastVersionBuilt $LibraryIndex $Api.ApiName)
 
     $BuildResult = New-Object BuildResult
 
-    #$RestNameAndVersion = $LibraryIndex.GetLibRestNameAndVersion($ApiName)
+    #$RestNameAndVersion = (Get-LibraryIndexLibRestNameAndVersion $LibraryIndex $ApiName)
     $BuildResult.LibName = "gShell." + (ConvertTo-FirstUpper $Api.NameAndVersion)
     $BuildResult.LibVersion = DetermineNextBuildVersion -GoogleSourceVersion $Api.AssemblyVersion `
-        -LastGshellVersionBuilt $LibraryIndex.GetLibLastVersionBuilt($BuildResult.LibName) -AsAlpha
+        -LastGshellVersionBuilt (Get-LibraryIndexLibLastVersionBuilt $LibraryIndex $BuildResult.LibName) -AsAlpha
     $BuildResult.GeneratedProjectPath = [System.IO.Path]::Combine($RootProjPath, $BuildResult.LibName)
 
-    if (-not $LibraryIndex.HasLib($Api.ApiName) -or $LastVersionBuilt -eq $null `
+    if (-not (Test-LibraryIndexLib $LibraryIndex $Api.ApiName) -or $LastVersionBuilt -eq $null `
         -or $LastVersionBuilt -ne $Api.AssemblyVersion -or $Force) {
 
         Log ("{0} {1} either doesn't exist or needs to be updated to {2}." -f $BuildResult.LibName, `
@@ -410,7 +410,7 @@ function CheckAndBuildGShellApi ($Api, $RootProjPath, $LibraryIndex, [bool]$Log 
         $BuildResult.Api = Create-TemplatesFromDll -LibraryIndex $LibraryIndex -Api $Api `
             -OutPath $BuildResult.GeneratedProjectPath -RestJson $RestJson -Log $Log
 
-        $BuildResult.DependencyChain = $LibraryIndex.GetLibVersionDependencyChain($Api.ApiName, $Api.AssemblyVersion)
+        $BuildResult.DependencyChain = (Get-LibraryIndexLibVersionDependencyChain $LibraryIndex $Api.ApiName, $Api.AssemblyVersion)
 
         #TODO - Almost all of this info should be on the $Api object - api name, dll version. Fix it.
         #First, try to build
@@ -445,7 +445,7 @@ function CheckAndBuildGShellApi ($Api, $RootProjPath, $LibraryIndex, [bool]$Log 
 
             #TODO - move this out of this function? ALSO, make sure the proper version built is set on the google library!
             #update the library
-            $LibraryIndex.SetLibLastVersionBuilt($Api.ApiName, $Api.AssemblyVersion)
+            (Set-LibraryIndexLibLastVersionBuilt $LibraryIndex $Api.ApiName, $Api.AssemblyVersion)
             SaveCompiledToLibraryIndex -ApiName $BuildResult.LibName -Version $BuildResult.LibVersion -DllLocation $NewDllFilePath `
                 -SourceVersion $Api.AssemblyVersion -BuildSucceeded $true -LibraryIndex $LibraryIndex -Dependencies $BuildResult.DependencyChain -Log $Log
             

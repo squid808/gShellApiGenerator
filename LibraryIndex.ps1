@@ -35,7 +35,18 @@ function Format-Json {
     $Lines -Join ""
 }
 
-function Load-LibraryIndexFile ($Path) {
+<#
+Loads or creates the library index file at the given path with a default file name
+#>
+function Load-LibraryIndexFile {
+[CmdletBinding()]
+    param (
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNullOrEmpty()]
+        [ValidateScript({ Test-Path $_ })]
+        [string]
+        $Path
+    )
     $DllPathsJsonPath = [System.IO.Path]::Combine($Path, "LibPaths.json")
     
     if (-not (Test-Path ($DllPathsJsonPath))){
@@ -43,6 +54,8 @@ function Load-LibraryIndexFile ($Path) {
     }
 
     $LibraryIndex = Get-Content $DllPathsJsonPath -Raw | ConvertFrom-Json
+
+    $LibraryIndex.PSObject.TypeNames.Add("LibraryIndex")
 
     $LibraryIndex | Add-Member -MemberType NoteProperty -Name "RootPath" -Value $DllPathsJsonPath -Force
 
@@ -60,209 +73,20 @@ function Get-LibraryIndex ($Path, [bool]$Log=$false) {
         $LibraryIndex | Add-Member -MemberType NoteProperty -Name "Libraries" -Value (New-Object psobject)
     }
 
-    #Save()
-    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "Save" -Value {
-        Save-LibraryIndex $this
-    }
-
-    #HasLib(LibName)
-    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "HasLib" -Value {
-        param([string]$LibName)
-        return (Test-LibraryIndexLib $this $LibName)
-    }
-
-    #GetLib(LibName)
-    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "GetLib" -Value {
-        param( [string]$LibName)
-        return Get-LibraryIndexLib $this $LibName
-    }
-
-    #GetLibAll()
-    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "GetLibAll" -Value {
-        return Get-LibraryIndexLibAll $this
-    }
-
-    #AddLib(LibName)
-    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "AddLib" -Value {
-        param( [string]$LibName )
-        return Add-LibraryIndexLib $this $LibName
-    }
-
-    #GetLibNameRedirect
-    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "GetLibNameRedirect" -Value {
-        param([string]$LibName)
-        return Get-LibraryIndexLibNameRedirect $this $LibName
-    }
-
-    #SetLibNameRedirect
-    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "SetLibNameRedirect" -Value {
-        param([string]$LibName, [string]$RedirectName)
-        return Set-LibraryIndexLibNameRedirect $this $LibName $RedirectName
-    }
-
-    #GetLibSource(LibName, Source)
-    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "GetLibSource" -Value {
-        param([string]$LibName)
-        return Get-LibraryIndexLibSource $this $LibName
-    }
-    
-    #SetLibSource(LibName, Source)
-    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "SetLibSource" -Value {
-        param([string]$LibName, [ValidateSet("Local","Nuget")][string]$Source)
-        return Set-LibraryIndexLibSource $this $LibName $Source
-    }
-
-    #GetLibLastVersionBuilt(LibName)
-    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "GetLibLastVersionBuilt" -Value {
-        param([string]$LibName)
-        return Get-LibraryIndexLibLastVersionBuilt $this $LibName
-    }
-
-    #SetLibLastVersionBuilt(LibName, Version)
-    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "SetLibLastVersionBuilt" -Value {
-        param([string]$LibName, [string]$Version = $null)
-        return Set-LibraryIndexLibLastVersionBuilt $this $LibName $Version
-    }
-
-    #GetLibLastSuccessfulVersionBuilt(LibName)
-    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "GetLibLastSuccessfulVersionBuilt" -Value {
-        param([string]$LibName)
-        return Get-LibraryIndexLibLastSuccessfulVersionBuilt $this $LibName
-    }
-
-    #SetLibLastSuccessfulVersionBuilt(LibName, Version)
-    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "SetLibLastSuccessfulVersionBuilt" -Value {
-        param([string]$LibName, [string]$Version)
-        return Set-LibraryIndexLibLastSuccessfulVersionBuilt $this $LibName $Version
-    }
-
-    #GetLibRestNameAndVersion(LibName)
-    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "GetLibRestNameAndVersion" -Value {
-        param([string]$LibName)
-        return Get-LibraryIndexLibRestNameAndVersion $this $LibName
-    }
-
-    #SetLibRestNameAndVersion(LibName, RestNameAndVersion)
-    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "SetLibRestNameAndVersion" -Value {
-        param([string]$LibName, [string]$RestNameAndVersion)
-        return Set-LibraryIndexLibRestNameAndVersion $this $LibName $RestNameAndVersion
-    }
-
-    #HasLibVersion(LibName, Version)
-    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "HasLibVersion" -Value {
-        param( [string]$LibName, [string]$Version)
-        return Test-LibraryIndexLibVersion $this $LibName $Version
-    }
-
-    #GetLibVersion(LibName, Version)
-    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "GetLibVersion" -Value {
-        param( [string]$LibName, [string]$Version)
-        return Get-LibraryIndexLibVersion $this $LibName $Version
-    }
-
-    #GetLibVersionAll(LibName)
-    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "GetLibVersionAll" -Value {
-        param( [string]$LibName)
-        return Get-LibraryIndexLibVersionAll $this $LibName
-    }
-
-    #GetLibVersionLatest(LibName)
-    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "GetLibVersionLatest" -Value {
-        param( [string]$LibName)
-        return Get-LibraryIndexLibVersionLatest $this $LibName
-    }
-
-    #GetLibVersionLatestName(LibName)
-    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "GetLibVersionLatestName" -Value {
-        param( [string]$LibName)
-        return Get-LibraryIndexLibVersionLatestName $this $LibName
-    }
-
     #AddLibVersion(LibName, Version)
     $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "AddLibVersion" -Value {
         param( [string]$LibName, [string]$Version)
         return Add-LibraryIndexLibVersion $this $LibName $Version
     }
 
-    #HasLibVersionDependency(LibName, Version, DependencyName, DependencyVersion)
-    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "HasLibVersionDependency" -Value {
-        param([string]$LibName, [string]$Version,
-            [string]$DependencyName, [string]$DependencyVersions)
-        return Test-LibraryIndexLibVersionDependency $this $LibName $Version $DependencyName $DependencyVersions
-    }
-
-    #GetLibVersionDependencies(LibName, Version)
-    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "GetLibVersionDependencies" -Value {
-        param([string]$LibName, [string]$Version)
-        return Get-LibraryIndexLibVersionDependencies $this $LibName $Version
-    }
-
-    #AddLibVersionDependency(LibName, Version, DependencyName, DependencyVersion)
-    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "AddLibVersionDependency" -Value {
-        param([string]$LibName, [string]$Version,
-            [string]$DependencyName, [string]$DependencyVersions)
-        return Add-LibraryIndexLibVersionDependency $this $LibName $Version $DependencyName $DependencyVersions
-    }
-
-    #GetLibVersionDependencyChain(LibName, Version)
-    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "GetLibVersionDependencyChain" -Value {
-        param([string]$LibName, [string]$Version)
-        return Get-LibraryIndexLibVersionDependencyChain $this $LibName $Version
-    }
-
-    #HasLibraryVersionSourceVersion(LibName, Version, DependencyName, DependencyVersion)
-    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "HasLibraryVersionSourceVersion" -Value {
-        param([string]$LibName, [string]$Version)
-        return Test-LibraryVersionSourceVersion $this $LibName $Version
-    }
-
-    #GetLibraryVersionSourceVersion(LibName, Version)
-    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "GetLibraryVersionSourceVersion" -Value {
-        param([string]$LibName, [string]$Version)
-        return Get-LibraryVersionSourceVersion $this $LibName $Version
-    }
-
-    #SetLibraryVersionSourceVersion(LibName, Version, DependencyName, DependencyVersion)
-    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "SetLibraryVersionSourceVersion" -Value {
-        param([string]$LibName, [string]$Version, [string]$SourceVersion)
-        return Set-LibraryVersionSourceVersion $this $LibName $Version $SourceVersion
-    }
-
-    #GetLibraryVersionCmdletCount(LibName, Version)
-    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "GetLibraryVersionCmdletCount" -Value {
-        param([string]$LibName, [string]$Version)
-        return Get-LibraryVersionCmdletCount $this $LibName $Version
-    }
-
-    #SetLibraryVersionCmdletCount(LibName, Version, DependencyName, DependencyVersion)
-    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "SetLibraryVersionCmdletCount" -Value {
-        param([string]$LibName, [string]$Version, [int]$CmdletCount)
-        return Set-LibraryVersionCmdletCount $this $LibName $Version $CmdletCount
-    }
-
-    #HasLibraryVersionSuccessfulGeneration(LibName, Version, DependencyName, DependencyVersion)
-    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "HasLibraryVersionSuccessfulGeneration" -Value {
-        param([string]$LibName, [string]$Version)
-        return Test-LibraryVersionSuccessfulGeneration $this $LibName $Version
-    }
-
-    #GetLibraryVersionSuccessfulGeneration(LibName, Version)
-    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "GetLibraryVersionSuccessfulGeneration" -Value {
-        param([string]$LibName, [string]$Version)
-        return Get-LibraryVersionSuccessfulGeneration $this $LibName $Version
-    }
-
-    #SetLibraryVersionSuccessfulGeneration(LibName, Version, DependencyName, DependencyVersion)
-    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "SetLibraryVersionSuccessfulGeneration" -Value {
-        param([string]$LibName, [string]$Version, [bool]$SuccessfulGeneration)
-        return Set-LibraryVersionSuccessfulGeneration $this $LibName $Version $SuccessfulGeneration
-    }
+    #TODO - combine this with Load-LibraryIndex?
 
     Initialize-LibraryIndex $LibraryIndex
 
     return $LibraryIndex
 }
 
+#region Library Object Functions
 #Save()
 function Save-LibraryIndex {
     param($LibraryIndex)
@@ -401,8 +225,8 @@ function Set-LibraryIndexLibRestNameAndVersion {
 function Test-LibraryIndexLibVersion {
     param($LibraryIndex, [string]$LibName, [string]$Version)
 
-    return ($LibraryIndex.HasLib($LibName) -and `
-        (Has-ObjProperty $LibraryIndex.GetLib($LibName).Versions $Version))
+    return ((Test-LibraryIndexLib $LibraryIndex $LibName) -and `
+        (Has-ObjProperty (Get-LibraryIndexLib $LibraryIndex $LibName).Versions $Version))
 }
 
 #GetLibVersion(LibName, Version)
@@ -410,9 +234,9 @@ function Get-LibraryIndexLibVersion {
     param($LibraryIndex, [string]$LibName, [string]$Version)
 
     if ($Version  -eq -1) {
-        return $LibraryIndex.GetLibVersionAll($LibName) | sort -Property Name | select -Last 1
+        return (Get-LibraryIndexLibVersionAll $LibraryIndex $LibName) | sort -Property Name | select -Last 1
     } else {    
-        return $LibraryIndex.GetLib($LibName).Versions.$Version
+        return (Get-LibraryIndexLib $LibraryIndex $LibName).Versions.$Version
     }
 }
 
@@ -477,8 +301,8 @@ function Test-LibraryIndexLibVersionDependency {
 function Get-LibraryIndexLibVersionDependencies {
     param($LibraryIndex, [string]$LibName, [string]$Version)
 
-    if ($LibraryIndex.HasLibVersion($LibName, $Version)){
-        return $LibraryIndex.GetLibVersion($LibName, $Version).Dependencies
+    if ((Test-LibraryIndexLibVersion $LibraryIndex $LibName $Version)){
+        return (Get-LibraryIndexLibVersion $LibraryIndex $LibName $Version).Dependencies
     }
 }
 
@@ -487,14 +311,14 @@ function Add-LibraryIndexLibVersionDependency {
     param($LibraryIndex, [string]$LibName, [string]$Version,
         [string]$DependencyName, [string]$DependencyVersions)
 
-    if (-not ($LibraryIndex.HasLibVersion($LibName, $Version))) {
-        $LibraryIndex.AddLibVersion($LibName, $Version)
+    if (-not ((Test-LibraryIndexLibVersion $LibraryIndex $LibName $Version))) {
+        (Add-LibraryIndexLibVersion $LibraryIndex $LibName $Version)
     }
 
-    if (-not ($LibraryIndex.HasLibVersionDependency($LibName, $Version,
+    if (-not ((Test-LibraryIndexLibVersionDependency $LibraryIndex $LibName $Version,
         $DependencyName, $DependencyVersions))) {
 
-        $D = $LibraryIndex.GetLibVersion($LibName, $Version)
+        $D = (Get-LibraryIndexLibVersion $LibraryIndex $LibName $Version)
                 
         $O = New-Object psobject -Property ([ordered]@{
             Name = $DependencyName
@@ -511,20 +335,20 @@ function Get-LibraryIndexLibVersionDependencyChain {
 
     $DependenciesHash = @{}
 
-    if ($LibraryIndex.HasLibVersion($LibName, $Version)){
+    if ((Test-LibraryIndexLibVersion $LibraryIndex $LibName $Version)){
             
         if (-not $DependenciesHash.ContainsKey($LibName)) {
             $DependenciesHash[$LibName] = $Version
         }
 
-        $Dependencies = $LibraryIndex.GetLibVersion($LibName, $Version).Dependencies
+        $Dependencies = (Get-LibraryIndexLibVersion $LibraryIndex $LibName $Version).Dependencies
         foreach ($Dependency in $Dependencies) {
             $Version = Get-LatestVersionFromRange $Dependency.Versions
             if  ($version -eq -1) {
-                $Version = $LibraryIndex.GetLibVersionLatestName($Dependency.Name)
+                $Version = (Get-LibraryIndexLibVersionLatestName $LibraryIndex $Dependency.Name)
             }
 
-            $SubDependenciesHash = $LibraryIndex.GetLibVersionDependencyChain($Dependency.Name, $Version)
+            $SubDependenciesHash = (Get-LibraryIndexLibVersionDependencyChain $LibraryIndex $Dependency.Name, $Version)
 
             foreach ($LibKey in $SubDependenciesHash.Keys) {
                 $DependenciesHash[$LibKey] = $SubDependenciesHash[$LibKey]
@@ -539,8 +363,8 @@ function Get-LibraryIndexLibVersionDependencyChain {
 function Test-LibraryVersionSourceVersion {
     param($LibraryIndex, [string]$LibName, [string]$Version)
 
-    if ($LibraryIndex.HasLibVersion($LibName, $Version)){
-        $VersionInfo = $LibraryIndex.GetLibVersion($LibName, $Version)
+    if ((Test-LibraryIndexLibVersion $LibraryIndex $LibName $Version)){
+        $VersionInfo = (Get-LibraryIndexLibVersion $LibraryIndex $LibName $Version)
         return (-not [String]::IsNullOrWhiteSpace($VersionInfo.SourceVersion))
     }
 }
@@ -550,7 +374,7 @@ function Get-LibraryVersionSourceVersion {
     param($LibraryIndex, [string]$LibName, [string]$Version)
 
     if (Test-LibraryVersionSourceVersion $LibraryIndex $LibName $Version){
-        return $LibraryIndex.GetLibVersion($LibName, $Version).SourceVersion
+        return (Get-LibraryIndexLibVersion $LibraryIndex $LibName $Version).SourceVersion
     }
 }
 
@@ -558,11 +382,11 @@ function Get-LibraryVersionSourceVersion {
 function Set-LibraryVersionSourceVersion {
     param($LibraryIndex, [string]$LibName, [string]$Version, [string]$SourceVersion)
 
-    if (-not ($LibraryIndex.HasLibVersion($LibName, $Version))) {
-        $LibraryIndex.AddLibVersion($LibName, $Version)
+    if (-not ((Test-LibraryIndexLibVersion $LibraryIndex $LibName $Version))) {
+        (Add-LibraryIndexLibVersion $LibraryIndex $LibName $Version)
     }
 
-    $VersionInfo = $LibraryIndex.GetLibVersion($LibName, $Version)
+    $VersionInfo = (Get-LibraryIndexLibVersion $LibraryIndex $LibName $Version)
 
     if ($VersionInfo.PSObject.Properties.Name -notcontains "SourceVersion") {
         $VersionInfo | Add-Member -NotePropertyName "SourceVersion" -NotePropertyValue $null
@@ -575,18 +399,18 @@ function Set-LibraryVersionSourceVersion {
 function Get-LibraryVersionCmdletCount {
     param($LibraryIndex, [string]$LibName, [string]$Version)
 
-    return $LibraryIndex.GetLibVersion($LibName, $Version).CmdletCount
+    return (Get-LibraryIndexLibVersion $LibraryIndex $LibName $Version).CmdletCount
 }
 
 #SetLibraryVersionCmdletCount(LibName, Version, CmdletCount)
 function Set-LibraryVersionCmdletCount {
     param($LibraryIndex, [string]$LibName, [string]$Version, [int]$CmdletCount)
 
-    if (-not ($LibraryIndex.HasLibVersion($LibName, $Version))) {
-        $LibraryIndex.AddLibVersion($LibName, $Version)
+    if (-not ((Test-LibraryIndexLibVersion $LibraryIndex $LibName $Version))) {
+        (Add-LibraryIndexLibVersion $LibraryIndex $LibName $Version)
     }
 
-    $VersionInfo = $LibraryIndex.GetLibVersion($LibName, $Version)
+    $VersionInfo = (Get-LibraryIndexLibVersion $LibraryIndex $LibName $Version)
 
     if ($VersionInfo.PSObject.Properties.Name -notcontains "CmdletCount") {
         $VersionInfo | Add-Member -NotePropertyName "CmdletCount" -NotePropertyValue $null
@@ -599,8 +423,8 @@ function Set-LibraryVersionCmdletCount {
 function Test-LibraryVersionSuccessfulGeneration {
     param($LibraryIndex, [string]$LibName, [string]$Version)
 
-    if ($LibraryIndex.HasLibVersion($LibName, $Version)){
-        $VersionInfo = $LibraryIndex.GetLibVersion($LibName, $Version)
+    if ((Test-LibraryIndexLibVersion $LibraryIndex $LibName $Version)){
+        $VersionInfo = (Get-LibraryIndexLibVersion $LibraryIndex $LibName $Version)
         return (-not [String]::IsNullOrWhiteSpace($VersionInfo.SuccessfulGeneration))
     }
 }
@@ -610,7 +434,7 @@ function Get-LibraryVersionSuccessfulGeneration {
     param($LibraryIndex, [string]$LibName, [string]$Version)
 
     if (Test-LibraryVersionSourceVersion $LibraryIndex $LibName $Version){
-        return $LibraryIndex.GetLibVersion($LibName, $Version).SuccessfulGeneration
+        return (Get-LibraryIndexLibVersion $LibraryIndex $LibName $Version).SuccessfulGeneration
     }
 }
 
@@ -618,11 +442,11 @@ function Get-LibraryVersionSuccessfulGeneration {
 function Set-LibraryVersionSuccessfulGeneration {
     param($LibraryIndex, [string]$LibName, [string]$Version, [bool]$SuccessfulGeneration)
 
-    if (-not ($LibraryIndex.HasLibVersion($LibName, $Version))) {
-        $LibraryIndex.AddLibVersion($LibName, $Version)
+    if (-not ((Test-LibraryIndexLibVersion $LibraryIndex $LibName $Version))) {
+        (Add-LibraryIndexLibVersion $LibraryIndex $LibName $Version)
     }
 
-    $VersionInfo = $LibraryIndex.GetLibVersion($LibName, $Version)
+    $VersionInfo = (Get-LibraryIndexLibVersion $LibraryIndex $LibName $Version)
 
     if ($VersionInfo.PSObject.Properties.Name -notcontains "SuccessfulGeneration") {
         $VersionInfo | Add-Member -NotePropertyName "SuccessfulGeneration" -NotePropertyValue $null
@@ -685,5 +509,6 @@ function Update-Paths ($LibraryIndex, $NewDllRootPath) {
         }
     }
 
-    $LibraryIndex.Save()
+    Save-LibraryIndex $LibraryIndex
 }
+#endregion

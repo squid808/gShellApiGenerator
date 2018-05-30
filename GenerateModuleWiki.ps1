@@ -184,7 +184,7 @@ function New-WikiMarkdownApiTable ($LibraryIndex, $Apis) {
     $ModulesWithCmdlets = 0
     $CmdletsTotal = 0
     
-    $GShellLibs = $LibraryIndex.GetLibAll() | where {$_ -match "^gShell"}
+    $GShellLibs = (Get-LibraryIndexLibAll $LibraryIndex ) | where {$_ -match "^gShell"}
 
     $Header = @"
 
@@ -200,7 +200,7 @@ function New-WikiMarkdownApiTable ($LibraryIndex, $Apis) {
         if ($Api -like "*gmail*") {
             write-host ""
 }
-        $Info = $LibraryIndex.GetLib("gShell.$Api")
+        $Info = (Get-LibraryIndexLib $LibraryIndex "gShell.$Api")
         if ($null -ne $Info) {
             if ([string]::IsNullOrWhiteSpace($Info.LastSuccessfulVersionBuilt)) {
                 $NA = $true
@@ -211,7 +211,7 @@ function New-WikiMarkdownApiTable ($LibraryIndex, $Apis) {
                     $CmdletsTotal += $SuccessfulCmdletCount
                     $ModulesWithCmdlets += 1
                 }
-                $LastBuilt = $LibraryIndex.GetLibLastVersionBuilt("gShell.$Api")
+                $LastBuilt = (Get-LibraryIndexLibLastVersionBuilt $LibraryIndex "gShell.$Api")
                 if ($Info.Versions.$LastBuilt.SuccessfulGeneration -eq $true) {
                     $Status = "![Built][shieldBuilt]"
                 } else {
@@ -241,7 +241,7 @@ function New-WikiMarkdownApiTable ($LibraryIndex, $Apis) {
 function Make-ApiModulePage ($LibraryIndex, [string]$HelpOutDirPath, $PerTable=15) {
     $TopOfPageAnchor = Get-HtmlAnchor "topofpage"
 
-    $KnownApis = $LibraryIndex.GetLibAll() | where {$_ -match "Google.Apis\..+"}
+    $KnownApis = (Get-LibraryIndexLibAll $LibraryIndex ) | where {$_ -match "Google.Apis\..+"}
 
     $ContentCollection = New-Object System.Collections.ArrayList
 
@@ -268,9 +268,9 @@ Below is the list of APIs that have been processed by the [gShell Api Generator]
 
     #$ContentCollection.Add($Content) | Out-Null
 
-    #$GShellLibs = $LibraryIndex.GetLibAll() | where {$_ -match "^gShell"} | where {$_ -ne "gShell.Main"} | sort
+    #$GShellLibs = (Get-LibraryIndexLibAll $LibraryIndex ) | where {$_ -match "^gShell"} | where {$_ -ne "gShell.Main"} | sort
 
-    $Libs = $LibraryIndex.GetLibAll() | where {$_ -match "^Google\.Apis\..+"}  | % {$_ -replace "Google.Apis.",""} | sort
+    $Libs = (Get-LibraryIndexLibAll $LibraryIndex ) | where {$_ -match "^Google\.Apis\..+"}  | % {$_ -replace "Google.Apis.",""} | sort
 
     #To use in keeping track of the letters index
     $RecentLetter = $null

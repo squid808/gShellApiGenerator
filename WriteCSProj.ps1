@@ -55,7 +55,7 @@ function Write-CSPReferenceTexts($Api, $LibraryIndex) {
 
     $ReferencesTexts = New-Object system.collections.arraylist
 
-    $ReferenceChain = $LibraryIndex.GetLibVersionDependencyChain($Api.RootNamespace, $LibraryIndex.GetLibVersionLatestName($Api.RootNamespace))
+    $ReferenceChain = (Get-LibraryIndexLibVersionDependencyChain $LibraryIndex $Api.RootNamespace, (Get-LibraryIndexLibVersionLatestName $LibraryIndex $Api.RootNamespace))
 
     foreach ($Key in $ReferenceChain.Keys) {
         Add-String $ReferencesTexts (Write-CSPReference $Key $ReferenceChain[$Key])

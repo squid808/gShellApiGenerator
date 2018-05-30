@@ -520,18 +520,18 @@ function Check-AllApiPackages($LibraryIndex, $JsonRootPath, $LibrarySaveFolderPa
                 
             $ShouldDownloadNewest = $false
 
-            $NameRedirect = $LibraryIndex.GetLibNameRedirect($PackageId)
+            $NameRedirect = (Get-LibraryIndexLibNameRedirect $LibraryIndex $PackageId)
 
             if (-not [string]::IsNullOrWhiteSpace($NameRedirect)) {
                 Log ("Redirecting to $NameRedirect") $Log
                 $PackageId = $NameRedirect
             }
                 
-            if ($LibraryIndex.HasLib($PackageId)){
+            if ((Test-LibraryIndexLib $LibraryIndex $PackageId)){
                 $SearchResult = Invoke-NugetApiPackageSearch -SearchString $PackageId -Author "Google Inc." -IsExactPackageId $true -Log $Log
                 $VersionData = Get-SearchResultVersion -SearchResult $SearchResult -Version -1
                 $VersionDataObj = [System.Version]$VersionData.version
-                $LatestVersion = $LibraryIndex.GetLibVersionLatestName($PackageId)
+                $LatestVersion = (Get-LibraryIndexLibVersionLatestName $LibraryIndex $PackageId)
                 $LatestVersionObj = [System.Version]$LatestVersion
                 if ($LatestVersionObj -ne $null -and $LatestVersionObj -lt $VersionDataObj) {
                     $ShouldDownloadNewest = $true
@@ -544,16 +544,16 @@ function Check-AllApiPackages($LibraryIndex, $JsonRootPath, $LibrarySaveFolderPa
                 $SearchResult = Invoke-BroadGoogleSearchOnNuget -PackageId $PackageId -Json $Json -Log $True
                 $VersionData = Get-SearchResultVersion -SearchResult $SearchResult -Version -1
                 
-                $LibraryIndex.SetLibRestNameAndVersion($PackageId, $Directory.Name)
+                (Set-LibraryIndexLibRestNameAndVersion $LibraryIndex $PackageId $Directory.Name)
 
                 if ($SearchResult.id -ne $PackageId) {
                     Log ("Adding name redirect of {0} => {1}" -f $PackageId, $SearchResult.id) $Log
-                    $LibraryIndex.SetLibNameRedirect($PackageId, $SearchResult.id)
-                    $LibraryIndex.SetLibRestNameAndVersion($SearchResult.id, $Directory.Name)
+                    (Set-LibraryIndexLibNameRedirect $LibraryIndex $PackageId $SearchResult.id)
+                    (Set-LibraryIndexLibRestNameAndVersion $LibraryIndex $SearchResult.id, $Directory.Name)
                     $PackageId = $SearchResult.id
                 }
 
-                $LibraryIndex.Save()
+                Save-LibraryIndex $LibraryIndex
 
                 $ShouldDownloadNewest = $true
                 Log ("$PackageId is not found in the library index.") $Log
@@ -578,7 +578,7 @@ function Check-AllApiPackages($LibraryIndex, $JsonRootPath, $LibrarySaveFolderPa
 function Get-SystemMgmtAuto ($LibraryIndex, [bool]$Log = $false) {
     $SMA = "System.Management.Automation.dll"
     
-    if (-not $LibraryIndex.HasLib($SMA)) {
+    if (-not (Test-LibraryIndexLib $LibraryIndex $SMA)) {
         Get-SinglePackageByName -LibraryIndex $LibraryIndex -PackageName $SMA -Author $null -Log $Log -Version "10.0.10586"
     }
 }

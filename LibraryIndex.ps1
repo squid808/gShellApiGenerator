@@ -47,6 +47,8 @@ function Load-LibraryIndexFile {
         [string]
         $Path
     )
+
+    
     $DllPathsJsonPath = [System.IO.Path]::Combine($Path, "LibPaths.json")
     
     if (-not (Test-Path ($DllPathsJsonPath))){
@@ -73,12 +75,6 @@ function Get-LibraryIndex ($Path, [bool]$Log=$false) {
         $LibraryIndex | Add-Member -MemberType NoteProperty -Name "Libraries" -Value (New-Object psobject)
     }
 
-    #AddLibVersion(LibName, Version)
-    $LibraryIndex | Add-Member -MemberType ScriptMethod -Name "AddLibVersion" -Value {
-        param( [string]$LibName, [string]$Version)
-        return Add-LibraryIndexLibVersion $this $LibName $Version
-    }
-
     #TODO - combine this with Load-LibraryIndex?
 
     Initialize-LibraryIndex $LibraryIndex
@@ -94,6 +90,7 @@ function Save-LibraryIndex {
     $LibraryIndex | ConvertTo-Json -Depth 20 | Format-Json | Out-File $LibraryIndex.RootPath -Force
 }
 
+#HasLib
 function Test-LibraryIndexLib {
     param($LibraryIndex, [string]$LibName)
 

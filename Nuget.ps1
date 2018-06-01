@@ -110,7 +110,7 @@ function Get-LatestVersionFromRange ($VersionRange) {
 }
 
 #TODO: Make sure this is only responsible for figuring out the nuget dependencies, which goes hand in hand with downloading them?
-function Get-DependenciesOf($CatalogEntry, $JsonHash, $CatalogHash = $null, [bool]$Log=$false){
+function Get-DependenciesOf($CatalogEntry, $LibraryIndex, $CatalogHash = $null, [bool]$Log=$false){
     
     Log ("Retrieving Dependencies for {0}" -f $CatalogEntry.id) $Log
 
@@ -167,14 +167,14 @@ function Get-DependenciesOf($CatalogEntry, $JsonHash, $CatalogHash = $null, [boo
             #$CatalogHash[$Dependency.id][$DependencyCatalogEntry.version] = $DependencyCatalogEntry
 
             <# Run against the APIs no matter what for now, and then only download if they're missing later? #>
-            #if (-NOT $JsonHash.HasLibVersion($Dependency.id, $DependencyCatalogEntry.version) `
-            #    -OR $JsonHash.GetLibVersion($Dependency.id, $DependencyCatalogEntry.version).dllPath -eq "missing" `
-            #    -OR $JsonHash.GetLibVersion($Dependency.id, $DependencyCatalogEntry.version).xmlPath -eq "missing") {
+            #if (-NOT $LibraryIndex.HasLibVersion($Dependency.id, $DependencyCatalogEntry.version) `
+            #    -OR $LibraryIndex.GetLibVersion($Dependency.id, $DependencyCatalogEntry.version).dllPath -eq "missing" `
+            #    -OR $LibraryIndex.GetLibVersion($Dependency.id, $DependencyCatalogEntry.version).xmlPath -eq "missing") {
             #    #Recurse and add 
-            #    $CatalogHash = Get-DependenciesOf $DependencyCatalogEntry $JsonHash $CatalogHash
+            #    $CatalogHash = Get-DependenciesOf $DependencyCatalogEntry $LibraryIndex $CatalogHash
             #}
 
-            $CatalogHash = Get-DependenciesOf $DependencyCatalogEntry $JsonHash $CatalogHash -Log $Log
+            $CatalogHash = Get-DependenciesOf $DependencyCatalogEntry $LibraryIndex $CatalogHash -Log $Log
         } else {
             Log ("The CatalogHash already contains info for {0} version {1}" -f $Dependency.id, $DependencyVersion) $Log
         }
@@ -253,9 +253,9 @@ function Download-NupkgDll {
 }
 
 #TODO: Finish this? Make it something to manually run
-function Check-JsonLibraryExists ($JsonHash, $DependencyInfo){
-    if ($JsonHash.HasLib($DependencyInfo.Name)){
-        $Lib = $JsonHash.GetLib($DependencyInfo.Name)
+function Check-JsonLibraryExists ($LibraryIndex, $DependencyInfo){
+    if (Test-LibraryIndexLib $LibraryIndex $DependencyInfo.Name){
+        $Lib = (Get-LibraryIndexLib $LibraryIndex $DependencyInfo.Name)
     }
 
     $DependencyInfo.versions -match '(?<=[\[\(]).*(?=,\s)' | Out-Null
@@ -279,11 +279,9 @@ function Check-JsonLibraryExists ($JsonHash, $DependencyInfo){
     foreach ($V in $Versions) {
       #TODO  
     }
-
-    #if ($JsonHash.HasLibVersion($DependencyInfo.Name, $DependencyInfo.Versions)
 }
 
-function Download-Dependencies ($DependencyHash, $OutPath, $JsonHash, [bool]$Log=$false, [bool]$Force=$false) {
+function Download-Dependencies ($DependencyHash, $OutPath, $LibraryIndex, [bool]$Log=$false, [bool]$Force=$false) {
 
     Log ("Downloading all saved dependencies") $Log
 
@@ -291,19 +289,19 @@ function Download-Dependencies ($DependencyHash, $OutPath, $JsonHash, [bool]$Log
 
     foreach ($LibKey in $DependencyHash.Keys) {
         
-        if (-not $JsonHash.HasLib($LibKey)) {
-            $JsonHash.AddLib($LibKey)
+        if (-not (Test-LibraryIndexLib $LibraryIndex $LibKey)) {
+            (Add-LibraryIndexLib $LibraryIndex $LibKey)
         }
 
         foreach ($VersionKey in ($DependencyHash[$LibKey].Keys| where {$_ -ne -1})){
             
             $PackageDetails = $DependencyHash[$LibKey][$VersionKey]
 
-            if (-NOT $JsonHash.HasLibVersion($LibKey, $DependencyHash[$LibKey][$VersionKey].version) `
-                -OR $JsonHash.GetLibVersion($LibKey, $DependencyHash[$LibKey][$VersionKey].version).dllPath -eq "missing" `
-                -OR $JsonHash.GetLibVersion($LibKey, $DependencyHash[$LibKey][$VersionKey].version).dllPath -eq $null `
-                -OR $JsonHash.GetLibVersion($LibKey, $DependencyHash[$LibKey][$VersionKey].version).xmlPath -eq "missing" `
-                -OR $JsonHash.GetLibVersion($LibKey, $DependencyHash[$LibKey][$VersionKey].version).xmlPath -eq $null `
+            if (-NOT (Test-LibraryIndexLibVersion $LibraryIndex $LibKey $DependencyHash[$LibKey][$VersionKey].version) `
+                -OR (Get-LibraryIndexLibVersion $LibraryIndex $LibKey $DependencyHash[$LibKey][$VersionKey].version).dllPath -eq "missing" `
+                -OR (Get-LibraryIndexLibVersion $LibraryIndex $LibKey $DependencyHash[$LibKey][$VersionKey].version).dllPath -eq $null `
+                -OR (Get-LibraryIndexLibVersion $LibraryIndex $LibKey $DependencyHash[$LibKey][$VersionKey].version).xmlPath -eq "missing" `
+                -OR (Get-LibraryIndexLibVersion $LibraryIndex $LibKey $DependencyHash[$LibKey][$VersionKey].version).xmlPath -eq $null `
                 -OR $Force -eq $true) {
 
                 $Version = $PackageDetails.version
@@ -337,36 +335,36 @@ function Download-Dependencies ($DependencyHash, $OutPath, $JsonHash, [bool]$Log
                     }
                 }
 
-                $Test = $JsonHash.HasLibVersion($LibKey, $Version)
+                $Test = (Test-LibraryIndexLibVersion $LibraryIndex $LibKey $Version)
 
-                if (-NOT $JsonHash.HasLibVersion($LibKey, $Version)) {
-                    $JsonHash.AddLibVersion($LibKey, $Version)
+                if (-NOT $Test) {
+                    Add-LibraryIndexLibVersion $LibraryIndex $LibKey $Version
                 }
 
                 if ((Has-ObjProperty $PackageDetails "dllPath")) {
-                    $JsonHash.GetLibVersion($LibKey, $Version)."dllPath" = $PackageDetails.dllPath
+                    (Get-LibraryIndexLibVersion $LibraryIndex $LibKey $Version)."dllPath" = $PackageDetails.dllPath
                 }
             
                 if ((Has-ObjProperty $PackageDetails "xmlPath")) {
-                    $JsonHash.GetLibVersion($LibKey, $Version)."xmlPath" = $PackageDetails.xmlPath
+                    (Get-LibraryIndexLibVersion $LibraryIndex $LibKey $Version)."xmlPath" = $PackageDetails.xmlPath
                 }
 
-                $DependencyInfos = New-Object System.Collections.ArrayList
+                #$DependencyInfos = New-Object System.Collections.ArrayList
 
                 $TargetFrameworkDependencies = $PackageDetails.dependencyGroups | Where-Object targetFramework -eq $TargetFramework
 
                 if ($TargetFrameworkDependencies -ne $null -AND (Has-ObjProperty $TargetFrameworkDependencies "dependencies")) {
-                      $TargetFrameworkDependencies | select -expandproperty dependencies | % { 
-                        $JsonHash.AddLibVersionDependency($LibKey, $Version, $_.id, $_.range)
+                      $TargetFrameworkDependencies | Select-Object -expandproperty dependencies | ForEach-Object { 
+                        (Add-LibraryIndexLibVersionDependency $LibraryIndex $LibKey $Version $_.id $_.range)
                       }
                 }
 
-                $JsonHash.Save()
+                $LibraryIndex.Save()
 
                 $FoundUpdate = $true
             } else {
-                $PackageDetails.dllPath = $JsonHash.GetLibVersion($LibKey, $DependencyHash[$LibKey][$VersionKey].version).dllPath
-                $PackageDetails.xmlPath = $JsonHash.GetLibVersion($LibKey, $DependencyHash[$LibKey][$VersionKey].version).xmlPath
+                $PackageDetails.dllPath = (Get-LibraryIndexLibVersion $LibraryIndex $LibKey $DependencyHash[$LibKey][$VersionKey].version).dllPath
+                $PackageDetails.xmlPath = (Get-LibraryIndexLibVersion $LibraryIndex $LibKey $DependencyHash[$LibKey][$VersionKey].version).xmlPath
             }
         }
     }
@@ -470,7 +468,7 @@ function Get-ApiPackage ($Name, $Version, [bool]$Log = $false) {
 function Get-AllApiPackages ([bool]$Log = $false) {
     $LibraryIndex = Get-LibraryIndex $LibraryIndexRoot
 
-    foreach ($JsonFileInfo in (gci $JsonRootPath -Recurse -Filter "*.json")){
+    foreach ($JsonFileInfo in (Get-ChildItem $JsonRootPath -Recurse -Filter "*.json")){
         $File = Get-MostRecentJsonFile $JsonFileInfo.directory.fullname
         if ($File -ne $null) {
             try {
